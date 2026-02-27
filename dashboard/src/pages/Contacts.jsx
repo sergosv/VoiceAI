@@ -27,7 +27,7 @@ export function Contacts() {
   const [clientId, setClientId] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const navigate = useNavigate()
-  const { toast } = useToast()
+  const toast = useToast()
 
   useEffect(() => {
     setLoading(true)
@@ -36,7 +36,7 @@ export function Contacts() {
     if (clientId) params.set('client_id', clientId)
     api.get(`/contacts?${params}`)
       .then(setContacts)
-      .catch(e => toast(e.message, 'error'))
+      .catch(e => toast.error(e.message))
       .finally(() => setLoading(false))
   }, [page, search, clientId])
 
@@ -154,7 +154,7 @@ export function Contacts() {
           onCreated={c => {
             setContacts(prev => [c, ...prev])
             setShowCreate(false)
-            toast('Contacto creado')
+            toast.success('Contacto creado')
           }}
         />
       )}
@@ -165,17 +165,17 @@ export function Contacts() {
 function CreateContactModal({ onClose, onCreated }) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', notes: '' })
   const [saving, setSaving] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!form.phone) return toast('Teléfono requerido', 'error')
+    if (!form.phone) return toast.error('Teléfono requerido')
     setSaving(true)
     try {
       const created = await api.post('/contacts', form)
       onCreated(created)
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }

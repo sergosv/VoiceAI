@@ -13,7 +13,7 @@ import { ArrowLeft, Save, Phone, Mail, Clock, Trash2 } from 'lucide-react'
 export function ContactDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { toast } = useToast()
+  const toast = useToast()
   const [contact, setContact] = useState(null)
   const [calls, setCalls] = useState([])
   const [loading, setLoading] = useState(true)
@@ -37,7 +37,7 @@ export function ContactDetail() {
         })
       })
       .catch(e => {
-        toast(e.message, 'error')
+        toast.error(e.message)
         navigate('/contacts')
       })
       .finally(() => setLoading(false))
@@ -55,9 +55,9 @@ export function ContactDetail() {
       }
       const updated = await api.patch(`/contacts/${id}`, updates)
       setContact(updated)
-      toast('Contacto actualizado')
+      toast.success('Contacto actualizado')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }
@@ -67,10 +67,10 @@ export function ContactDetail() {
     if (!confirm('¿Eliminar este contacto?')) return
     try {
       await api.delete(`/contacts/${id}`)
-      toast('Contacto eliminado')
+      toast.success('Contacto eliminado')
       navigate('/contacts')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     }
   }
 

@@ -45,7 +45,7 @@ const callStatusLabels = {
 export function CampaignDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { toast } = useToast()
+  const toast = useToast()
   const [campaign, setCampaign] = useState(null)
   const [calls, setCalls] = useState([])
   const [loading, setLoading] = useState(true)
@@ -80,7 +80,7 @@ export function CampaignDetail() {
         retry_attempts: camp.retry_attempts,
       })
     } catch (e) {
-      toast(e.message, 'error')
+      toast.error(e.message)
       navigate('/campaigns')
     } finally {
       setLoading(false)
@@ -92,9 +92,9 @@ export function CampaignDetail() {
     try {
       const updated = await api.patch(`/campaigns/${id}`, form)
       setCampaign(updated)
-      toast('Campaña actualizada')
+      toast.success('Campaña actualizada')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }
@@ -104,9 +104,9 @@ export function CampaignDetail() {
     try {
       const updated = await api.post(`/campaigns/${id}/start`)
       setCampaign(updated)
-      toast('Campaña iniciada')
+      toast.success('Campaña iniciada')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     }
   }
 
@@ -114,9 +114,9 @@ export function CampaignDetail() {
     try {
       const updated = await api.post(`/campaigns/${id}/pause`)
       setCampaign(updated)
-      toast('Campaña pausada')
+      toast.success('Campaña pausada')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     }
   }
 
@@ -124,10 +124,10 @@ export function CampaignDetail() {
     if (!confirm('¿Eliminar esta campaña?')) return
     try {
       await api.delete(`/campaigns/${id}`)
-      toast('Campaña eliminada')
+      toast.success('Campaña eliminada')
       navigate('/campaigns')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     }
   }
 
@@ -298,7 +298,7 @@ export function CampaignDetail() {
           onAdded={() => {
             setShowAddContacts(false)
             loadData()
-            toast('Contactos agregados')
+            toast.success('Contactos agregados')
           }}
         />
       )}
@@ -309,7 +309,7 @@ export function CampaignDetail() {
 function AddContactsModal({ campaignId, onClose, onAdded }) {
   const [phones, setPhones] = useState('')
   const [saving, setSaving] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -317,13 +317,13 @@ function AddContactsModal({ campaignId, onClose, onAdded }) {
       .split(/[\n,;]+/)
       .map(p => p.trim())
       .filter(Boolean)
-    if (!phoneNumbers.length) return toast('Ingresa al menos un número', 'error')
+    if (!phoneNumbers.length) return toast.error('Ingresa al menos un número')
     setSaving(true)
     try {
       await api.post(`/campaigns/${campaignId}/contacts`, { phone_numbers: phoneNumbers })
       onAdded()
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }

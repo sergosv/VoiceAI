@@ -19,7 +19,7 @@ const allTools = [
 
 export function Integrations() {
   const { user } = useAuth()
-  const { toast } = useToast()
+  const toast = useToast()
   const [client, setClient] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -49,7 +49,7 @@ export function Integrations() {
           enabled_tools: c.enabled_tools || ['search_knowledge'],
         })
       })
-      .catch(e => toast(e.message, 'error'))
+      .catch(e => toast.error(e.message))
       .finally(() => setLoading(false))
   }, [clientId])
 
@@ -58,9 +58,9 @@ export function Integrations() {
     try {
       const updated = await api.patch(`/clients/${clientId}`, form)
       setClient(updated)
-      toast('Configuración guardada')
+      toast.success('Configuración guardada')
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }
@@ -70,9 +70,9 @@ export function Integrations() {
     setTestingWa(true)
     try {
       const res = await api.post(`/clients/${clientId}/test-whatsapp`)
-      toast(res.message)
+      toast.success(res.message)
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setTestingWa(false)
     }
@@ -82,9 +82,9 @@ export function Integrations() {
     setTestingCal(true)
     try {
       const res = await api.post(`/clients/${clientId}/test-calendar`)
-      toast(res.message)
+      toast.success(res.message)
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setTestingCal(false)
     }

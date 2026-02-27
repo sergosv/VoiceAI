@@ -33,7 +33,7 @@ export function Campaigns() {
   const [clientId, setClientId] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const navigate = useNavigate()
-  const { toast } = useToast()
+  const toast = useToast()
 
   useEffect(() => {
     setLoading(true)
@@ -41,7 +41,7 @@ export function Campaigns() {
     if (clientId) params.set('client_id', clientId)
     api.get(`/campaigns?${params}`)
       .then(setCampaigns)
-      .catch(e => toast(e.message, 'error'))
+      .catch(e => toast.error(e.message))
       .finally(() => setLoading(false))
   }, [clientId])
 
@@ -115,7 +115,7 @@ export function Campaigns() {
           onCreated={c => {
             setCampaigns(prev => [c, ...prev])
             setShowCreate(false)
-            toast('Campaña creada')
+            toast.success('Campaña creada')
             navigate(`/campaigns/${c.id}`)
           }}
         />
@@ -133,17 +133,17 @@ function CreateCampaignModal({ onClose, onCreated }) {
     retry_attempts: 2,
   })
   const [saving, setSaving] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!form.name || !form.script) return toast('Nombre y script requeridos', 'error')
+    if (!form.name || !form.script) return toast.error('Nombre y script requeridos')
     setSaving(true)
     try {
       const created = await api.post('/campaigns', form)
       onCreated(created)
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }

@@ -48,7 +48,7 @@ export function Appointments() {
   const [weekBase, setWeekBase] = useState(new Date())
   const [statusFilter, setStatusFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const weekDates = getWeekDates(weekBase)
   const dateFrom = weekDates[0].toISOString().slice(0, 10)
@@ -61,7 +61,7 @@ export function Appointments() {
     if (clientId) params.set('client_id', clientId)
     api.get(`/appointments?${params}`)
       .then(setAppointments)
-      .catch(e => toast(e.message, 'error'))
+      .catch(e => toast.error(e.message))
       .finally(() => setLoading(false))
   }, [dateFrom, dateTo, statusFilter, clientId])
 
@@ -81,9 +81,9 @@ export function Appointments() {
     try {
       const updated = await api.patch(`/appointments/${id}`, { status: newStatus })
       setAppointments(prev => prev.map(a => a.id === id ? updated : a))
-      toast(`Cita ${statusLabels[newStatus]?.toLowerCase()}`)
+      toast.success(`Cita ${statusLabels[newStatus]?.toLowerCase()}`)
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     }
   }
 
@@ -240,7 +240,7 @@ export function Appointments() {
           onCreated={a => {
             setAppointments(prev => [...prev, a])
             setShowCreate(false)
-            toast('Cita creada')
+            toast.success('Cita creada')
           }}
         />
       )}
@@ -257,11 +257,11 @@ function CreateAppointmentModal({ onClose, onCreated }) {
     endTime: '10:00',
   })
   const [saving, setSaving] = useState(false)
-  const { toast } = useToast()
+  const toast = useToast()
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!form.title || !form.date) return toast('Título y fecha requeridos', 'error')
+    if (!form.title || !form.date) return toast.error('Título y fecha requeridos')
     setSaving(true)
     try {
       const start_time = `${form.date}T${form.startTime}:00`
@@ -274,7 +274,7 @@ function CreateAppointmentModal({ onClose, onCreated }) {
       })
       onCreated(created)
     } catch (err) {
-      toast(err.message, 'error')
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }
