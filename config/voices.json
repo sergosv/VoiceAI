@@ -1,33 +1,68 @@
 {
     "voices": {
         "es_female_warm": {
-            "id": "PENDING_CARTESIA_VOICE_ID",
-            "name": "María",
+            "id": "5c5ad5e7-1020-476b-8b91-fdcbe9cc313c",
+            "name": "Daniela",
+            "cartesia_name": "Daniela - Relaxed Woman",
             "language": "es",
             "gender": "female",
-            "description": "Voz femenina cálida, profesional, mexicana"
+            "description": "Voz femenina cálida con acento mexicano, natural y confiable"
+        },
+        "es_female_friendly": {
+            "id": "727f663b-0e90-4031-90f2-558b7334425b",
+            "name": "Carmen",
+            "cartesia_name": "Carmen - Friendly Neighbor",
+            "language": "es",
+            "gender": "female",
+            "description": "Voz femenina amigable para conversaciones casuales"
+        },
+        "es_female_nurturing": {
+            "id": "ae823354-f9be-4aef-8543-f569644136b4",
+            "name": "Mariana",
+            "cartesia_name": "Mariana - Nurturing Guide",
+            "language": "es",
+            "gender": "female",
+            "description": "Voz maternal cálida y reconfortante"
+        },
+        "es_female_support": {
+            "id": "c68a8bd0-f99e-4e7f-915d-a097da6d024c",
+            "name": "Juanita",
+            "cartesia_name": "Juanita - Helpful Companion",
+            "language": "es",
+            "gender": "female",
+            "description": "Voz amigable y tranquilizadora para soporte al cliente"
         },
         "es_male_professional": {
-            "id": "PENDING_CARTESIA_VOICE_ID",
-            "name": "Carlos",
+            "id": "15d0c2e2-8d29-44c3-be23-d585d5f154a1",
+            "name": "Pedro",
+            "cartesia_name": "Pedro - Formal Speaker",
             "language": "es",
             "gender": "male",
-            "description": "Voz masculina profesional, seria"
+            "description": "Voz masculina formal con acento mexicano, claro y conciso"
         },
-        "en_female_friendly": {
-            "id": "PENDING_CARTESIA_VOICE_ID",
-            "name": "Katie",
-            "language": "en",
-            "gender": "female",
-            "description": "English friendly female voice"
+        "es_male_friendly": {
+            "id": "e9f0368b-3662-4a01-b037-e13ca5203c74",
+            "name": "Javier",
+            "cartesia_name": "Javier - Gentle Advisor",
+            "language": "es",
+            "gender": "male",
+            "description": "Voz masculina amable para conversaciones naturales"
         },
-        "bilingual_female": {
-            "id": "PENDING_CARTESIA_VOICE_ID",
-            "name": "Sofia",
-            "language": "es-en",
-            "gender": "female",
-            "description": "Bilingual Spanish/English, natural switching"
+        "es_male_advisor": {
+            "id": "7c1ecd2d-1c83-4d5d-a25c-b3820a274a2e",
+            "name": "Jerónimo",
+            "cartesia_name": "Jeronimo - Empathetic Advisor",
+            "language": "es",
+            "gender": "male",
+            "description": "Voz empática masculina para interacciones de confianza"
+        },
+        "es_male_energetic": {
+            "id": "9ebc775b-c579-4c31-b37c-2306cbe9cc91",
+            "name": "Carlos",
+            "cartesia_name": "Carlos",
+            "language": "es",
+            "gender": "male",
+            "description": "Voz joven masculina cálida y expresiva"
         }
-    },
-    "note": "Actualizar IDs después de explorar el catálogo de Cartesia Sonic 3"
+    }
 }
