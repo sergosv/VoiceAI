@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 
 from livekit.api import LiveKitAPI
 from livekit.api.sip_service import CreateSIPParticipantRequest
+from livekit.protocol.agent_dispatch import RoomAgentDispatch
+from livekit.protocol.room import CreateRoomRequest, RoomAgent
 
 from api.deps import get_supabase
 
@@ -181,6 +184,7 @@ async def _place_outbound_call(
                 raise ValueError("Campaña no encontrada")
 
             client_id = camp.data[0]["client_id"]
+            script = camp.data[0]["script"]
 
             # Obtener trunk del cliente
             client = sb.table("clients").select("phone_number, livekit_sip_trunk_id").eq("id", client_id).limit(1).execute()
@@ -192,20 +196,50 @@ async def _place_outbound_call(
 
             room_name = f"campaign-{campaign_id[:8]}-{call_entry_id[:8]}"
 
-            # Crear participante SIP (llamada outbound)
+            # Metadata de la room para que el agente sepa que es outbound
+            room_metadata = json.dumps({
+                "type": "outbound",
+                "campaign_id": campaign_id,
+                "client_id": client_id,
+                "script": script,
+            })
+
+            # 1. Crear room con agent dispatch para que el agente se conecte
+            create_room_req = CreateRoomRequest(
+                name=room_name,
+                metadata=room_metadata,
+                empty_timeout=60,
+                agents=[
+                    RoomAgent(
+                        dispatches=[
+                            RoomAgentDispatch(
+                                agent_name="voice-ai-platform",
+                                metadata=room_metadata,
+                            )
+                        ]
+                    )
+                ],
+            )
+            await lk_api.room.create_room(create_room_req)
+            logger.info("Room creada con agent dispatch: %s", room_name)
+
+            # 2. Crear participante SIP (llamada outbound)
             request = CreateSIPParticipantRequest(
                 sip_trunk_id=trunk_id,
                 sip_call_to=phone,
                 room_name=room_name,
                 participant_identity=f"outbound-{call_entry_id[:8]}",
                 participant_name=f"Outbound to {phone}",
-                participant_metadata='{"type": "outbound", "campaign_id": "' + campaign_id + '"}',
+                participant_metadata=json.dumps({
+                    "type": "outbound",
+                    "campaign_id": campaign_id,
+                }),
             )
             await lk_api.sip.create_sip_participant(request)
 
-            logger.info("Llamada outbound colocada: %s → %s (room: %s)", from_number, phone, room_name)
+            logger.info("Llamada outbound colocada: %s -> %s (room: %s)", from_number, phone, room_name)
 
-            # Marcar como completed (el SessionHandler guardará los detalles de la llamada)
+            # Marcar como completed (el SessionHandler guardará los detalles)
             sb.table("campaign_calls").update({
                 "status": "completed",
             }).eq("id", call_entry_id).execute()
@@ -213,6 +247,8 @@ async def _place_outbound_call(
             # Actualizar contadores
             _increment_campaign_counter(sb, campaign_id, "completed_contacts")
             _increment_campaign_counter(sb, campaign_id, "successful_contacts")
+
+            await lk_api.aclose()
 
         except Exception as e:
             logger.error("Error en llamada outbound %s: %s", call_entry_id, e)

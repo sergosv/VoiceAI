@@ -15,7 +15,7 @@ from livekit.plugins import deepgram, google, cartesia, silero, noise_cancellati
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent
-from agent.config_loader import load_client_config_by_phone
+from agent.config_loader import load_client_config_by_id, load_client_config_by_phone
 from agent.session_handler import SessionHandler
 
 load_dotenv()
@@ -74,6 +74,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     import json
     outbound_mode = False
     campaign_script: str | None = None
+    outbound_client_id: str | None = None
     room_metadata = ctx.room.metadata or ""
     if room_metadata:
         try:
@@ -81,13 +82,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             if meta.get("type") == "outbound":
                 outbound_mode = True
                 campaign_script = meta.get("script")
+                outbound_client_id = meta.get("client_id")
                 logger.info("Modo outbound detectado, campaign_id: %s", meta.get("campaign_id"))
         except (json.JSONDecodeError, AttributeError):
             pass
 
     # Cargar config del cliente
     config = None
-    if called_number:
+    if outbound_mode and outbound_client_id:
+        config = await load_client_config_by_id(outbound_client_id)
+    elif called_number:
         config = await load_client_config_by_phone(called_number)
 
     if not config:
