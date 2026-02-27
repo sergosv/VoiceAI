@@ -1,0 +1,33 @@
+# LiveKit Agents
+livekit>=1.0
+livekit-agents[codecs]>=1.4,<2
+livekit-plugins-deepgram>=1.4,<2
+livekit-plugins-cartesia>=1.4,<2
+livekit-plugins-google>=1.2,<2
+livekit-plugins-silero>=1.4,<2
+livekit-plugins-turn-detector>=1.4,<2
+livekit-plugins-noise-cancellation>=0.2
+
+# Google Gemini (File Search)
+google-genai>=1.65
+
+# Database
+supabase>=2.0
+
+# Admin API
+fastapi>=0.115
+uvicorn>=0.32
+
+# Twilio
+twilio>=9.0
+
+# Utilities
+python-dotenv>=1.0
+typer>=0.12
+rich>=13.0
+pydantic>=2.0
+structlog>=24.0
+
+# Tests
+pytest>=8.0
+pytest-asyncio>=0.24

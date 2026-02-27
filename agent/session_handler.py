@@ -1,0 +1,141 @@
+"""Maneja el lifecycle de cada llamada: tracking, costos, logging."""
+
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from supabase import create_client, Client
+
+from agent.config_loader import ClientConfig
+
+logger = logging.getLogger(__name__)
+
+# Rates por minuto (USD)
+RATES = {
+    "livekit": Decimal("0.01"),
+    "stt": Decimal("0.005"),
+    "llm": Decimal("0.01"),
+    "tts": Decimal("0.01"),
+    "telephony": Decimal("0.01"),
+}
+
+
+def _get_supabase() -> Client:
+    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+
+
+class SessionHandler:
+    """Trackea una sesión de llamada individual."""
+
+    def __init__(
+        self,
+        config: ClientConfig,
+        direction: str,
+        caller_number: str | None,
+        callee_number: str | None,
+        room_name: str | None = None,
+    ) -> None:
+        self._config = config
+        self._direction = direction
+        self._caller_number = caller_number
+        self._callee_number = callee_number
+        self._room_name = room_name
+        self._started_at = datetime.now(timezone.utc)
+        self._transcript: list[dict] = []
+
+    def add_transcript_entry(self, role: str, text: str) -> None:
+        """Agrega una entrada a la transcripción."""
+        self._transcript.append({
+            "role": role,
+            "text": text,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    async def finalize(
+        self,
+        status: str = "completed",
+        summary: str | None = None,
+    ) -> None:
+        """Finaliza la sesión: calcula costos y guarda en DB."""
+        ended_at = datetime.now(timezone.utc)
+        duration_seconds = int((ended_at - self._started_at).total_seconds())
+        duration_minutes = Decimal(duration_seconds) / Decimal(60)
+
+        # Calcular costos
+        costs = {
+            "livekit": duration_minutes * RATES["livekit"],
+            "stt": duration_minutes * RATES["stt"],
+            "llm": duration_minutes * RATES["llm"],
+            "tts": duration_minutes * RATES["tts"],
+            "telephony": duration_minutes * RATES["telephony"],
+        }
+        total_cost = sum(costs.values())
+
+        logger.info(
+            "Llamada finalizada para '%s': %ds, $%.4f USD",
+            self._config.slug,
+            duration_seconds,
+            total_cost,
+        )
+
+        sb = _get_supabase()
+
+        # Guardar call log
+        call_data = {
+            "client_id": self._config.id,
+            "direction": self._direction,
+            "caller_number": self._caller_number,
+            "callee_number": self._callee_number,
+            "livekit_room_name": self._room_name,
+            "duration_seconds": duration_seconds,
+            "cost_livekit": float(costs["livekit"]),
+            "cost_stt": float(costs["stt"]),
+            "cost_llm": float(costs["llm"]),
+            "cost_tts": float(costs["tts"]),
+            "cost_telephony": float(costs["telephony"]),
+            "cost_total": float(total_cost),
+            "status": status,
+            "summary": summary,
+            "transcript": self._transcript,
+            "started_at": self._started_at.isoformat(),
+            "ended_at": ended_at.isoformat(),
+        }
+        sb.table("calls").insert(call_data).execute()
+
+        # Actualizar usage_daily (upsert)
+        today = self._started_at.date().isoformat()
+        is_inbound = 1 if self._direction == "inbound" else 0
+        is_outbound = 1 if self._direction == "outbound" else 0
+
+        # Buscar registro existente
+        existing = (
+            sb.table("usage_daily")
+            .select("*")
+            .eq("client_id", self._config.id)
+            .eq("date", today)
+            .limit(1)
+            .execute()
+        )
+
+        if existing.data:
+            row = existing.data[0]
+            sb.table("usage_daily").update({
+                "total_calls": row["total_calls"] + 1,
+                "total_minutes": float(Decimal(str(row["total_minutes"])) + duration_minutes),
+                "total_cost": float(Decimal(str(row["total_cost"])) + total_cost),
+                "inbound_calls": row["inbound_calls"] + is_inbound,
+                "outbound_calls": row["outbound_calls"] + is_outbound,
+            }).eq("id", row["id"]).execute()
+        else:
+            sb.table("usage_daily").insert({
+                "client_id": self._config.id,
+                "date": today,
+                "total_calls": 1,
+                "total_minutes": float(duration_minutes),
+                "total_cost": float(total_cost),
+                "inbound_calls": is_inbound,
+                "outbound_calls": is_outbound,
+            }).execute()

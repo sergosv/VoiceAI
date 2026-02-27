@@ -1,0 +1,33 @@
+{
+    "voices": {
+        "es_female_warm": {
+            "id": "PENDING_CARTESIA_VOICE_ID",
+            "name": "María",
+            "language": "es",
+            "gender": "female",
+            "description": "Voz femenina cálida, profesional, mexicana"
+        },
+        "es_male_professional": {
+            "id": "PENDING_CARTESIA_VOICE_ID",
+            "name": "Carlos",
+            "language": "es",
+            "gender": "male",
+            "description": "Voz masculina profesional, seria"
+        },
+        "en_female_friendly": {
+            "id": "PENDING_CARTESIA_VOICE_ID",
+            "name": "Katie",
+            "language": "en",
+            "gender": "female",
+            "description": "English friendly female voice"
+        },
+        "bilingual_female": {
+            "id": "PENDING_CARTESIA_VOICE_ID",
+            "name": "Sofia",
+            "language": "es-en",
+            "gender": "female",
+            "description": "Bilingual Spanish/English, natural switching"
+        }
+    },
+    "note": "Actualizar IDs después de explorar el catálogo de Cartesia Sonic 3"
+}

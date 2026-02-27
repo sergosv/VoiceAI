@@ -1,0 +1,169 @@
+"""Entrypoint del agente de voz LiveKit.
+
+Un solo worker que se adapta dinámicamente por llamada,
+cargando la configuración del cliente desde Supabase.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from dotenv import load_dotenv
+from livekit import agents, rtc
+from livekit.agents import AgentSession, AgentServer, room_io
+from livekit.plugins import deepgram, google, cartesia, silero, noise_cancellation
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+from agent.agent_factory import build_agent
+from agent.config_loader import load_client_config_by_phone
+from agent.session_handler import SessionHandler
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger("voice-ai")
+
+server = AgentServer()
+
+
+@server.rtc_session(agent_name="voice-ai-platform")
+async def entrypoint(ctx: agents.JobContext) -> None:
+    """Punto de entrada para cada llamada."""
+    await ctx.connect(auto_subscribe=agents.AutoSubscribe.AUDIO_ONLY)
+
+    logger.info("Nueva sesión en room: %s", ctx.room.name)
+
+    # Esperar al participante SIP
+    caller_number: str | None = None
+    called_number: str | None = None
+
+    def on_participant_connected(participant: rtc.RemoteParticipant) -> None:
+        nonlocal caller_number, called_number
+        if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+            caller_number = participant.attributes.get("sip.phoneNumber")
+            called_number = participant.attributes.get("sip.trunkPhoneNumber")
+            logger.info(
+                "SIP participante: caller=%s, called=%s",
+                caller_number,
+                called_number,
+            )
+
+    ctx.room.on("participant_connected", on_participant_connected)
+
+    # Verificar participantes ya conectados
+    for p in ctx.room.remote_participants.values():
+        if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+            caller_number = p.attributes.get("sip.phoneNumber")
+            called_number = p.attributes.get("sip.trunkPhoneNumber")
+            break
+
+    # Si no hay SIP (ej: test desde web), esperar un momento
+    if not called_number:
+        import asyncio
+        await asyncio.sleep(2)
+        for p in ctx.room.remote_participants.values():
+            if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                caller_number = p.attributes.get("sip.phoneNumber")
+                called_number = p.attributes.get("sip.trunkPhoneNumber")
+                break
+
+    # Cargar config del cliente
+    config = None
+    if called_number:
+        config = await load_client_config_by_phone(called_number)
+
+    if not config:
+        logger.warning(
+            "No se encontró cliente para número '%s'. Usando config por defecto.",
+            called_number,
+        )
+        # Config por defecto para testing
+        from agent.config_loader import ClientConfig
+        config = ClientConfig(
+            id="00000000-0000-0000-0000-000000000000",
+            name="Test",
+            slug="test",
+            business_type="generic",
+            agent_name="Asistente",
+            language="es",
+            voice_id="default",
+            greeting="Hola, soy un asistente virtual de prueba. ¿En qué puedo ayudarle?",
+            system_prompt="Eres un asistente virtual de prueba. Responde en español de forma amable y concisa.",
+            file_search_store_id=None,
+            tools_enabled=["search_knowledge"],
+            max_call_duration_seconds=300,
+            transfer_number=None,
+            business_hours=None,
+            after_hours_message=None,
+        )
+
+    # Construir agente dinámico
+    voice_agent = build_agent(config)
+
+    # Configurar pipeline de voz
+    stt_language = "es" if config.language in ("es", "es-en") else "en"
+
+    session = AgentSession(
+        stt=deepgram.STT(model="nova-3", language=stt_language),
+        llm=google.LLM(model="gemini-2.5-flash"),
+        tts=cartesia.TTS(
+            model="sonic-3",
+            voice=config.voice_id if config.voice_id != "default" else None,
+            language=stt_language,
+        ),
+        vad=silero.VAD.load(),
+        turn_detection=MultilingualModel(),
+    )
+
+    # Session handler para tracking
+    handler = SessionHandler(
+        config=config,
+        direction="inbound",
+        caller_number=caller_number,
+        callee_number=called_number,
+        room_name=ctx.room.name,
+    )
+
+    # Registrar transcripción
+    @session.on("user_input_transcribed")
+    def on_user_input(ev) -> None:
+        if ev.is_final:
+            handler.add_transcript_entry("user", ev.transcript)
+
+    @session.on("conversation_item_added")
+    def on_conversation_item(ev) -> None:
+        msg = ev.item
+        if msg.role == "assistant" and msg.text_content():
+            handler.add_transcript_entry("assistant", msg.text_content())
+
+    # Cleanup al terminar
+    async def on_shutdown() -> None:
+        logger.info("Finalizando sesión para '%s'", config.slug)
+        await handler.finalize(status="completed")
+
+    ctx.add_shutdown_callback(on_shutdown)
+
+    # Iniciar sesión
+    await session.start(
+        room=ctx.room,
+        agent=voice_agent,
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(
+                noise_cancellation=lambda params: (
+                    noise_cancellation.BVCTelephony()
+                    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                    else noise_cancellation.BVC()
+                ),
+            ),
+        ),
+    )
+
+    # Saludo inicial
+    await session.generate_reply(instructions=f"Saluda al usuario con: {config.greeting}")
+
+
+if __name__ == "__main__":
+    agents.cli.run_app(server)
