@@ -10,7 +10,7 @@ import os
 from livekit.api import LiveKitAPI
 from livekit.api.sip_service import CreateSIPParticipantRequest
 from livekit.protocol.agent_dispatch import RoomAgentDispatch
-from livekit.protocol.room import CreateRoomRequest, RoomAgent
+from livekit.protocol.room import CreateRoomRequest
 
 from api.deps import get_supabase
 
@@ -210,13 +210,9 @@ async def _place_outbound_call(
                 metadata=room_metadata,
                 empty_timeout=60,
                 agents=[
-                    RoomAgent(
-                        dispatches=[
-                            RoomAgentDispatch(
-                                agent_name="voice-ai-platform",
-                                metadata=room_metadata,
-                            )
-                        ]
+                    RoomAgentDispatch(
+                        agent_name="voice-ai-platform",
+                        metadata=room_metadata,
                     )
                 ],
             )
