@@ -120,8 +120,20 @@ export function CampaignDetail() {
     }
   }
 
+  async function handleRestart() {
+    if (!confirm('¿Reiniciar la campaña? Se resetearán todas las llamadas a pendiente.')) return
+    try {
+      const updated = await api.post(`/campaigns/${id}/restart`)
+      setCampaign(updated)
+      await loadData()
+      toast.success('Campaña reiniciada — lista para lanzar')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   async function handleDelete() {
-    if (!confirm('¿Eliminar esta campaña?')) return
+    if (!confirm('¿Eliminar esta campaña y todas sus llamadas?')) return
     try {
       await api.delete(`/campaigns/${id}`)
       toast.success('Campaña eliminada')
@@ -134,7 +146,7 @@ export function CampaignDetail() {
   if (loading) return <PageLoader />
   if (!campaign) return null
 
-  const editable = ['draft', 'paused'].includes(campaign.status)
+  const editable = ['draft', 'paused', 'completed'].includes(campaign.status)
   const progress = campaign.total_contacts > 0
     ? Math.round((campaign.completed_contacts / campaign.total_contacts) * 100)
     : 0
@@ -157,12 +169,21 @@ export function CampaignDetail() {
             <Button variant="secondary" onClick={handlePause}>
               <Pause size={16} className="mr-1" /> Pausar
             </Button>
-          ) : editable && campaign.total_contacts > 0 ? (
-            <Button onClick={handleStart}>
-              <Play size={16} className="mr-1" /> Iniciar
-            </Button>
-          ) : null}
-          {editable && (
+          ) : (
+            <>
+              {campaign.status === 'completed' && (
+                <Button variant="secondary" onClick={handleRestart}>
+                  <Play size={16} className="mr-1" /> Relanzar
+                </Button>
+              )}
+              {['draft', 'paused', 'scheduled'].includes(campaign.status) && campaign.total_contacts > 0 && (
+                <Button onClick={handleStart}>
+                  <Play size={16} className="mr-1" /> Iniciar
+                </Button>
+              )}
+            </>
+          )}
+          {campaign.status !== 'running' && (
             <Button variant="secondary" className="text-danger" onClick={handleDelete}>
               <Trash2 size={16} />
             </Button>

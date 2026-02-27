@@ -23,8 +23,8 @@ async def start_campaign(campaign_id: str) -> dict:
         raise ValueError("Campaña no encontrada")
 
     camp = campaign.data[0]
-    if camp["status"] not in ("draft", "scheduled", "paused"):
-        raise ValueError(f"No se puede iniciar una campaña con status '{camp['status']}'")
+    if camp["status"] == "running":
+        raise ValueError("La campaña ya está en ejecución")
 
     # Contar contactos pendientes
     pending = (
@@ -63,6 +63,50 @@ async def pause_campaign(campaign_id: str) -> dict:
     )
     if not result.data:
         raise ValueError("Campaña no encontrada o no está en ejecución")
+    return result.data[0]
+
+
+async def restart_campaign(campaign_id: str) -> dict:
+    """Resetea una campaña completada/fallida para poder relanzarla."""
+    sb = get_supabase()
+
+    campaign = sb.table("campaigns").select("*").eq("id", campaign_id).limit(1).execute()
+    if not campaign.data:
+        raise ValueError("Campaña no encontrada")
+
+    camp = campaign.data[0]
+    if camp["status"] == "running":
+        raise ValueError("No se puede reiniciar una campaña en ejecución")
+
+    # Resetear campaign_calls fallidos/completados a pending
+    sb.table("campaign_calls").update({
+        "status": "pending",
+        "attempt": 0,
+        "result_summary": None,
+        "next_retry_at": None,
+    }).eq("campaign_id", campaign_id).in_(
+        "status", ["completed", "failed", "no_answer", "busy"]
+    ).execute()
+
+    # Resetear contadores de la campaña
+    total = (
+        sb.table("campaign_calls")
+        .select("id", count="exact")
+        .eq("campaign_id", campaign_id)
+        .execute()
+    )
+    result = sb.table("campaigns").update({
+        "status": "draft",
+        "completed_contacts": 0,
+        "successful_contacts": 0,
+        "completed_at": None,
+        "total_contacts": total.count or 0,
+    }).eq("id", campaign_id).execute()
+
+    if not result.data:
+        raise ValueError("Error reiniciando campaña")
+
+    logger.info("Campaña %s reiniciada", campaign_id)
     return result.data[0]
 
 

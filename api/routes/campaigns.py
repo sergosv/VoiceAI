@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import MessageResponse
-from api.services.outbound_service import start_campaign, pause_campaign
+from api.services.outbound_service import start_campaign, pause_campaign, restart_campaign
 
 router = APIRouter()
 
@@ -149,8 +149,8 @@ async def update_campaign(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaña no encontrada")
     if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
-    if existing.data[0]["status"] not in ("draft", "paused"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se puede editar en draft o paused")
+    if existing.data[0]["status"] == "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pausa la campaña antes de editarla")
 
     updates = req.model_dump(exclude_none=True)
     if not updates:
@@ -167,7 +167,7 @@ async def delete_campaign(
     campaign_id: str,
     user: CurrentUser = Depends(get_current_user),
 ) -> MessageResponse:
-    """Elimina una campaña (solo en draft)."""
+    """Elimina una campaña (no se puede si está running)."""
     sb = get_supabase()
 
     existing = sb.table("campaigns").select("client_id, status").eq("id", campaign_id).limit(1).execute()
@@ -175,8 +175,8 @@ async def delete_campaign(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaña no encontrada")
     if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
-    if existing.data[0]["status"] != "draft":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se puede eliminar en draft")
+    if existing.data[0]["status"] == "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pausa la campaña antes de eliminarla")
 
     sb.table("campaign_calls").delete().eq("campaign_id", campaign_id).execute()
     sb.table("campaigns").delete().eq("id", campaign_id).execute()
@@ -225,6 +225,27 @@ async def pause_campaign_route(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.post("/{campaign_id}/restart", response_model=CampaignOut)
+async def restart_campaign_route(
+    campaign_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> CampaignOut:
+    """Reinicia una campaña: resetea llamadas fallidas/completadas a pending."""
+    sb = get_supabase()
+
+    existing = sb.table("campaigns").select("client_id").eq("id", campaign_id).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaña no encontrada")
+    if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    try:
+        result = await restart_campaign(campaign_id)
+        return CampaignOut(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.get("/{campaign_id}/calls", response_model=list[CampaignCallOut])
 async def list_campaign_calls(
     campaign_id: str,
@@ -267,8 +288,8 @@ async def add_campaign_contacts(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaña no encontrada")
     if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
-    if existing.data[0]["status"] not in ("draft", "paused"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se agregan contactos en draft o paused")
+    if existing.data[0]["status"] == "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pausa la campaña antes de agregar contactos")
 
     entries = []
 
