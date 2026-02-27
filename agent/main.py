@@ -70,6 +70,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 called_number = p.attributes.get("sip.trunkPhoneNumber")
                 break
 
+    # Detectar modo outbound desde metadata del room
+    import json
+    outbound_mode = False
+    campaign_script: str | None = None
+    room_metadata = ctx.room.metadata or ""
+    if room_metadata:
+        try:
+            meta = json.loads(room_metadata)
+            if meta.get("type") == "outbound":
+                outbound_mode = True
+                campaign_script = meta.get("script")
+                logger.info("Modo outbound detectado, campaign_id: %s", meta.get("campaign_id"))
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
     # Cargar config del cliente
     config = None
     if called_number:
@@ -100,6 +115,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             after_hours_message=None,
         )
 
+    # Override del system prompt para outbound con script de campaña
+    if outbound_mode and campaign_script:
+        from dataclasses import replace
+        config = replace(config, system_prompt=campaign_script)
+
     # Construir agente dinámico
     voice_agent = build_agent(config)
 
@@ -121,7 +141,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Session handler para tracking
     handler = SessionHandler(
         config=config,
-        direction="inbound",
+        direction="outbound" if outbound_mode else "inbound",
         caller_number=caller_number,
         callee_number=called_number,
         room_name=ctx.room.name,
@@ -135,9 +155,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     @session.on("conversation_item_added")
     def on_conversation_item(ev) -> None:
-        msg = ev.item
-        if msg.role == "assistant" and msg.text_content:
-            handler.add_transcript_entry("assistant", msg.text_content)
+        try:
+            msg = ev.item
+            if msg.role == "assistant" and msg.text_content:
+                handler.add_transcript_entry("assistant", msg.text_content)
+        except Exception:
+            logger.exception("Error procesando conversation_item_added")
 
     # Cleanup al terminar
     async def on_shutdown() -> None:
@@ -162,7 +185,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     )
 
     # Saludo inicial
-    await session.generate_reply(instructions=f"Saluda al usuario con: {config.greeting}")
+    if outbound_mode:
+        await session.generate_reply(
+            instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
+        )
+    else:
+        await session.generate_reply(instructions=f"Saluda al usuario con: {config.greeting}")
 
 
 if __name__ == "__main__":

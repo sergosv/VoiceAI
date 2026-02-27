@@ -30,6 +30,13 @@ class ClientConfig:
     transfer_number: str | None
     business_hours: dict | None
     after_hours_message: str | None
+    # Integraciones Phase 3
+    google_calendar_id: str | None = None
+    google_service_account_key: dict | None = None
+    whatsapp_instance_id: str | None = None
+    whatsapp_api_url: str | None = None
+    whatsapp_api_key: str | None = None
+    enabled_tools: list[str] = field(default_factory=lambda: ["search_knowledge"])
 
 
 def _get_supabase() -> Client:
@@ -125,4 +132,10 @@ def _row_to_config(row: dict) -> ClientConfig:
         transfer_number=row.get("transfer_number"),
         business_hours=row.get("business_hours"),
         after_hours_message=row.get("after_hours_message"),
+        google_calendar_id=row.get("google_calendar_id"),
+        google_service_account_key=row.get("google_service_account_key"),
+        whatsapp_instance_id=row.get("whatsapp_instance_id"),
+        whatsapp_api_url=row.get("whatsapp_api_url"),
+        whatsapp_api_key=row.get("whatsapp_api_key"),
+        enabled_tools=row.get("enabled_tools") or ["search_knowledge"],
     )

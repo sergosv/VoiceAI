@@ -92,6 +92,29 @@ Antes de implementar cada integración, verificar la API actual:
 - Cartesia: verificar modelo y snapshot actual
 - Deepgram: verificar que Nova-3 y Flux están disponibles
 
+## Problemas Conocidos del Deploy
+
+### SIP URI incorrecto
+El subdomain del proyecto (`innotecnia-2lp4xy8z.sip.livekit.cloud`) **NO** es el SIP URI. El real es el project ID: `2r172cwux9u.sip.livekit.cloud`. Se encuentra en LiveKit Dashboard → Telephony → SIP trunks (esquina superior derecha).
+
+### Supabase API keys
+El SDK `supabase-py` **no soporta** el formato nuevo de keys (`sb_publishable_`, `sb_secret_`). Usar las **legacy JWT keys** (`eyJ...`) que están en Settings → API → pestaña "Legacy anon, service_role API keys".
+
+### Twilio SIP transport
+Twilio usa UDP por default, LiveKit necesita **TCP**. Usar `transport=tcp` en el Origination URI del Elastic SIP Trunk: `sip:2r172cwux9u.sip.livekit.cloud;transport=tcp`.
+
+### LiveKit deploy — livekit.toml not found
+El build remoto de `lk deploy` no incluye `livekit.toml` en el contexto de Docker. **NO** incluir `COPY livekit.toml .` en el Dockerfile. LiveKit lo maneja por separado.
+
+### LiveKit deploy — agent ID requerido
+El `livekit.toml` necesita el campo `id` bajo `[agent]` para que `lk agent deploy` funcione. Ejemplo: `id = "CA_cRCs5tbTho5A"`.
+
+### LiveKit deploy — max agents
+Plan Build permite solo 1 agente. Usar `lk agent deploy` para actualizar, **no** `lk agent create` para crear otro.
+
+### Twilio trial
+Solo permite llamadas a números verificados. Para pruebas, verificar el celular en Console → Verified Caller ID.
+
 ## NO hacer
 - No sobre-engineerear. Mínimo viable primero.
 - No agregar features no pedidos (auth, billing, analytics avanzados = Fase 3)

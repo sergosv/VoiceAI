@@ -1,3 +1,7 @@
+# .dockerignore
+# Add exclusions here if needed
+# !livekit.toml
+
 venv/
 .venv/
 __pycache__/

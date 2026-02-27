@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código
 COPY agent/ ./agent/
 COPY config/ ./config/
-COPY livekit.toml .
+
 
 # Pre-descargar modelos (silero VAD, turn detector)
 RUN python -m agent.main download-files

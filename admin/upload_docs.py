@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 
 import typer
 from dotenv import load_dotenv
-from google import genai
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from supabase import create_client
 
 load_dotenv()
+
+from api.services.document_service import (
+    save_document_record,
+    upload_document_to_gemini,
+)
 
 console = Console()
 app = typer.Typer()
@@ -21,10 +24,6 @@ app = typer.Typer()
 
 def _get_supabase():
     return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
-
-
-def _get_gemini():
-    return genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 def _get_client_store(slug: str) -> tuple[str, str]:
@@ -43,7 +42,7 @@ def _get_client_store(slug: str) -> tuple[str, str]:
 
     row = result.data[0]
     if not row["file_search_store_id"]:
-        console.print(f"[red]Cliente '{slug}' no tiene FileSearchStore. Recréalo con create_client.py[/red]")
+        console.print(f"[red]Cliente '{slug}' no tiene FileSearchStore[/red]")
         raise typer.Exit(1)
 
     return row["id"], row["file_search_store_id"]
@@ -69,42 +68,27 @@ def upload(
     console.print(f"  Store:   {store_id}")
     console.print(f"  Tamaño:  {file_size / 1024:.1f} KB\n")
 
-    gemini = _get_gemini()
-
-    # Subir archivo al store
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
         task = progress.add_task("Subiendo e indexando...", total=None)
-
-        operation = gemini.file_search_stores.upload_to_file_search_store(
-            file=str(file),
-            file_search_store_name=store_id,
-            config={"display_name": file.name},
-        )
-
-        # Esperar a que termine la indexación
-        while not operation.done:
-            time.sleep(3)
-            operation = gemini.operations.get(operation)
-
+        upload_document_to_gemini(str(file), store_id, os.environ["GOOGLE_API_KEY"])
         progress.update(task, description="[green]Indexado completamente")
 
     # Guardar referencia en DB
     sb = _get_supabase()
-    doc_data = {
-        "client_id": client_id,
-        "filename": file.name,
-        "file_type": file_type,
-        "file_size_bytes": file_size,
-        "indexing_status": "indexed",
-        "description": description or f"Documento {file.name}",
-    }
-    sb.table("documents").insert(doc_data).execute()
+    save_document_record(
+        sb,
+        client_id=client_id,
+        filename=file.name,
+        file_type=file_type,
+        file_size_bytes=file_size,
+        description=description or f"Documento {file.name}",
+    )
 
-    console.print(f"\n[bold green]Documento '{file.name}' subido y registrado exitosamente.[/bold green]\n")
+    console.print(f"\n[bold green]Documento '{file.name}' subido exitosamente.[/bold green]\n")
 
 
 @app.command()

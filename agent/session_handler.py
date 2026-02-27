@@ -103,7 +103,24 @@ class SessionHandler:
             "started_at": self._started_at.isoformat(),
             "ended_at": ended_at.isoformat(),
         }
-        sb.table("calls").insert(call_data).execute()
+        call_result = sb.table("calls").insert(call_data).execute()
+        call_id = call_result.data[0]["id"] if call_result.data else None
+
+        # Auto-capturar contacto del llamante
+        if self._caller_number:
+            try:
+                contact_data = {
+                    "client_id": self._config.id,
+                    "phone": self._caller_number,
+                    "source": self._direction + "_call",
+                    "metadata": {"last_call_id": call_id} if call_id else {},
+                }
+                sb.table("contacts").upsert(
+                    contact_data, on_conflict="client_id,phone"
+                ).execute()
+                logger.info("Contacto auto-capturado: %s", self._caller_number)
+            except Exception:
+                logger.exception("Error auto-capturando contacto")
 
         # Actualizar usage_daily (upsert)
         today = self._started_at.date().isoformat()
