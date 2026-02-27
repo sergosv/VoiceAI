@@ -16,5 +16,8 @@ COPY agent/ ./agent/
 COPY config/ ./config/
 COPY livekit.toml .
 
+# Pre-descargar modelos (silero VAD, turn detector)
+RUN python -m agent.main download-files
+
 # Entrypoint
 CMD ["python", "-m", "agent.main", "start"]

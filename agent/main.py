@@ -136,8 +136,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     @session.on("conversation_item_added")
     def on_conversation_item(ev) -> None:
         msg = ev.item
-        if msg.role == "assistant" and msg.text_content():
-            handler.add_transcript_entry("assistant", msg.text_content())
+        if msg.role == "assistant" and msg.text_content:
+            handler.add_transcript_entry("assistant", msg.text_content)
 
     # Cleanup al terminar
     async def on_shutdown() -> None:
