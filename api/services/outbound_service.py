@@ -29,6 +29,12 @@ async def start_campaign(campaign_id: str) -> dict:
     if camp["status"] == "running":
         raise ValueError("La campaña ya está en ejecución")
 
+    # Si viene de paused, resetear contactos "calling" que se quedaron colgados
+    if camp["status"] == "paused":
+        sb.table("campaign_calls").update({
+            "status": "pending",
+        }).eq("campaign_id", campaign_id).eq("status", "calling").execute()
+
     # Contar contactos pendientes
     pending = (
         sb.table("campaign_calls")
@@ -86,6 +92,7 @@ async def restart_campaign(campaign_id: str) -> dict:
         "status": "pending",
         "attempt": 0,
         "result_summary": None,
+        "analysis_data": None,
         "next_retry_at": None,
     }).eq("campaign_id", campaign_id).in_(
         "status", ["completed", "failed", "no_answer", "busy"]

@@ -11,11 +11,12 @@ import logging
 from dotenv import load_dotenv
 from livekit import agents, rtc
 from livekit.agents import AgentSession, AgentServer, room_io
-from livekit.plugins import deepgram, google, cartesia, silero, noise_cancellation
+from livekit.plugins import silero, noise_cancellation
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent
 from agent.config_loader import load_client_config_by_id, load_client_config_by_phone
+from agent.pipeline_builder import build_llm, build_realtime_model, build_stt, build_tts
 from agent.session_handler import SessionHandler
 
 load_dotenv()
@@ -129,20 +130,43 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Construir agente dinámico
     voice_agent = build_agent(config)
 
-    # Configurar pipeline de voz
+    # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.language in ("es", "es-en") else "en"
 
-    session = AgentSession(
-        stt=deepgram.STT(model="nova-3", language=stt_language),
-        llm=google.LLM(model="gemini-2.5-flash"),
-        tts=cartesia.TTS(
-            model="sonic-3",
-            voice=config.voice_id if config.voice_id != "default" else None,
-            language=stt_language,
-        ),
-        vad=silero.VAD.load(),
-        turn_detection=MultilingualModel(),
+    vad = silero.VAD.load(
+        activation_threshold=0.6,
+        min_speech_duration=0.15,
+        min_silence_duration=0.8,
+        sample_rate=8000,
     )
+
+    if config.voice_mode == "realtime":
+        logger.info("Modo realtime: model=%s, voice=%s", config.realtime_model, config.realtime_voice)
+        session = AgentSession(
+            llm=build_realtime_model(config),
+            vad=vad,
+            turn_detection=MultilingualModel(),
+            min_endpointing_delay=0.8,
+            max_endpointing_delay=6.0,
+            min_interruption_duration=0.7,
+            min_interruption_words=1,
+        )
+    else:
+        logger.info(
+            "Modo pipeline: stt=%s, llm=%s, tts=%s",
+            config.stt_provider, config.llm_provider, config.tts_provider,
+        )
+        session = AgentSession(
+            stt=build_stt(config, stt_language),
+            llm=build_llm(config),
+            tts=build_tts(config, stt_language),
+            vad=vad,
+            turn_detection=MultilingualModel(),
+            min_endpointing_delay=0.8,
+            max_endpointing_delay=6.0,
+            min_interruption_duration=0.7,
+            min_interruption_words=1,
+        )
 
     # Para outbound, los números van al revés:
     # - caller_number = nuestro número (el que llama)
@@ -162,6 +186,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         callee_number=outbound_callee if outbound_mode else called_number,
         room_name=ctx.room.name,
         campaign_id=campaign_id,
+        campaign_script=campaign_script,
     )
 
     # Registrar transcripción

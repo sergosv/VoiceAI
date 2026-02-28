@@ -9,12 +9,12 @@
             "description": "Voz femenina cálida con acento mexicano, natural y confiable"
         },
         "es_female_friendly": {
-            "id": "727f663b-0e90-4031-90f2-558b7334425b",
-            "name": "Carmen",
-            "cartesia_name": "Carmen - Friendly Neighbor",
+            "id": "ccfea4bf-b3f4-421e-87ed-dd05dae01431",
+            "name": "Alondra",
+            "cartesia_name": "Alondra - Reassuring Sister",
             "language": "es",
             "gender": "female",
-            "description": "Voz femenina amigable para conversaciones casuales"
+            "description": "Voz femenina amigable y cercana, como una hermana mayor"
         },
         "es_female_nurturing": {
             "id": "ae823354-f9be-4aef-8543-f569644136b4",
@@ -32,6 +32,22 @@
             "gender": "female",
             "description": "Voz amigable y tranquilizadora para soporte al cliente"
         },
+        "es_female_cheerful": {
+            "id": "bef2ba57-5c10-433b-b215-3bef35110a81",
+            "name": "Camila",
+            "cartesia_name": "Camila - Happy Conversationalist",
+            "language": "es",
+            "gender": "female",
+            "description": "Voz animada para conversaciones casuales y ligeras"
+        },
+        "es_female_presenter": {
+            "id": "d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",
+            "name": "Paloma",
+            "cartesia_name": "Paloma - Clear Presenter Woman",
+            "language": "es",
+            "gender": "female",
+            "description": "Voz clara y profesional para presentaciones y atención al cliente"
+        },
         "es_male_professional": {
             "id": "15d0c2e2-8d29-44c3-be23-d585d5f154a1",
             "name": "Pedro",
@@ -41,12 +57,12 @@
             "description": "Voz masculina formal con acento mexicano, claro y conciso"
         },
         "es_male_friendly": {
-            "id": "e9f0368b-3662-4a01-b037-e13ca5203c74",
-            "name": "Javier",
-            "cartesia_name": "Javier - Gentle Advisor",
+            "id": "79743797-2087-422f-8dc7-86f9efca85f1",
+            "name": "Fran",
+            "cartesia_name": "Fran - Confident Young Professional",
             "language": "es",
             "gender": "male",
-            "description": "Voz masculina amable para conversaciones naturales"
+            "description": "Voz joven masculina segura para conversaciones e IA telefónica"
         },
         "es_male_advisor": {
             "id": "7c1ecd2d-1c83-4d5d-a25c-b3820a274a2e",
@@ -63,6 +79,102 @@
             "language": "es",
             "gender": "male",
             "description": "Voz joven masculina cálida y expresiva"
+        },
+        "es_male_optimist": {
+            "id": "b0689631-eee7-4a6c-bb86-195f1d267c2e",
+            "name": "Emilio",
+            "cartesia_name": "Emilio - Friendly Optimist",
+            "language": "es",
+            "gender": "male",
+            "description": "Voz optimista y amigable para atención al cliente positiva"
+        },
+        "es_male_calm": {
+            "id": "3a35daa1-ba81-451c-9b21-59332e9db2f3",
+            "name": "Alejandro",
+            "cartesia_name": "Alejandro - Calm Mentor",
+            "language": "es",
+            "gender": "male",
+            "description": "Voz calmada con tono rico, ideal para guía y mentoría"
+        },
+        "en_female_receptionist": {
+            "id": "1242fb95-7ddd-44ac-8a05-9e8a22a6137d",
+            "name": "Cindy",
+            "cartesia_name": "Cindy - Receptionist",
+            "language": "en",
+            "gender": "female",
+            "description": "Warm, welcoming voice for frontline customer interactions"
+        },
+        "en_female_support": {
+            "id": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+            "name": "Katie",
+            "cartesia_name": "Katie - Friendly Fixer",
+            "language": "en",
+            "gender": "female",
+            "description": "Friendly young adult for conversational support"
+        },
+        "en_female_agent": {
+            "id": "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+            "name": "Jacqueline",
+            "cartesia_name": "Jacqueline - Reassuring Agent",
+            "language": "en",
+            "gender": "female",
+            "description": "Confident voice for empathic customer support"
+        },
+        "en_female_kind": {
+            "id": "ec1e269e-9ca0-402f-8a18-58e0e022355a",
+            "name": "Ariana",
+            "cartesia_name": "Ariana - Kind Friend",
+            "language": "en",
+            "gender": "female",
+            "description": "Warm, welcoming tone that builds trust and connection"
+        },
+        "en_female_british": {
+            "id": "62ae83ad-4f6a-430b-af41-a9bede9286ca",
+            "name": "Gemma",
+            "cartesia_name": "Gemma - Decisive Agent",
+            "language": "en",
+            "gender": "female",
+            "description": "Confident British voice for professional assistance"
+        },
+        "en_male_agent": {
+            "id": "a167e0f3-df7e-4d52-a9c3-f949145efdab",
+            "name": "Blake",
+            "cartesia_name": "Blake - Helpful Agent",
+            "language": "en",
+            "gender": "male",
+            "description": "Energetic voice for engaging customer support"
+        },
+        "en_male_assistant": {
+            "id": "47c38ca4-5f35-497b-b1a3-415245fb35e1",
+            "name": "Daniel",
+            "cartesia_name": "Daniel - Modern Assistant",
+            "language": "en",
+            "gender": "male",
+            "description": "Clear, crisp voice for digital assistants and system interactions"
+        },
+        "en_male_support": {
+            "id": "a5136bf9-224c-4d76-b823-52bd5efcffcc",
+            "name": "Jameson",
+            "cartesia_name": "Jameson - Easygoing Support",
+            "language": "en",
+            "gender": "male",
+            "description": "Friendly, laid-back voice for customer support and onboarding"
+        },
+        "en_male_british": {
+            "id": "ee7ea9f8-c0c1-498c-9279-764d6b56d189",
+            "name": "Oliver",
+            "cartesia_name": "Oliver - Customer Chap",
+            "language": "en",
+            "gender": "male",
+            "description": "Polite British voice for customer-facing interactions"
+        },
+        "en_male_caring": {
+            "id": "0ad65e7f-006c-47cf-bd31-52279d487913",
+            "name": "Rupert",
+            "cartesia_name": "Rupert - Caring Dad",
+            "language": "en",
+            "gender": "male",
+            "description": "Warm, mature voice for caring, reassuring conversations"
         }
     }
 }

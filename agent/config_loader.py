@@ -37,6 +37,17 @@ class ClientConfig:
     whatsapp_api_url: str | None = None
     whatsapp_api_key: str | None = None
     enabled_tools: list[str] = field(default_factory=lambda: ["search_knowledge"])
+    # BYOK — Voice Pipeline
+    voice_mode: str = "pipeline"
+    stt_provider: str = "deepgram"
+    llm_provider: str = "google"
+    tts_provider: str = "cartesia"
+    stt_api_key: str | None = None
+    llm_api_key: str | None = None
+    tts_api_key: str | None = None
+    realtime_api_key: str | None = None
+    realtime_voice: str = "alloy"
+    realtime_model: str = "gpt-4o-realtime-preview"
 
 
 def _get_supabase() -> Client:
@@ -138,4 +149,14 @@ def _row_to_config(row: dict) -> ClientConfig:
         whatsapp_api_url=row.get("whatsapp_api_url"),
         whatsapp_api_key=row.get("whatsapp_api_key"),
         enabled_tools=row.get("enabled_tools") or ["search_knowledge"],
+        voice_mode=row.get("voice_mode", "pipeline"),
+        stt_provider=row.get("stt_provider", "deepgram"),
+        llm_provider=row.get("llm_provider", "google"),
+        tts_provider=row.get("tts_provider", "cartesia"),
+        stt_api_key=row.get("stt_api_key"),
+        llm_api_key=row.get("llm_api_key"),
+        tts_api_key=row.get("tts_api_key"),
+        realtime_api_key=row.get("realtime_api_key"),
+        realtime_voice=row.get("realtime_voice", "alloy"),
+        realtime_model=row.get("realtime_model", "gpt-4o-realtime-preview"),
     )

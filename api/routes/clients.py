@@ -15,6 +15,7 @@ from api.schemas import (
     ClientOut,
     ClientUpdateRequest,
     MessageResponse,
+    client_out_from_row,
 )
 from api.services.phone_service import (
     assign_phone_to_client,
@@ -46,7 +47,7 @@ async def list_clients(
         query = query.eq("id", user.client_id)
 
     result = query.execute()
-    return [ClientOut(**row) for row in result.data]
+    return [client_out_from_row(row) for row in result.data]
 
 
 @router.get("/{client_id}", response_model=ClientOut)
@@ -62,7 +63,7 @@ async def get_client(
     result = sb.table("clients").select("*").eq("id", client_id).limit(1).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-    return ClientOut(**result.data[0])
+    return client_out_from_row(result.data[0])
 
 
 @router.post("", response_model=ClientOut, status_code=201)
@@ -109,7 +110,7 @@ async def create_client(
         store_name=store_name,
         owner_email=req.owner_email,
     )
-    return ClientOut(**row)
+    return client_out_from_row(row)
 
 
 @router.patch("/{client_id}", response_model=ClientOut)
@@ -124,11 +125,14 @@ async def update_client(
 
     # Campos que un client puede editar
     client_editable = {
-        "greeting", "system_prompt", "agent_name", "language",
+        "greeting", "system_prompt", "agent_name", "language", "voice_id",
         "max_call_duration_seconds", "transfer_number", "business_hours",
         "after_hours_message",
         "google_calendar_id", "whatsapp_instance_id", "whatsapp_api_url",
         "whatsapp_api_key", "enabled_tools",
+        "voice_mode", "stt_provider", "llm_provider", "tts_provider",
+        "stt_api_key", "llm_api_key", "tts_api_key",
+        "realtime_api_key", "realtime_voice", "realtime_model",
     }
 
     updates = req.model_dump(exclude_none=True)
@@ -144,7 +148,7 @@ async def update_client(
     result = sb.table("clients").update(updates).eq("id", client_id).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-    return ClientOut(**result.data[0])
+    return client_out_from_row(result.data[0])
 
 
 @router.post("/{client_id}/assign-phone", response_model=ClientOut)
@@ -186,7 +190,7 @@ async def assign_phone(
     )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-    return ClientOut(**row)
+    return client_out_from_row(row)
 
 
 @router.delete("/{client_id}", response_model=MessageResponse)

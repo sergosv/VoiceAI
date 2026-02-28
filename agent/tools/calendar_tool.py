@@ -6,6 +6,13 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
+try:
+    from zoneinfo import ZoneInfo
+    TZ_MEXICO = ZoneInfo("America/Mexico_City")
+except ImportError:
+    # Fallback si zoneinfo no tiene datos (ej: Windows sin tzdata)
+    TZ_MEXICO = timezone(timedelta(hours=-6))
+
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
@@ -31,9 +38,9 @@ async def schedule_appointment(
     Valida disponibilidad, crea/actualiza contacto, y crea la cita.
     """
     try:
-        # Parsear fecha y hora
+        # Parsear fecha y hora en timezone de México
         start_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
-        start_dt = start_dt.replace(tzinfo=timezone(timedelta(hours=-6)))  # CST México
+        start_dt = start_dt.replace(tzinfo=TZ_MEXICO)
         end_dt = start_dt + timedelta(minutes=duration_minutes)
     except ValueError:
         return (

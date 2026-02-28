@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from supabase import create_client, Client
 
+from agent.call_analyzer import analyze_call_transcript
 from agent.config_loader import ClientConfig
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class SessionHandler:
         callee_number: str | None,
         room_name: str | None = None,
         campaign_id: str | None = None,
+        campaign_script: str | None = None,
     ) -> None:
         self._config = config
         self._direction = direction
@@ -45,6 +47,7 @@ class SessionHandler:
         self._callee_number = callee_number
         self._room_name = room_name
         self._campaign_id = campaign_id
+        self._campaign_script = campaign_script
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
 
@@ -104,6 +107,12 @@ class SessionHandler:
             "transcript": self._transcript,
             "started_at": self._started_at.isoformat(),
             "ended_at": ended_at.isoformat(),
+            "metadata": {
+                "voice_mode": self._config.voice_mode,
+                "stt_provider": self._config.stt_provider,
+                "llm_provider": self._config.llm_provider,
+                "tts_provider": self._config.tts_provider,
+            },
         }
         call_result = sb.table("calls").insert(call_data).execute()
         call_id = call_result.data[0]["id"] if call_result.data else None
@@ -138,11 +147,31 @@ class SessionHandler:
                             if len(summary_text) > 500:
                                 summary_text = summary_text[:500]
 
-                        sb.table("campaign_calls").update({
+                        update_data: dict = {
                             "status": call_status,
                             "call_id": call_id,
                             "result_summary": summary_text,
-                        }).eq("id", cc_id).execute()
+                        }
+
+                        # Análisis IA de la transcripción
+                        if had_conversation:
+                            analysis = await analyze_call_transcript(
+                                self._transcript, self._campaign_script
+                            )
+                            if analysis:
+                                update_data["analysis_data"] = analysis
+                                # Enriquecer contacto con datos extraídos
+                                _enrich_contact(
+                                    sb,
+                                    self._config.id,
+                                    phone,
+                                    cc.data[0].get("contact_id"),
+                                    analysis,
+                                )
+
+                        sb.table("campaign_calls").update(
+                            update_data
+                        ).eq("id", cc_id).execute()
 
                         # Actualizar contadores de la campaña
                         _update_campaign_counters(sb, self._campaign_id)
@@ -206,6 +235,58 @@ class SessionHandler:
                 "inbound_calls": is_inbound,
                 "outbound_calls": is_outbound,
             }).execute()
+
+
+def _enrich_contact(
+    sb: Client,
+    client_id: str,
+    phone: str,
+    contact_id: str | None,
+    analysis: dict,
+) -> None:
+    """Enriquece el contacto con datos extraídos del análisis de la llamada."""
+    try:
+        # Buscar contacto por ID o por teléfono
+        if contact_id:
+            result = sb.table("contacts").select("*").eq("id", contact_id).limit(1).execute()
+        else:
+            result = (
+                sb.table("contacts").select("*")
+                .eq("client_id", client_id)
+                .eq("phone", phone)
+                .limit(1)
+                .execute()
+            )
+
+        if not result.data:
+            return
+
+        contact = result.data[0]
+        updates: dict = {}
+
+        # Solo llenar campos vacíos
+        extracted_name = analysis.get("contact_name")
+        if extracted_name and not contact.get("name"):
+            updates["name"] = extracted_name
+
+        extracted_email = analysis.get("contact_email")
+        if extracted_email and not contact.get("email"):
+            updates["email"] = extracted_email
+
+        # Siempre actualizar metadata con el último análisis
+        metadata = contact.get("metadata") or {}
+        metadata["last_analysis"] = {
+            "result": analysis.get("result"),
+            "summary": analysis.get("summary"),
+            "sentiment": analysis.get("sentiment"),
+        }
+        updates["metadata"] = metadata
+
+        if updates:
+            sb.table("contacts").update(updates).eq("id", contact["id"]).execute()
+            logger.info("Contacto enriquecido: %s", phone)
+    except Exception:
+        logger.exception("Error enriqueciendo contacto %s", phone)
 
 
 def _update_campaign_counters(sb: Client, campaign_id: str) -> None:

@@ -61,6 +61,7 @@ class CampaignCallOut(BaseModel):
     status: str = "pending"
     attempt: int = 0
     result_summary: str | None = None
+    analysis_data: dict | None = None
     created_at: str | None = None
 
 
@@ -327,3 +328,34 @@ async def add_campaign_contacts(
     sb.table("campaigns").update({"total_contacts": total.count or 0}).eq("id", campaign_id).execute()
 
     return MessageResponse(message=f"{len(entries)} contactos agregados a la campaña")
+
+
+@router.delete("/{campaign_id}/calls/{call_id}", response_model=MessageResponse)
+async def delete_campaign_call(
+    campaign_id: str,
+    call_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> MessageResponse:
+    """Elimina un contacto/llamada de una campaña."""
+    sb = get_supabase()
+
+    existing = sb.table("campaigns").select("client_id, status").eq("id", campaign_id).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaña no encontrada")
+    if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+    if existing.data[0]["status"] == "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pausa la campaña antes de eliminar contactos")
+
+    sb.table("campaign_calls").delete().eq("id", call_id).eq("campaign_id", campaign_id).execute()
+
+    # Recalcular total_contacts
+    total = (
+        sb.table("campaign_calls")
+        .select("id", count="exact")
+        .eq("campaign_id", campaign_id)
+        .execute()
+    )
+    sb.table("campaigns").update({"total_contacts": total.count or 0}).eq("id", campaign_id).execute()
+
+    return MessageResponse(message="Contacto eliminado de la campaña")

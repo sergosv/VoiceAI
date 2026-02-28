@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { ToastProvider } from './context/ToastContext'
+import { ConfirmProvider } from './context/ConfirmContext'
 import { DashboardLayout } from './layouts/DashboardLayout'
 import { AuthLayout } from './layouts/AuthLayout'
 import { AdminRoute } from './components/AdminRoute'
@@ -31,6 +32,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
+        <ConfirmProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
               {/* Auth */}
@@ -63,6 +65,7 @@ export default function App() {
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
+        </ConfirmProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

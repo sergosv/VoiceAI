@@ -65,6 +65,17 @@ class ClientOut(BaseModel):
     whatsapp_instance_id: str | None = None
     whatsapp_api_url: str | None = None
     enabled_tools: list[str] = Field(default_factory=lambda: ["search_knowledge"])
+    # BYOK voice pipeline
+    voice_mode: str = "pipeline"
+    stt_provider: str = "deepgram"
+    llm_provider: str = "google"
+    tts_provider: str = "cartesia"
+    has_stt_api_key: bool = False
+    has_llm_api_key: bool = False
+    has_tts_api_key: bool = False
+    has_realtime_api_key: bool = False
+    realtime_voice: str = "alloy"
+    realtime_model: str = "gpt-4o-realtime-preview"
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -101,6 +112,17 @@ class ClientUpdateRequest(BaseModel):
     whatsapp_api_url: str | None = None
     whatsapp_api_key: str | None = None
     enabled_tools: list[str] | None = None
+    # BYOK voice pipeline
+    voice_mode: str | None = None
+    stt_provider: str | None = None
+    llm_provider: str | None = None
+    tts_provider: str | None = None
+    stt_api_key: str | None = None
+    llm_api_key: str | None = None
+    tts_api_key: str | None = None
+    realtime_api_key: str | None = None
+    realtime_voice: str | None = None
+    realtime_model: str | None = None
 
 
 class AssignPhoneRequest(BaseModel):
@@ -257,3 +279,18 @@ class PaginatedResponse(BaseModel):
     total: int = 0
     page: int = 1
     per_page: int = 20
+
+
+# ── Helpers ──────────────────────────────────────────
+
+def client_out_from_row(row: dict) -> ClientOut:
+    """Convierte un row de DB a ClientOut, reemplazando API keys con booleans has_*."""
+    data = dict(row)
+    # Convertir presencia de keys a booleans y eliminar las keys reales
+    data["has_stt_api_key"] = bool(data.pop("stt_api_key", None))
+    data["has_llm_api_key"] = bool(data.pop("llm_api_key", None))
+    data["has_tts_api_key"] = bool(data.pop("tts_api_key", None))
+    data["has_realtime_api_key"] = bool(data.pop("realtime_api_key", None))
+    # Eliminar google_service_account_key del output (es un JSON grande)
+    data.pop("google_service_account_key", None)
+    return ClientOut(**data)

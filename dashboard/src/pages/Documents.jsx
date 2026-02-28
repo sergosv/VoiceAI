@@ -3,6 +3,7 @@ import { Upload, Trash2, FileText } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import { useConfirm } from '../context/ConfirmContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
@@ -13,6 +14,7 @@ import { ClientSelector } from '../components/ClientSelector'
 export function Documents() {
   const { user } = useAuth()
   const toast = useToast()
+  const confirm = useConfirm()
   const [docs, setDocs] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -54,7 +56,13 @@ export function Documents() {
   }
 
   async function handleDelete(id) {
-    if (!confirm('¿Eliminar documento?')) return
+    const ok = await confirm({
+      title: 'Eliminar documento',
+      message: '¿Eliminar este documento? Se quitará de la base de conocimientos.',
+      confirmText: 'Eliminar',
+      variant: 'danger',
+    })
+    if (!ok) return
     try {
       await api.delete(`/documents/${id}`)
       setDocs(docs.filter(d => d.id !== id))

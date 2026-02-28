@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { Card } from '../components/ui/Card'
@@ -9,15 +9,17 @@ import { Table, Th, Td } from '../components/ui/Table'
 import { Modal } from '../components/ui/Modal'
 import { PageLoader } from '../components/ui/Spinner'
 import { useToast } from '../context/ToastContext'
+import { useConfirm } from '../context/ConfirmContext'
 import {
   ArrowLeft, Play, Pause, Save, Plus, Trash2, Phone,
-  CheckCircle, XCircle, Clock, AlertTriangle,
+  CheckCircle, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp,
+  User, Mail, MessageSquare, TrendingUp,
 } from 'lucide-react'
 
 const statusLabels = {
   draft: 'Borrador',
   scheduled: 'Programada',
-  running: 'En ejecución',
+  running: 'En ejecucion',
   paused: 'Pausada',
   completed: 'Completada',
 }
@@ -42,16 +44,150 @@ const callStatusLabels = {
   retry: 'Reintento',
 }
 
+// Badges de resultado del análisis IA
+const analysisResultConfig = {
+  demo_agendada: { label: 'Demo agendada', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  interesado: { label: 'Interesado', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  no_interesado: { label: 'No interesado', color: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30' },
+  no_contactar: { label: 'No contactar', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+  voicemail: { label: 'Voicemail', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+  no_answer: { label: 'Sin respuesta', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
+}
+
+const sentimentConfig = {
+  positive: { label: 'Positivo', color: 'text-green-400' },
+  neutral: { label: 'Neutral', color: 'text-zinc-400' },
+  negative: { label: 'Negativo', color: 'text-red-400' },
+}
+
+function AnalysisResultBadge({ result }) {
+  const config = analysisResultConfig[result]
+  if (!config) return <span className="text-xs text-text-muted">{result}</span>
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${config.color}`}>
+      {config.label}
+    </span>
+  )
+}
+
+function AnalysisSummaryCards({ calls }) {
+  const analyzed = calls.filter(c => c.analysis_data?.result)
+  if (analyzed.length === 0) return null
+
+  const counts = {}
+  for (const c of analyzed) {
+    const r = c.analysis_data.result
+    counts[r] = (counts[r] || 0) + 1
+  }
+
+  return (
+    <div className="flex flex-wrap gap-3 mb-4">
+      {Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([result, count]) => {
+          const config = analysisResultConfig[result]
+          if (!config) return null
+          return (
+            <div key={result} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${config.color}`}>
+              <span className="text-sm font-semibold">{count}</span>
+              <span className="text-xs">{config.label}</span>
+            </div>
+          )
+        })}
+    </div>
+  )
+}
+
+function ExpandedAnalysis({ analysis }) {
+  if (!analysis) return null
+  return (
+    <div className="px-4 py-3 bg-bg-primary/50 border-t border-border space-y-3">
+      {/* Resumen */}
+      {analysis.summary && (
+        <div>
+          <span className="text-xs text-text-muted font-medium">Resumen</span>
+          <p className="text-sm text-text-secondary mt-0.5">{analysis.summary}</p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-6">
+        {/* Sentimiento */}
+        {analysis.sentiment && (
+          <div>
+            <span className="text-xs text-text-muted font-medium">Sentimiento</span>
+            <p className={`text-sm mt-0.5 ${sentimentConfig[analysis.sentiment]?.color || 'text-text-secondary'}`}>
+              {sentimentConfig[analysis.sentiment]?.label || analysis.sentiment}
+            </p>
+          </div>
+        )}
+
+        {/* Confianza */}
+        {analysis.confidence != null && (
+          <div>
+            <span className="text-xs text-text-muted font-medium">Confianza</span>
+            <p className="text-sm text-text-secondary mt-0.5">{Math.round(analysis.confidence * 100)}%</p>
+          </div>
+        )}
+
+        {/* Contacto extraido */}
+        {(analysis.contact_name || analysis.contact_email) && (
+          <div>
+            <span className="text-xs text-text-muted font-medium">Contacto</span>
+            <div className="flex items-center gap-3 mt-0.5">
+              {analysis.contact_name && (
+                <span className="flex items-center gap-1 text-sm text-text-secondary">
+                  <User size={12} /> {analysis.contact_name}
+                </span>
+              )}
+              {analysis.contact_email && (
+                <span className="flex items-center gap-1 text-sm text-text-secondary">
+                  <Mail size={12} /> {analysis.contact_email}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Objeciones */}
+      {analysis.objections?.length > 0 && (
+        <div>
+          <span className="text-xs text-text-muted font-medium">Objeciones</span>
+          <div className="flex flex-wrap gap-1.5 mt-1">
+            {analysis.objections.map((obj, i) => (
+              <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-red-500/10 text-red-400 border border-red-500/20">
+                {obj}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Siguiente paso */}
+      {analysis.next_step && (
+        <div>
+          <span className="text-xs text-text-muted font-medium">Siguiente paso</span>
+          <p className="text-sm text-accent mt-0.5 flex items-center gap-1">
+            <TrendingUp size={12} /> {analysis.next_step}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CampaignDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const confirm = useConfirm()
   const [campaign, setCampaign] = useState(null)
   const [calls, setCalls] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showAddContacts, setShowAddContacts] = useState(false)
   const [form, setForm] = useState({})
+  const [expandedRow, setExpandedRow] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -92,7 +228,7 @@ export function CampaignDetail() {
     try {
       const updated = await api.patch(`/campaigns/${id}`, form)
       setCampaign(updated)
-      toast.success('Campaña actualizada')
+      toast.success('Campana actualizada')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -104,7 +240,7 @@ export function CampaignDetail() {
     try {
       const updated = await api.post(`/campaigns/${id}/start`)
       setCampaign(updated)
-      toast.success('Campaña iniciada')
+      toast.success('Campana iniciada')
     } catch (err) {
       toast.error(err.message)
     }
@@ -114,30 +250,59 @@ export function CampaignDetail() {
     try {
       const updated = await api.post(`/campaigns/${id}/pause`)
       setCampaign(updated)
-      toast.success('Campaña pausada')
+      toast.success('Campana pausada')
     } catch (err) {
       toast.error(err.message)
     }
   }
 
   async function handleRestart() {
-    if (!confirm('¿Reiniciar la campaña? Se resetearán todas las llamadas a pendiente.')) return
+    const ok = await confirm({
+      title: 'Relanzar campana',
+      message: 'Se resetearan todas las llamadas a pendiente. Continuar?',
+      confirmText: 'Relanzar',
+      variant: 'warning',
+    })
+    if (!ok) return
     try {
       const updated = await api.post(`/campaigns/${id}/restart`)
       setCampaign(updated)
       await loadData()
-      toast.success('Campaña reiniciada — lista para lanzar')
+      toast.success('Campana reiniciada — lista para lanzar')
     } catch (err) {
       toast.error(err.message)
     }
   }
 
   async function handleDelete() {
-    if (!confirm('¿Eliminar esta campaña y todas sus llamadas?')) return
+    const ok = await confirm({
+      title: 'Eliminar campana',
+      message: 'Se eliminara la campana y todas sus llamadas. Esta accion es irreversible.',
+      confirmText: 'Eliminar',
+      variant: 'danger',
+    })
+    if (!ok) return
     try {
       await api.delete(`/campaigns/${id}`)
-      toast.success('Campaña eliminada')
+      toast.success('Campana eliminada')
       navigate('/campaigns')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  async function handleRemoveContact(callId, phone) {
+    const ok = await confirm({
+      title: 'Eliminar contacto',
+      message: `Eliminar ${phone} de la campana?`,
+      confirmText: 'Eliminar',
+      variant: 'danger',
+    })
+    if (!ok) return
+    try {
+      await api.delete(`/campaigns/${id}/calls/${callId}`)
+      await loadData()
+      toast.success('Contacto eliminado')
     } catch (err) {
       toast.error(err.message)
     }
@@ -171,14 +336,15 @@ export function CampaignDetail() {
             </Button>
           ) : (
             <>
-              {campaign.status === 'completed' && (
+              {['paused', 'completed'].includes(campaign.status) && (
                 <Button variant="secondary" onClick={handleRestart}>
                   <Play size={16} className="mr-1" /> Relanzar
                 </Button>
               )}
               {['draft', 'paused', 'scheduled'].includes(campaign.status) && campaign.total_contacts > 0 && (
                 <Button onClick={handleStart}>
-                  <Play size={16} className="mr-1" /> Iniciar
+                  <Play size={16} className="mr-1" />
+                  {campaign.status === 'paused' ? 'Reanudar' : 'Iniciar'}
                 </Button>
               )}
             </>
@@ -212,7 +378,7 @@ export function CampaignDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Config */}
         <Card className="lg:col-span-1">
-          <h2 className="text-lg font-semibold mb-4">Configuración</h2>
+          <h2 className="text-lg font-semibold mb-4">Configuracion</h2>
           <div className="space-y-4">
             <Input
               label="Nombre"
@@ -221,7 +387,7 @@ export function CampaignDetail() {
               disabled={!editable}
             />
             <Input
-              label="Descripción"
+              label="Descripcion"
               value={form.description || ''}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
               disabled={!editable}
@@ -238,7 +404,7 @@ export function CampaignDetail() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label="Simultáneas"
+                label="Simultaneas"
                 type="number"
                 value={form.max_concurrent || 1}
                 onChange={e => setForm(f => ({ ...f, max_concurrent: parseInt(e.target.value) || 1 }))}
@@ -272,11 +438,14 @@ export function CampaignDetail() {
           </div>
           {calls.length === 0 ? (
             <p className="text-text-muted text-center py-8">
-              Sin contactos. Agrega contactos para iniciar la campaña.
+              Sin contactos. Agrega contactos para iniciar la campana.
             </p>
           ) : (
             <>
-              {/* Resumen rápido */}
+              {/* Resumen por resultado de análisis IA */}
+              <AnalysisSummaryCards calls={calls} />
+
+              {/* Resumen rápido por status */}
               <div className="flex gap-4 mb-4 text-xs">
                 <span className="text-text-muted">
                   {calls.filter(c => c.status === 'calling').length} en llamada
@@ -294,34 +463,72 @@ export function CampaignDetail() {
               <Table>
                 <thead>
                   <tr>
-                    <Th>Teléfono</Th>
+                    <Th>Telefono</Th>
                     <Th>Estado</Th>
                     <Th>Intento</Th>
                     <Th>Resultado</Th>
+                    {editable && <Th></Th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {calls.map(c => (
-                    <tr key={c.id}>
-                      <Td>
-                        <span className="font-mono text-xs">{c.phone}</span>
-                      </Td>
-                      <Td>
-                        <span className="flex items-center gap-1 text-xs">
-                          {callStatusIcons[c.status]}
-                          {callStatusLabels[c.status] || c.status}
-                        </span>
-                      </Td>
-                      <Td>
-                        <span className="text-xs">{c.attempt}</span>
-                      </Td>
-                      <Td>
-                        <span className="text-xs text-text-secondary line-clamp-2" title={c.result_summary || ''}>
-                          {c.result_summary || '—'}
-                        </span>
-                      </Td>
-                    </tr>
-                  ))}
+                  {calls.map(c => {
+                    const hasAnalysis = !!c.analysis_data?.result
+                    const isExpanded = expandedRow === c.id
+                    return (
+                      <React.Fragment key={c.id}>
+                        <tr className="group">
+                          <Td>
+                            <span className="font-mono text-xs">{c.phone}</span>
+                          </Td>
+                          <Td>
+                            <span className="flex items-center gap-1 text-xs">
+                              {callStatusIcons[c.status]}
+                              {callStatusLabels[c.status] || c.status}
+                            </span>
+                          </Td>
+                          <Td>
+                            <span className="text-xs">{c.attempt}</span>
+                          </Td>
+                          <Td>
+                            {hasAnalysis ? (
+                              <button
+                                onClick={() => setExpandedRow(isExpanded ? null : c.id)}
+                                className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+                              >
+                                <AnalysisResultBadge result={c.analysis_data.result} />
+                                {isExpanded
+                                  ? <ChevronUp size={12} className="text-text-muted" />
+                                  : <ChevronDown size={12} className="text-text-muted" />
+                                }
+                              </button>
+                            ) : (
+                              <span className="text-xs text-text-secondary line-clamp-2" title={c.result_summary || ''}>
+                                {c.result_summary || '\u2014'}
+                              </span>
+                            )}
+                          </Td>
+                          {editable && (
+                            <Td>
+                              <button
+                                onClick={() => handleRemoveContact(c.id, c.phone)}
+                                className="text-text-muted hover:text-danger transition-colors p-1"
+                                title="Eliminar contacto"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </Td>
+                          )}
+                        </tr>
+                        {isExpanded && hasAnalysis && (
+                          <tr>
+                            <td colSpan={editable ? 5 : 4} className="p-0">
+                              <ExpandedAnalysis analysis={c.analysis_data} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
                 </tbody>
               </Table>
             </>
@@ -355,7 +562,7 @@ function AddContactsModal({ campaignId, onClose, onAdded }) {
       .split(/[\n,;]+/)
       .map(p => p.trim())
       .filter(Boolean)
-    if (!phoneNumbers.length) return toast.error('Ingresa al menos un número')
+    if (!phoneNumbers.length) return toast.error('Ingresa al menos un numero')
     setSaving(true)
     try {
       await api.post(`/campaigns/${campaignId}/contacts`, { phone_numbers: phoneNumbers })
@@ -372,7 +579,7 @@ function AddContactsModal({ campaignId, onClose, onAdded }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs text-text-muted mb-1">
-            Números de teléfono (uno por línea, o separados por comas)
+            Numeros de telefono (uno por linea, o separados por comas)
           </label>
           <textarea
             value={phones}

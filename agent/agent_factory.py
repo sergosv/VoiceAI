@@ -221,8 +221,87 @@ class VoiceAgent(Agent):
         )
 
 
+def _voice_rules() -> str:
+    """Genera reglas de voz con fecha/hora actual."""
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        tz_mx = ZoneInfo("America/Mexico_City")
+    except ImportError:
+        tz_mx = timezone(timedelta(hours=-6))
+    now = datetime.now(tz_mx)
+    today = now.strftime("%A %d de %B de %Y")
+    current_time = now.strftime("%H:%M")
+    # Nombres de día/mes en español
+    day_map = {
+        "Monday": "lunes", "Tuesday": "martes", "Wednesday": "miércoles",
+        "Thursday": "jueves", "Friday": "viernes", "Saturday": "sábado", "Sunday": "domingo",
+    }
+    month_map = {
+        "January": "enero", "February": "febrero", "March": "marzo", "April": "abril",
+        "May": "mayo", "June": "junio", "July": "julio", "August": "agosto",
+        "September": "septiembre", "October": "octubre", "November": "noviembre", "December": "diciembre",
+    }
+    for eng, esp in day_map.items():
+        today = today.replace(eng, esp)
+    for eng, esp in month_map.items():
+        today = today.replace(eng, esp)
+
+    tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    return (
+        f"\n\n## Contexto temporal\n"
+        f"- Hoy es {today}. Fecha: {now.strftime('%Y-%m-%d')}. Hora actual: {current_time} (hora de México).\n"
+        f"- Mañana es {tomorrow}.\n"
+        f"\n## Reglas de voz\n"
+        "- NUNCA deletrees palabras ni nombres. Pronúncialos de forma natural y fluida.\n"
+        "- No uses siglas ni abreviaturas a menos que sean muy comunes (ej: OK, USA).\n"
+        "- Habla de forma conversacional, como si estuvieras hablando con un amigo por teléfono.\n"
+        "- Sé conciso. No des respuestas largas. Máximo 2-3 oraciones por turno.\n"
+        "- Cuando el usuario diga 'mañana', 'pasado mañana', 'el lunes', etc., calcula la fecha EXACTA "
+        f"basándote en que hoy es {now.strftime('%Y-%m-%d')}."
+    )
+
+TOOL_INSTRUCTIONS = {
+    "schedule_appointment": (
+        "Puedes AGENDAR CITAS. Cuando el usuario quiera programar, reservar o agendar una cita, "
+        "pregúntale su nombre completo, la fecha y hora que prefiere, y el motivo. "
+        "Luego usa la herramienta schedule_appointment para registrarla."
+    ),
+    "send_whatsapp": (
+        "Puedes ENVIAR MENSAJES por WhatsApp. Ofrece enviar confirmaciones, "
+        "direcciones o información importante al WhatsApp del usuario."
+    ),
+    "save_contact": (
+        "Puedes GUARDAR DATOS DE CONTACTO. Si el usuario te da su nombre, correo "
+        "o información relevante, guárdala con save_contact_info."
+    ),
+    "search_knowledge": (
+        "Tienes acceso a la BASE DE CONOCIMIENTOS del negocio. Cuando te pregunten "
+        "sobre servicios, precios, horarios o información del negocio, busca en ella."
+    ),
+}
+
+
+def _build_tool_instructions(enabled_tools: list[str]) -> str:
+    """Genera instrucciones automáticas según las herramientas habilitadas."""
+    lines = []
+    for tool_name in enabled_tools:
+        if tool_name in TOOL_INSTRUCTIONS:
+            lines.append(f"- {TOOL_INSTRUCTIONS[tool_name]}")
+    if not lines:
+        return ""
+    return "\n\n## Herramientas disponibles\n" + "\n".join(lines)
+
+
 def build_agent(config: ClientConfig) -> VoiceAgent:
     """Construye un VoiceAgent configurado para un cliente específico."""
+    # Inyectar contexto temporal + reglas de voz + instrucciones de herramientas
+    from dataclasses import replace
+    tool_instructions = _build_tool_instructions(config.enabled_tools)
+    augmented_prompt = config.system_prompt + _voice_rules() + tool_instructions
+    config = replace(config, system_prompt=augmented_prompt)
+
     agent = VoiceAgent(config)
     logger.info(
         "Agente creado para '%s' (%s) — voz: %s, tools: %s",

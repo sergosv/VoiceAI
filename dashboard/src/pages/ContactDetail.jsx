@@ -8,12 +8,14 @@ import { Badge } from '../components/ui/Badge'
 import { Table, Th, Td } from '../components/ui/Table'
 import { PageLoader } from '../components/ui/Spinner'
 import { useToast } from '../context/ToastContext'
+import { useConfirm } from '../context/ConfirmContext'
 import { ArrowLeft, Save, Phone, Mail, Clock, Trash2 } from 'lucide-react'
 
 export function ContactDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const confirm = useConfirm()
   const [contact, setContact] = useState(null)
   const [calls, setCalls] = useState([])
   const [loading, setLoading] = useState(true)
@@ -64,7 +66,13 @@ export function ContactDetail() {
   }
 
   async function handleDelete() {
-    if (!confirm('¿Eliminar este contacto?')) return
+    const ok = await confirm({
+      title: 'Eliminar contacto',
+      message: '¿Eliminar este contacto? Esta acción es irreversible.',
+      confirmText: 'Eliminar',
+      variant: 'danger',
+    })
+    if (!ok) return
     try {
       await api.delete(`/contacts/${id}`)
       toast.success('Contacto eliminado')

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Save, Trash2, UserPlus, Phone } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
+import { useConfirm } from '../../context/ConfirmContext'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { Input, Textarea, Select } from '../../components/ui/Input'
@@ -14,6 +15,7 @@ export function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const confirm = useConfirm()
   const [client, setClient] = useState(null)
   const [calls, setCalls] = useState([])
   const [voices, setVoices] = useState([])
@@ -69,7 +71,13 @@ export function ClientDetail() {
   }
 
   async function handleDelete() {
-    if (!confirm(`¿Eliminar ${client.name}? Esta acción es irreversible.`)) return
+    const ok = await confirm({
+      title: 'Eliminar cliente',
+      message: `¿Eliminar ${client.name}? Se borrarán todos sus datos, llamadas y documentos.`,
+      confirmText: 'Eliminar',
+      variant: 'danger',
+    })
+    if (!ok) return
     try {
       await api.delete(`/clients/${id}`)
       toast.success('Cliente eliminado')

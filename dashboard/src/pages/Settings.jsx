@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, ArrowRight } from 'lucide-react'
+import { Save, ArrowRight, Volume2, Zap, RefreshCw } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Input, Textarea, Select } from '../components/ui/Input'
-import { PageLoader } from '../components/ui/Spinner'
+import { PageLoader, Spinner } from '../components/ui/Spinner'
+
+const PROVIDER_LABELS = {
+  cartesia: 'Cartesia',
+  elevenlabs: 'ElevenLabs',
+  openai: 'OpenAI TTS',
+}
 
 export function Settings() {
   const { user } = useAuth()
@@ -16,27 +22,66 @@ export function Settings() {
   const [client, setClient] = useState(null)
   const [voices, setVoices] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingVoices, setLoadingVoices] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Cargar client + voces al montar
   useEffect(() => {
     if (user?.role === 'admin') return setLoading(false)
     if (!user?.client_id) return setLoading(false)
-    Promise.all([
-      api.get(`/clients/${user.client_id}`),
-      api.get('/voices'),
-    ]).then(([c, v]) => {
-      setClient(c)
-      setVoices(v)
-    }).catch(console.error)
+    api.get(`/clients/${user.client_id}`)
+      .then(c => {
+        setClient(c)
+        return loadVoicesForProvider(c)
+      })
+      .catch(console.error)
       .finally(() => setLoading(false))
   }, [user])
+
+  async function loadVoicesForProvider(c) {
+    const provider = c.tts_provider || 'cartesia'
+    const mode = c.voice_mode || 'pipeline'
+
+    if (mode === 'realtime') {
+      setVoices([]) // Realtime usa su propio selector
+      return
+    }
+
+    setLoadingVoices(true)
+    try {
+      if (provider === 'elevenlabs' || provider === 'openai') {
+        // Cargar voces del provider via API
+        const v = await api.get(`/voices/provider/${c.id}`)
+        setVoices(v)
+      } else {
+        // Cartesia: catalogo estatico
+        const v = await api.get('/voices')
+        setVoices(v)
+      }
+    } catch (err) {
+      // Si falla (ej: no hay API key), cargar catalogo default
+      console.error('Error cargando voces del provider:', err)
+      try {
+        const v = await api.get('/voices')
+        setVoices(v)
+      } catch { /* ignore */ }
+    } finally {
+      setLoadingVoices(false)
+    }
+  }
+
+  async function handleRefreshVoices() {
+    if (!client) return
+    await loadVoicesForProvider(client)
+    toast.success('Voces actualizadas')
+  }
 
   async function handleSave(e) {
     e.preventDefault()
     if (!client) return
     setSaving(true)
     try {
-      const updated = await api.patch(`/clients/${client.id}`, {
+      const payload = {
         agent_name: client.agent_name,
         greeting: client.greeting,
         system_prompt: client.system_prompt,
@@ -44,9 +89,15 @@ export function Settings() {
         max_call_duration_seconds: client.max_call_duration_seconds,
         transfer_number: client.transfer_number || null,
         after_hours_message: client.after_hours_message || null,
-      })
+      }
+      if (client.voice_mode === 'realtime') {
+        payload.realtime_voice = client.realtime_voice
+      } else {
+        payload.voice_id = client.voice_id
+      }
+      const updated = await api.patch(`/clients/${client.id}`, payload)
       setClient(updated)
-      toast.success('Configuración guardada')
+      toast.success('Configuracion guardada')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -56,14 +107,14 @@ export function Settings() {
 
   if (loading) return <PageLoader />
 
-  // Admin: redirigir a la gestión de clientes
+  // Admin: redirigir a la gestion de clientes
   if (user?.role === 'admin') {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Configuración</h1>
+        <h1 className="text-2xl font-bold">Configuracion</h1>
         <Card className="space-y-4">
           <p className="text-text-secondary">
-            Como administrador, puedes configurar cada cliente desde la sección de clientes.
+            Como administrador, puedes configurar cada cliente desde la seccion de clientes.
           </p>
           <Button onClick={() => navigate('/admin/clients')}>
             <ArrowRight size={16} className="mr-2 inline" /> Ir a Clientes
@@ -76,15 +127,19 @@ export function Settings() {
   if (!client) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Configuración</h1>
-        <Card><p className="text-text-muted">No se encontró configuración de cliente.</p></Card>
+        <h1 className="text-2xl font-bold">Configuracion</h1>
+        <Card><p className="text-text-muted">No se encontro configuracion de cliente.</p></Card>
       </div>
     )
   }
 
+  const ttsProvider = client.tts_provider || 'cartesia'
+  const isRealtime = client.voice_mode === 'realtime'
+  const providerLabel = isRealtime ? 'OpenAI Realtime' : PROVIDER_LABELS[ttsProvider] || ttsProvider
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Configuración</h1>
+      <h1 className="text-2xl font-bold">Configuracion</h1>
 
       <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="space-y-4">
@@ -99,19 +154,38 @@ export function Settings() {
             value={client.language}
             onChange={e => setClient({ ...client, language: e.target.value })}
             options={[
-              { value: 'es', label: 'Español' },
+              { value: 'es', label: 'Espanol' },
               { value: 'en', label: 'English' },
-              { value: 'es-en', label: 'Bilingüe' },
+              { value: 'es-en', label: 'Bilingue' },
             ]}
           />
+
+          {/* Selector de voz dinamico segun provider */}
+          {isRealtime ? (
+            <RealtimeVoiceSelector
+              value={client.realtime_voice || 'alloy'}
+              onChange={v => setClient({ ...client, realtime_voice: v })}
+            />
+          ) : (
+            <ProviderVoiceSelector
+              voices={voices}
+              loading={loadingVoices}
+              provider={ttsProvider}
+              language={client.language}
+              value={client.voice_id}
+              onChange={voiceId => setClient({ ...client, voice_id: voiceId })}
+              onRefresh={handleRefreshVoices}
+            />
+          )}
+
           <Input
-            label="Duración máxima (segundos)"
+            label="Duracion maxima (segundos)"
             type="number"
             value={client.max_call_duration_seconds}
             onChange={e => setClient({ ...client, max_call_duration_seconds: parseInt(e.target.value) || 300 })}
           />
           <Input
-            label="Número de transferencia"
+            label="Numero de transferencia"
             value={client.transfer_number || ''}
             onChange={e => setClient({ ...client, transfer_number: e.target.value })}
             placeholder="+52..."
@@ -145,8 +219,144 @@ export function Settings() {
             <Save size={16} className="mr-2 inline" />
             {saving ? 'Guardando...' : 'Guardar cambios'}
           </Button>
+          <span className="text-xs text-text-muted">
+            Voz: {providerLabel}
+          </span>
         </div>
       </form>
+    </div>
+  )
+}
+
+const REALTIME_VOICES = [
+  { value: 'alloy', label: 'Alloy', desc: 'Neutral, balanceada' },
+  { value: 'ash', label: 'Ash', desc: 'Clara, precisa' },
+  { value: 'ballad', label: 'Ballad', desc: 'Melodica, suave' },
+  { value: 'coral', label: 'Coral', desc: 'Calida, amigable' },
+  { value: 'echo', label: 'Echo', desc: 'Resonante, profunda' },
+  { value: 'sage', label: 'Sage', desc: 'Calmada, reflexiva' },
+  { value: 'shimmer', label: 'Shimmer', desc: 'Brillante, energetica' },
+  { value: 'verse', label: 'Verse', desc: 'Versatil, expresiva' },
+  { value: 'marin', label: 'Marin', desc: 'Nueva, alta calidad (recomendada)' },
+  { value: 'cedar', label: 'Cedar', desc: 'Nueva, alta calidad (recomendada)' },
+]
+
+function RealtimeVoiceSelector({ value, onChange }) {
+  return (
+    <div>
+      <label className="block text-xs text-text-muted mb-1">
+        <Zap size={12} className="inline mr-1" />
+        Voz OpenAI Realtime
+      </label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+      >
+        {REALTIME_VOICES.map(v => (
+          <option key={v.value} value={v.value}>
+            {v.label} — {v.desc}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-text-muted mt-1">
+        Modo OpenAI Realtime activo. Cambia el modo en Integraciones.
+      </p>
+    </div>
+  )
+}
+
+function ProviderVoiceSelector({ voices, loading, provider, language, value, onChange, onRefresh }) {
+  const filtered = useMemo(() => {
+    if (!voices?.length) return []
+    // Para ElevenLabs/OpenAI mostrar todas, para Cartesia filtrar por idioma
+    if (provider !== 'cartesia') return voices
+    if (language === 'es-en') return voices
+    return voices.filter(v => v.language === language)
+  }, [voices, language, provider])
+
+  const grouped = useMemo(() => {
+    const groups = {}
+    for (const v of filtered) {
+      let key
+      if (provider === 'cartesia') {
+        const lang = v.language === 'es' ? 'Espanol' : 'English'
+        const gender = v.gender === 'female' ? 'Mujeres' : 'Hombres'
+        key = language === 'es-en' ? `${lang} — ${gender}` : gender
+      } else {
+        // ElevenLabs/OpenAI: agrupar por genero
+        const g = v.gender || 'unknown'
+        key = g === 'female' ? 'Mujeres' : g === 'male' ? 'Hombres' : 'Voces'
+      }
+      if (!groups[key]) groups[key] = []
+      groups[key].push(v)
+    }
+    return groups
+  }, [filtered, language, provider])
+
+  const current = voices?.find(v => v.id === value)
+  const providerLabel = PROVIDER_LABELS[provider] || provider
+
+  if (loading) {
+    return (
+      <div>
+        <label className="block text-xs text-text-muted mb-1">
+          <Volume2 size={12} className="inline mr-1" />
+          Voz del agente ({providerLabel})
+        </label>
+        <div className="flex items-center gap-2 py-2 text-xs text-text-muted">
+          <Spinner size={14} /> Cargando voces de {providerLabel}...
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="block text-xs text-text-muted">
+          <Volume2 size={12} className="inline mr-1" />
+          Voz del agente ({providerLabel})
+        </label>
+        {provider !== 'cartesia' && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="text-xs text-accent hover:text-accent/80 flex items-center gap-1"
+            title="Recargar voces"
+          >
+            <RefreshCw size={12} /> Recargar
+          </button>
+        )}
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-xs text-text-muted py-2">
+          No se encontraron voces. Verifica tu API key en Integraciones.
+        </p>
+      ) : (
+        <>
+          <select
+            value={value || ''}
+            onChange={e => onChange(e.target.value)}
+            className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+          >
+            {Object.entries(grouped).map(([group, groupVoices]) => (
+              <optgroup key={group} label={group}>
+                {groupVoices.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.name} — {v.description}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {current && (
+            <p className="text-xs text-text-muted mt-1">
+              {current.name} ({current.gender === 'female' ? '♀' : current.gender === 'male' ? '♂' : '⚡'}) — {current.description}
+            </p>
+          )}
+        </>
+      )}
     </div>
   )
 }

@@ -8,6 +8,7 @@ import { Modal } from '../components/ui/Modal'
 import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
 import { useToast } from '../context/ToastContext'
+import { useConfirm } from '../context/ConfirmContext'
 import { Calendar, Plus, Clock, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const statusColors = {
@@ -49,6 +50,7 @@ export function Appointments() {
   const [statusFilter, setStatusFilter] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const toast = useToast()
+  const confirmDialog = useConfirm()
 
   const weekDates = getWeekDates(weekBase)
   const dateFrom = weekDates[0].toISOString().slice(0, 10)
@@ -87,16 +89,21 @@ export function Appointments() {
     }
   }
 
-  // Agrupar citas por día y hora
+  // Formatear fecha en zona local (YYYY-MM-DD) — consistente con getHours()
+  function toLocalDateStr(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  // Agrupar citas por día y hora (ambos en timezone local del navegador)
   function getAppointmentsForSlot(dayDate, hour) {
-    const dayStr = dayDate.toISOString().slice(0, 10)
+    const dayStr = toLocalDateStr(dayDate)
     return appointments.filter(a => {
       const start = new Date(a.start_time)
-      return start.toISOString().slice(0, 10) === dayStr && start.getHours() === hour
+      return toLocalDateStr(start) === dayStr && start.getHours() === hour
     })
   }
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = toLocalDateStr(new Date())
 
   return (
     <div className="space-y-6">
@@ -177,11 +184,15 @@ export function Appointments() {
                           key={a.id}
                           className={`text-[10px] rounded px-1.5 py-0.5 mb-0.5 cursor-pointer truncate ${statusColors[a.status] || 'bg-bg-hover text-text-secondary'}`}
                           title={`${a.title} (${statusLabels[a.status]})`}
-                          onClick={() => {
+                          onClick={async () => {
                             const next = a.status === 'confirmed' ? 'completed' : 'confirmed'
-                            if (confirm(`¿Cambiar a "${statusLabels[next]}"?`)) {
-                              handleStatusChange(a.id, next)
-                            }
+                            const ok = await confirmDialog({
+                              title: 'Cambiar estado',
+                              message: `¿Cambiar cita a "${statusLabels[next]}"?`,
+                              confirmText: 'Cambiar',
+                              variant: 'info',
+                            })
+                            if (ok) handleStatusChange(a.id, next)
                           }}
                         >
                           <span className="font-medium">{new Date(a.start_time).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</span>{' '}
@@ -264,8 +275,16 @@ function CreateAppointmentModal({ onClose, onCreated }) {
     if (!form.title || !form.date) return toast.error('Título y fecha requeridos')
     setSaving(true)
     try {
-      const start_time = `${form.date}T${form.startTime}:00`
-      const end_time = `${form.date}T${form.endTime}:00`
+      // Crear Date en zona local del navegador para obtener offset correcto
+      const startLocal = new Date(`${form.date}T${form.startTime}`)
+      const endLocal = new Date(`${form.date}T${form.endTime}`)
+      const tzOffset = -startLocal.getTimezoneOffset()
+      const tzSign = tzOffset >= 0 ? '+' : '-'
+      const tzH = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0')
+      const tzM = String(Math.abs(tzOffset) % 60).padStart(2, '0')
+      const tz = `${tzSign}${tzH}:${tzM}`
+      const start_time = `${form.date}T${form.startTime}:00${tz}`
+      const end_time = `${form.date}T${form.endTime}:00${tz}`
       const created = await api.post('/appointments', {
         title: form.title,
         description: form.description || null,
