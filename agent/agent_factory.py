@@ -221,8 +221,8 @@ class VoiceAgent(Agent):
         )
 
 
-def _voice_rules() -> str:
-    """Genera reglas de voz con fecha/hora actual."""
+def _voice_rules(config: ClientConfig) -> str:
+    """Genera reglas de voz con fecha/hora actual y datos del agente."""
     from datetime import datetime, timezone, timedelta
     try:
         from zoneinfo import ZoneInfo
@@ -232,7 +232,6 @@ def _voice_rules() -> str:
     now = datetime.now(tz_mx)
     today = now.strftime("%A %d de %B de %Y")
     current_time = now.strftime("%H:%M")
-    # Nombres de día/mes en español
     day_map = {
         "Monday": "lunes", "Tuesday": "martes", "Wednesday": "miércoles",
         "Thursday": "jueves", "Friday": "viernes", "Saturday": "sábado", "Sunday": "domingo",
@@ -249,17 +248,28 @@ def _voice_rules() -> str:
 
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
+    agent_name = config.agent_name
+    business_name = config.name
+
     return (
         f"\n\n## Contexto temporal\n"
         f"- Hoy es {today}. Fecha: {now.strftime('%Y-%m-%d')}. Hora actual: {current_time} (hora de México).\n"
         f"- Mañana es {tomorrow}.\n"
-        f"\n## Reglas de voz\n"
-        "- NUNCA deletrees palabras ni nombres. Pronúncialos de forma natural y fluida.\n"
-        "- No uses siglas ni abreviaturas a menos que sean muy comunes (ej: OK, USA).\n"
-        "- Habla de forma conversacional, como si estuvieras hablando con un amigo por teléfono.\n"
-        "- Sé conciso. No des respuestas largas. Máximo 2-3 oraciones por turno.\n"
-        "- Cuando el usuario diga 'mañana', 'pasado mañana', 'el lunes', etc., calcula la fecha EXACTA "
-        f"basándote en que hoy es {now.strftime('%Y-%m-%d')}."
+        f"- Cuando el usuario diga 'mañana', 'pasado mañana', 'el lunes', etc., calcula la fecha EXACTA "
+        f"basándote en que hoy es {now.strftime('%Y-%m-%d')}.\n"
+        f"\n## Reglas de voz (OBLIGATORIAS)\n"
+        "- Máximo 2 frases por respuesta. Si necesitas decir más, pausa y pregunta si quieren que continúes.\n"
+        "- Siempre termina con pregunta o siguiente paso. Nunca dejes silencio abierto.\n"
+        '- Usa muletillas naturales al inicio: "Mire...", "Claro que sí...", "Ah ok...", "Perfecto...", "Fíjese que..."\n'
+        "- Si te interrumpen, cede la palabra inmediatamente.\n"
+        '- Confirma datos repitiendo: "Su nombre es Juan Pérez, ¿verdad?"\n'
+        "- Números de teléfono: repite dígito por dígito.\n"
+        '- Fechas: incluye el día de la semana. "El lunes 3 de marzo".\n'
+        "- Despedida siempre con resumen de lo acordado.\n"
+        "- NUNCA digas que eres inteligencia artificial, asistente virtual ni robot.\n"
+        f'- Si preguntan si eres robot, di que eres {agent_name} de {business_name}.\n'
+        "- NUNCA deletrees palabras ni nombres.\n"
+        "- No uses siglas ni abreviaturas.\n"
     )
 
 TOOL_INSTRUCTIONS = {
@@ -299,7 +309,10 @@ def build_agent(config: ClientConfig) -> VoiceAgent:
     # Inyectar contexto temporal + reglas de voz + instrucciones de herramientas
     from dataclasses import replace
     tool_instructions = _build_tool_instructions(config.enabled_tools)
-    augmented_prompt = config.system_prompt + _voice_rules() + tool_instructions
+    augmented_prompt = config.system_prompt + _voice_rules(config) + tool_instructions
+    # Agregar ejemplos de conversación si existen
+    if config.conversation_examples:
+        augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.conversation_examples}"
     config = replace(config, system_prompt=augmented_prompt)
 
     agent = VoiceAgent(config)

@@ -12,6 +12,7 @@ from api.schemas import (
     ContactUpdateRequest,
     MessageResponse,
 )
+from agent.phone_utils import normalize_phone
 
 router = APIRouter()
 
@@ -81,14 +82,31 @@ async def create_contact(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="client_id requerido")
 
     sb = get_supabase()
+    normalized = normalize_phone(req.phone)
+
+    # Check de duplicado
+    existing = (
+        sb.table("contacts").select("id")
+        .eq("client_id", effective_client_id)
+        .eq("phone", normalized)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya existe un contacto con ese teléfono",
+        )
+
     data = {
         "client_id": effective_client_id,
-        "phone": req.phone,
+        "phone": normalized,
         "name": req.name,
         "email": req.email,
         "notes": req.notes,
         "tags": req.tags,
         "source": "manual",
+        "call_count": 0,
     }
     result = sb.table("contacts").insert(data).execute()
     if not result.data:
@@ -148,7 +166,6 @@ async def get_contact_calls(
     """Historial de llamadas de un contacto (por número de teléfono)."""
     sb = get_supabase()
 
-    # Obtener contacto
     contact = sb.table("contacts").select("phone, client_id").eq("id", contact_id).limit(1).execute()
     if not contact.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
@@ -157,10 +174,12 @@ async def get_contact_calls(
     if user.role == "client" and row.get("client_id") != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
-    # Buscar llamadas por teléfono del contacto
     calls = (
         sb.table("calls")
-        .select("id, direction, caller_number, callee_number, duration_seconds, cost_total, status, summary, started_at")
+        .select(
+            "id, direction, caller_number, callee_number, duration_seconds, "
+            "cost_total, status, summary, started_at, sentimiento, resumen_ia, lead_score"
+        )
         .eq("client_id", row["client_id"])
         .or_(f"caller_number.eq.{row['phone']},callee_number.eq.{row['phone']}")
         .order("started_at", desc=True)
@@ -168,3 +187,97 @@ async def get_contact_calls(
         .execute()
     )
     return calls.data
+
+
+@router.get("/{contact_id}/timeline")
+async def get_contact_timeline(
+    contact_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Timeline unificado del contacto: llamadas, citas, campañas."""
+    sb = get_supabase()
+
+    contact = sb.table("contacts").select("phone, client_id").eq("id", contact_id).limit(1).execute()
+    if not contact.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+
+    row = contact.data[0]
+    if user.role == "client" and row.get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    phone = row["phone"]
+    cid = row["client_id"]
+
+    # Llamadas con análisis
+    calls = (
+        sb.table("calls")
+        .select(
+            "id, direction, caller_number, callee_number, duration_seconds, "
+            "cost_total, status, summary, started_at, sentimiento, resumen_ia, lead_score, intencion"
+        )
+        .eq("client_id", cid)
+        .or_(f"caller_number.eq.{phone},callee_number.eq.{phone}")
+        .order("started_at", desc=True)
+        .limit(50)
+        .execute()
+    )
+
+    # Citas del contacto
+    appointments = (
+        sb.table("appointments")
+        .select("id, title, description, start_time, end_time, status, created_at")
+        .eq("contact_id", contact_id)
+        .order("start_time", desc=True)
+        .limit(50)
+        .execute()
+    )
+
+    # Campaign calls por teléfono
+    campaign_calls_raw = (
+        sb.table("campaign_calls")
+        .select("id, campaign_id, phone, status, result_summary, analysis_data, created_at")
+        .eq("phone", phone)
+        .order("created_at", desc=True)
+        .limit(50)
+        .execute()
+    )
+
+    # Enriquecer campaign_calls con nombre de campaña
+    campaign_calls = campaign_calls_raw.data or []
+    campaign_ids = list({cc["campaign_id"] for cc in campaign_calls if cc.get("campaign_id")})
+    campaign_names: dict[str, str] = {}
+    if campaign_ids:
+        campaigns = (
+            sb.table("campaigns")
+            .select("id, name")
+            .in_("id", campaign_ids)
+            .execute()
+        )
+        campaign_names = {c["id"]: c["name"] for c in (campaigns.data or [])}
+    for cc in campaign_calls:
+        cc["campaign_name"] = campaign_names.get(cc.get("campaign_id", ""), "")
+
+    # Summary
+    total_calls = len(calls.data or [])
+    total_appointments = len(appointments.data or [])
+    last_contact_date = None
+    if calls.data:
+        last_contact_date = calls.data[0].get("started_at")
+
+    next_appointment = None
+    for apt in reversed(appointments.data or []):
+        if apt.get("status") in ("confirmed", "pending"):
+            next_appointment = apt.get("start_time")
+            break
+
+    return {
+        "calls": calls.data or [],
+        "appointments": appointments.data or [],
+        "campaign_calls": campaign_calls,
+        "summary": {
+            "total_calls": total_calls,
+            "total_appointments": total_appointments,
+            "last_contact_date": last_contact_date,
+            "next_appointment": next_appointment,
+        },
+    }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -9,8 +10,9 @@ from decimal import Decimal
 
 from supabase import create_client, Client
 
-from agent.call_analyzer import analyze_call_transcript
+from agent.call_analyzer import analyze_call_transcript, analyze_call_universal
 from agent.config_loader import ClientConfig
+from agent.phone_utils import normalize_phone
 
 logger = logging.getLogger(__name__)
 
@@ -182,24 +184,31 @@ class SessionHandler:
             except Exception:
                 logger.exception("Error actualizando campaign_call")
 
-        # Auto-capturar contacto del llamante
+        # Auto-capturar contacto con deduplicación inteligente
         phone_for_contact = self._caller_number
         if self._direction == "outbound" and self._callee_number:
             phone_for_contact = self._callee_number
         if phone_for_contact:
             try:
-                contact_data = {
-                    "client_id": self._config.id,
-                    "phone": phone_for_contact,
-                    "source": self._direction + "_call",
-                    "metadata": {"last_call_id": call_id} if call_id else {},
-                }
-                sb.table("contacts").upsert(
-                    contact_data, on_conflict="client_id,phone"
-                ).execute()
-                logger.info("Contacto auto-capturado: %s", phone_for_contact)
+                _smart_upsert_contact(
+                    sb, self._config.id, phone_for_contact,
+                    self._direction + "_call", call_id,
+                )
             except Exception:
                 logger.exception("Error auto-capturando contacto")
+
+        # Lanzar análisis universal IA como task async para TODAS las llamadas
+        if call_id and len(self._transcript) >= 2:
+            asyncio.create_task(
+                _async_universal_analysis(
+                    call_id=call_id,
+                    transcript=list(self._transcript),
+                    direction=self._direction,
+                    client_id=self._config.id,
+                    business_type=self._config.business_type,
+                    phone_for_contact=phone_for_contact,
+                )
+            )
 
         # Actualizar usage_daily (upsert)
         today = self._started_at.date().isoformat()
@@ -237,6 +246,56 @@ class SessionHandler:
             }).execute()
 
 
+def _smart_upsert_contact(
+    sb: Client,
+    client_id: str,
+    phone: str,
+    source: str,
+    call_id: str | None,
+) -> None:
+    """Upsert inteligente de contacto con normalización y deduplicación."""
+    normalized = normalize_phone(phone)
+
+    # Buscar contacto existente por teléfono normalizado
+    result = (
+        sb.table("contacts").select("*")
+        .eq("client_id", client_id)
+        .eq("phone", normalized)
+        .limit(1)
+        .execute()
+    )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if result.data:
+        # Contacto existente: incrementar call_count, actualizar last_call_at
+        contact = result.data[0]
+        updates: dict = {
+            "call_count": (contact.get("call_count") or 0) + 1,
+            "last_call_at": now_iso,
+        }
+        # Merge metadata con last_call_id
+        metadata = contact.get("metadata") or {}
+        if call_id:
+            metadata["last_call_id"] = call_id
+        updates["metadata"] = metadata
+
+        sb.table("contacts").update(updates).eq("id", contact["id"]).execute()
+        logger.info("Contacto actualizado (call_count +1): %s", normalized)
+    else:
+        # Nuevo contacto
+        contact_data = {
+            "client_id": client_id,
+            "phone": normalized,
+            "source": source,
+            "call_count": 1,
+            "last_call_at": now_iso,
+            "metadata": {"last_call_id": call_id} if call_id else {},
+        }
+        sb.table("contacts").insert(contact_data).execute()
+        logger.info("Contacto nuevo creado: %s", normalized)
+
+
 def _enrich_contact(
     sb: Client,
     client_id: str,
@@ -246,14 +305,15 @@ def _enrich_contact(
 ) -> None:
     """Enriquece el contacto con datos extraídos del análisis de la llamada."""
     try:
-        # Buscar contacto por ID o por teléfono
+        normalized = normalize_phone(phone)
+        # Buscar contacto por ID o por teléfono normalizado
         if contact_id:
             result = sb.table("contacts").select("*").eq("id", contact_id).limit(1).execute()
         else:
             result = (
                 sb.table("contacts").select("*")
                 .eq("client_id", client_id)
-                .eq("phone", phone)
+                .eq("phone", normalized)
                 .limit(1)
                 .execute()
             )
@@ -273,12 +333,25 @@ def _enrich_contact(
         if extracted_email and not contact.get("email"):
             updates["email"] = extracted_email
 
+        # lead_score solo sube, nunca baja
+        new_lead = analysis.get("calificacion_lead")
+        if new_lead and new_lead > (contact.get("lead_score") or 0):
+            updates["lead_score"] = new_lead
+
+        # Merge tags (union)
+        existing_tags = contact.get("tags") or []
+        new_tags = analysis.get("tags") or []
+        if new_tags:
+            merged = list(set(existing_tags) | set(new_tags))
+            if merged != existing_tags:
+                updates["tags"] = merged
+
         # Siempre actualizar metadata con el último análisis
         metadata = contact.get("metadata") or {}
         metadata["last_analysis"] = {
             "result": analysis.get("result"),
-            "summary": analysis.get("summary"),
-            "sentiment": analysis.get("sentiment"),
+            "summary": analysis.get("summary") or analysis.get("resumen"),
+            "sentiment": analysis.get("sentiment") or analysis.get("sentimiento"),
         }
         updates["metadata"] = metadata
 
@@ -287,6 +360,42 @@ def _enrich_contact(
             logger.info("Contacto enriquecido: %s", phone)
     except Exception:
         logger.exception("Error enriqueciendo contacto %s", phone)
+
+
+async def _async_universal_analysis(
+    call_id: str,
+    transcript: list[dict],
+    direction: str,
+    client_id: str,
+    business_type: str | None,
+    phone_for_contact: str | None,
+) -> None:
+    """Ejecuta análisis universal IA de forma async y actualiza la DB."""
+    try:
+        analysis = await analyze_call_universal(transcript, direction, business_type)
+        if not analysis:
+            return
+
+        sb = _get_supabase()
+
+        # Actualizar la llamada con las columnas de análisis
+        call_updates = {
+            "sentimiento": analysis.get("sentimiento"),
+            "intencion": analysis.get("intencion_detectada"),
+            "lead_score": analysis.get("calificacion_lead"),
+            "siguiente_accion": analysis.get("siguiente_accion"),
+            "resumen_ia": analysis.get("resumen"),
+            "preguntas_sin_respuesta": analysis.get("preguntas_sin_respuesta"),
+        }
+        sb.table("calls").update(call_updates).eq("id", call_id).execute()
+        logger.info("Análisis universal guardado para call %s", call_id)
+
+        # Enriquecer contacto con datos del análisis universal
+        if phone_for_contact:
+            _enrich_contact(sb, client_id, phone_for_contact, None, analysis)
+
+    except Exception:
+        logger.exception("Error en análisis universal async para call %s", call_id)
 
 
 def _update_campaign_counters(sb: Client, campaign_id: str) -> None:

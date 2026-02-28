@@ -15,6 +15,7 @@ from api.schemas import (
     ClientOut,
     ClientUpdateRequest,
     MessageResponse,
+    PromptTemplateOut,
     client_out_from_row,
 )
 from api.services.phone_service import (
@@ -31,6 +32,59 @@ from api.services.client_service import (
 )
 
 router = APIRouter()
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "config", "prompts", "templates")
+
+
+def _parse_template_name(content: str) -> str:
+    """Extrae el nombre del template del header."""
+    for line in content.splitlines():
+        if line.startswith("# TEMPLATE:"):
+            return line.split(":", 1)[1].strip()
+    return "Sin nombre"
+
+
+@router.get("/templates", response_model=list[PromptTemplateOut])
+async def list_templates(
+    user: CurrentUser = Depends(get_current_user),
+) -> list[PromptTemplateOut]:
+    """Lista templates de prompts disponibles por industria."""
+    templates = []
+    tpl_dir = os.path.normpath(TEMPLATES_DIR)
+    if not os.path.isdir(tpl_dir):
+        return []
+    for filename in sorted(os.listdir(tpl_dir)):
+        if not filename.endswith(".txt"):
+            continue
+        key = filename.replace(".txt", "")
+        filepath = os.path.join(tpl_dir, filename)
+        with open(filepath, encoding="utf-8") as f:
+            content = f.read()
+        name = _parse_template_name(content)
+        templates.append(PromptTemplateOut(key=key, name=name, content=content))
+    return templates
+
+
+@router.get("/templates/{key}", response_model=PromptTemplateOut)
+async def get_template(
+    key: str,
+    agent_name: str = "María",
+    business_name: str = "Mi Negocio",
+    user: CurrentUser = Depends(get_current_user),
+) -> PromptTemplateOut:
+    """Devuelve un template con variables sustituidas."""
+    tpl_dir = os.path.normpath(TEMPLATES_DIR)
+    filepath = os.path.join(tpl_dir, f"{key}.txt")
+    if not os.path.isfile(filepath):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template no encontrado")
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
+    name = _parse_template_name(content)
+    # Sustituir variables
+    content = content.replace("{agent_name}", agent_name)
+    content = content.replace("{business_name}", business_name)
+    content = content.replace("{language}", "es")
+    return PromptTemplateOut(key=key, name=name, content=content)
 
 
 @router.get("", response_model=list[ClientOut])
@@ -125,7 +179,8 @@ async def update_client(
 
     # Campos que un client puede editar
     client_editable = {
-        "greeting", "system_prompt", "agent_name", "language", "voice_id",
+        "greeting", "system_prompt", "conversation_examples",
+        "agent_name", "language", "voice_id",
         "max_call_duration_seconds", "transfer_number", "business_hours",
         "after_hours_message",
         "google_calendar_id", "whatsapp_instance_id", "whatsapp_api_url",

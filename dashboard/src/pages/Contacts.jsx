@@ -10,7 +10,7 @@ import { Modal } from '../components/ui/Modal'
 import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
 import { useToast } from '../context/ToastContext'
-import { UserPlus, Search, Phone, Mail } from 'lucide-react'
+import { UserPlus, Search, Phone, Mail, PhoneCall, Clock } from 'lucide-react'
 
 const sourceLabels = {
   inbound_call: 'Llamada entrante',
@@ -82,8 +82,9 @@ export function Contacts() {
                 <Th>Nombre</Th>
                 <Th>Teléfono</Th>
                 <Th>Email</Th>
+                <Th>Llamadas</Th>
+                <Th>Último contacto</Th>
                 <Th>Fuente</Th>
-                <Th>Fecha</Th>
               </tr>
             </thead>
             <tbody>
@@ -120,14 +121,21 @@ export function Contacts() {
                     )}
                   </Td>
                   <Td>
+                    <span className="flex items-center gap-1 text-xs font-mono">
+                      <PhoneCall size={12} className="text-text-muted" />
+                      {c.call_count || 0}
+                    </span>
+                  </Td>
+                  <Td>
+                    <span className="flex items-center gap-1 text-xs text-text-muted">
+                      <Clock size={12} />
+                      {c.last_call_at ? new Date(c.last_call_at).toLocaleDateString('es-MX') : '—'}
+                    </span>
+                  </Td>
+                  <Td>
                     <Badge variant={c.source === 'manual' ? 'client' : 'inbound'}>
                       {sourceLabels[c.source] || c.source}
                     </Badge>
-                  </Td>
-                  <Td>
-                    <span className="text-xs text-text-muted">
-                      {c.created_at ? new Date(c.created_at).toLocaleDateString('es-MX') : '—'}
-                    </span>
                   </Td>
                 </tr>
               ))}
@@ -175,7 +183,11 @@ function CreateContactModal({ onClose, onCreated }) {
       const created = await api.post('/contacts', form)
       onCreated(created)
     } catch (err) {
-      toast.error(err.message)
+      if (err.message?.includes('409') || err.message?.includes('Ya existe')) {
+        toast.error('Ya existe un contacto con ese teléfono')
+      } else {
+        toast.error(err.message)
+      }
     } finally {
       setSaving(false)
     }

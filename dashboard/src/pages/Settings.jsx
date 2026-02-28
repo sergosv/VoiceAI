@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, ArrowRight, Volume2, Zap, RefreshCw } from 'lucide-react'
+import { Save, ArrowRight, Volume2, Zap, RefreshCw, Eye, FileText } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
+import { Modal } from '../components/ui/Modal'
 import { Input, Textarea, Select } from '../components/ui/Input'
 import { PageLoader, Spinner } from '../components/ui/Spinner'
 
@@ -21,17 +22,23 @@ export function Settings() {
   const navigate = useNavigate()
   const [client, setClient] = useState(null)
   const [voices, setVoices] = useState([])
+  const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingVoices, setLoadingVoices] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
 
   // Cargar client + voces al montar
   useEffect(() => {
     if (user?.role === 'admin') return setLoading(false)
     if (!user?.client_id) return setLoading(false)
-    api.get(`/clients/${user.client_id}`)
-      .then(c => {
+    Promise.all([
+      api.get(`/clients/${user.client_id}`),
+      api.get('/clients/templates').catch(() => []),
+    ])
+      .then(([c, tpls]) => {
         setClient(c)
+        setTemplates(tpls)
         return loadVoicesForProvider(c)
       })
       .catch(console.error)
@@ -85,6 +92,7 @@ export function Settings() {
         agent_name: client.agent_name,
         greeting: client.greeting,
         system_prompt: client.system_prompt,
+        conversation_examples: client.conversation_examples || null,
         language: client.language,
         max_call_duration_seconds: client.max_call_duration_seconds,
         transfer_number: client.transfer_number || null,
@@ -194,6 +202,38 @@ export function Settings() {
 
         <Card className="space-y-4">
           <h2 className="text-sm font-semibold text-text-secondary">Mensajes</h2>
+
+          {/* Selector de plantilla de industria */}
+          {templates.length > 0 && (
+            <div>
+              <label className="block text-xs text-text-muted mb-1">
+                <FileText size={12} className="inline mr-1" />
+                Plantilla de industria
+              </label>
+              <select
+                value=""
+                onChange={async (e) => {
+                  if (!e.target.value) return
+                  try {
+                    const tpl = await api.get(
+                      `/clients/templates/${e.target.value}?agent_name=${encodeURIComponent(client.agent_name)}&business_name=${encodeURIComponent(client.name)}`
+                    )
+                    setClient({ ...client, system_prompt: tpl.content })
+                    toast.success('Plantilla aplicada. Puedes editarla.')
+                  } catch (err) {
+                    toast.error(err.message)
+                  }
+                }}
+                className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+              >
+                <option value="">Seleccionar plantilla...</option>
+                {templates.map(t => (
+                  <option key={t.key} value={t.key}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <Textarea
             label="Saludo"
             value={client.greeting}
@@ -207,11 +247,21 @@ export function Settings() {
             rows={8}
           />
           <Textarea
+            label="Ejemplos de conversacion (few-shot)"
+            value={client.conversation_examples || ''}
+            onChange={e => setClient({ ...client, conversation_examples: e.target.value })}
+            rows={4}
+            placeholder="Paciente: ¿Cuánto cuesta una limpieza?&#10;Agente: Mire, la limpieza dental tiene un costo de $800..."
+          />
+          <Textarea
             label="Mensaje fuera de horario"
             value={client.after_hours_message || ''}
             onChange={e => setClient({ ...client, after_hours_message: e.target.value })}
             rows={2}
           />
+          <Button variant="secondary" type="button" onClick={() => setShowPreview(true)}>
+            <Eye size={14} className="mr-1 inline" /> Vista previa del prompt
+          </Button>
         </Card>
 
         <div className="lg:col-span-2 flex items-center gap-3">
@@ -224,6 +274,27 @@ export function Settings() {
           </span>
         </div>
       </form>
+
+      {/* Modal de vista previa del prompt compilado */}
+      {showPreview && (
+        <Modal open={true} title="Vista previa del prompt" onClose={() => setShowPreview(false)}>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+            <div>
+              <h3 className="text-xs font-semibold text-text-muted mb-1">System Prompt</h3>
+              <pre className="text-xs bg-bg-hover/50 rounded-lg p-3 whitespace-pre-wrap">{client.system_prompt}</pre>
+            </div>
+            {client.conversation_examples && (
+              <div>
+                <h3 className="text-xs font-semibold text-text-muted mb-1">Ejemplos de conversacion</h3>
+                <pre className="text-xs bg-bg-hover/50 rounded-lg p-3 whitespace-pre-wrap">{client.conversation_examples}</pre>
+              </div>
+            )}
+            <p className="text-[10px] text-text-muted">
+              * Las reglas de voz y herramientas se agregan automaticamente al prompt en tiempo de ejecucion.
+            </p>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

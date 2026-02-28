@@ -58,6 +58,7 @@ class ClientOut(BaseModel):
     transfer_number: str | None = None
     business_hours: dict | None = None
     after_hours_message: str | None = None
+    conversation_examples: str | None = None
     is_active: bool = True
     owner_email: str | None = None
     monthly_minutes_limit: int = 500
@@ -100,6 +101,7 @@ class ClientUpdateRequest(BaseModel):
     voice_id: str | None = None
     greeting: str | None = None
     system_prompt: str | None = None
+    conversation_examples: str | None = None
     max_call_duration_seconds: int | None = None
     transfer_number: str | None = None
     business_hours: dict | None = None
@@ -130,6 +132,12 @@ class AssignPhoneRequest(BaseModel):
     skip_livekit: bool = False
 
 
+class PromptTemplateOut(BaseModel):
+    key: str
+    name: str
+    content: str
+
+
 # ── Calls ─────────────────────────────────────────────
 
 class CallOut(BaseModel):
@@ -142,6 +150,8 @@ class CallOut(BaseModel):
     cost_total: Decimal = Decimal("0")
     status: str = "completed"
     summary: str | None = None
+    sentimiento: str | None = None
+    resumen_ia: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
 
@@ -156,6 +166,10 @@ class CallDetailOut(CallOut):
     cost_telephony: Decimal = Decimal("0")
     transcript: list[dict] | None = None
     metadata: dict = Field(default_factory=dict)
+    intencion: str | None = None
+    lead_score: int | None = None
+    siguiente_accion: str | None = None
+    preguntas_sin_respuesta: list[str] | None = None
 
 
 class CallStatsOut(BaseModel):
@@ -216,6 +230,9 @@ class ContactOut(BaseModel):
     source: str = "inbound_call"
     notes: str | None = None
     tags: list[str] = Field(default_factory=list)
+    call_count: int = 0
+    last_call_at: datetime | None = None
+    lead_score: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

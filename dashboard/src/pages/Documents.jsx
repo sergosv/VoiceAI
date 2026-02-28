@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Upload, Trash2, FileText } from 'lucide-react'
+import { Upload, Trash2, FileText, DollarSign, HelpCircle, Building, Shield, Users, MapPin, BookOpen, ChevronDown } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -10,6 +10,81 @@ import { Badge } from '../components/ui/Badge'
 import { Table, Th, Td } from '../components/ui/Table'
 import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
+
+const KB_CATEGORIES = [
+  {
+    icon: DollarSign,
+    title: 'Servicios y precios',
+    desc: 'Lista tus servicios con precios, duración y descripción clara.',
+    example: 'Limpieza dental — $800 MXN, duración 45 min, incluye revisión general',
+  },
+  {
+    icon: HelpCircle,
+    title: 'Preguntas frecuentes',
+    desc: 'Las preguntas que más hacen tus clientes y sus respuestas.',
+    example: '¿Aceptan tarjeta? Sí, Visa y Mastercard. También meses sin intereses.',
+  },
+  {
+    icon: Building,
+    title: 'Información del negocio',
+    desc: 'Dirección, horarios, formas de contacto y estacionamiento.',
+    example: 'Calle 60 #500, Col. Centro, Mérida. Lunes a viernes 9-18h. Sábados 9-14h.',
+  },
+  {
+    icon: Shield,
+    title: 'Políticas',
+    desc: 'Cancelaciones, garantías, devoluciones y condiciones.',
+    example: 'Cancelaciones con 24h de anticipación sin cargo. Reagendamos sin costo.',
+  },
+  {
+    icon: Users,
+    title: 'Equipo',
+    desc: 'Información sobre doctores, especialistas o personal clave.',
+    example: 'Dr. García — Ortodoncia, 15 años de experiencia. Atiende L-M-V.',
+  },
+  {
+    icon: MapPin,
+    title: 'Contexto local',
+    desc: 'Referencias de ubicación y datos que un local conocería.',
+    example: 'Frente al parque de Santiago, a 2 cuadras del mercado Lucas de Gálvez.',
+  },
+]
+
+function KnowledgeBaseGuide({ docCount }) {
+  const [open, setOpen] = useState(docCount === 0)
+
+  return (
+    <Card className="border-accent/20">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between text-left cursor-pointer"
+      >
+        <div className="flex items-center gap-2">
+          <BookOpen size={18} className="text-accent" />
+          <span className="font-semibold text-sm">¿Qué documentos subir a la base de conocimientos?</span>
+        </div>
+        <ChevronDown size={16} className={`text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {KB_CATEGORIES.map(cat => (
+            <div key={cat.title} className="border border-border rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <cat.icon size={16} className="text-accent" />
+                <span className="text-sm font-medium">{cat.title}</span>
+              </div>
+              <p className="text-xs text-text-secondary">{cat.desc}</p>
+              <p className="text-xs text-text-muted italic bg-bg-hover/50 rounded px-2 py-1">
+                Ej: "{cat.example}"
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
 
 export function Documents() {
   const { user } = useAuth()
@@ -93,6 +168,8 @@ export function Documents() {
       {user?.role === 'admin' && !clientId && (
         <p className="text-sm text-text-muted">Selecciona un cliente para subir documentos.</p>
       )}
+
+      <KnowledgeBaseGuide docCount={docs.length} />
 
       <Card>
         {loading ? <PageLoader /> : docs.length === 0 ? (

@@ -1,12 +1,35 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp } from 'lucide-react'
 import { api } from '../lib/api'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { TranscriptViewer } from '../components/TranscriptViewer'
 import { PageLoader } from '../components/ui/Spinner'
+
+const SENTIMIENTO_COLORS = {
+  positivo: 'bg-green-500/20 text-green-400',
+  neutral: 'bg-yellow-500/20 text-yellow-400',
+  negativo: 'bg-red-500/20 text-red-400',
+}
+
+const INTENCION_LABELS = {
+  agendar_cita: 'Agendar cita',
+  consulta_info: 'Consulta info',
+  queja: 'Queja',
+  cancelar: 'Cancelar',
+  cotizacion: 'Cotización',
+  seguimiento: 'Seguimiento',
+  otro: 'Otro',
+}
+
+const ACCION_LABELS = {
+  seguimiento: 'Seguimiento',
+  enviar_info: 'Enviar info',
+  agendar_cita: 'Agendar cita',
+  ninguna: 'Ninguna',
+}
 
 export function CallDetail() {
   const { id } = useParams()
@@ -80,6 +103,67 @@ export function CallDetail() {
             </>
           )}
         </Card>
+
+        {/* Sección Análisis IA */}
+        {call.sentimiento && (
+          <Card className="lg:col-span-2 space-y-4">
+            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+              <Brain size={16} className="text-accent" /> Análisis IA
+            </h2>
+
+            {/* Badges */}
+            <div className="flex flex-wrap gap-2">
+              <span className={`px-2 py-1 rounded text-xs font-medium ${SENTIMIENTO_COLORS[call.sentimiento] || 'bg-bg-hover text-text-secondary'}`}>
+                {call.sentimiento}
+              </span>
+              {call.intencion && (
+                <span className="px-2 py-1 rounded text-xs font-medium bg-accent/15 text-accent">
+                  <Target size={12} className="inline mr-1" />
+                  {INTENCION_LABELS[call.intencion] || call.intencion}
+                </span>
+              )}
+              {call.lead_score != null && (
+                <span className="px-2 py-1 rounded text-xs font-medium bg-purple-500/15 text-purple-400">
+                  <TrendingUp size={12} className="inline mr-1" />
+                  Lead: {call.lead_score}/100
+                </span>
+              )}
+            </div>
+
+            {/* Resumen IA */}
+            {call.resumen_ia && (
+              <div>
+                <h3 className="text-xs text-text-muted mb-1">Resumen</h3>
+                <p className="text-sm text-text-secondary">{call.resumen_ia}</p>
+              </div>
+            )}
+
+            {/* Siguiente acción */}
+            {call.siguiente_accion && call.siguiente_accion !== 'ninguna' && (
+              <div>
+                <h3 className="text-xs text-text-muted mb-1">Siguiente acción</h3>
+                <p className="text-sm text-accent">{ACCION_LABELS[call.siguiente_accion] || call.siguiente_accion}</p>
+              </div>
+            )}
+
+            {/* Preguntas sin respuesta */}
+            {call.preguntas_sin_respuesta?.length > 0 && (
+              <div>
+                <h3 className="text-xs text-text-muted mb-1 flex items-center gap-1">
+                  <AlertCircle size={12} className="text-yellow-400" /> Preguntas sin respuesta
+                </h3>
+                <ul className="space-y-1">
+                  {call.preguntas_sin_respuesta.map((q, i) => (
+                    <li key={i} className="text-sm text-yellow-400/80 flex items-start gap-2">
+                      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" />
+                      {q}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </Card>
+        )}
 
         <Card className="lg:col-span-2">
           <h2 className="text-sm font-semibold text-text-secondary mb-4">Transcripción</h2>

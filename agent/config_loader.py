@@ -37,6 +37,7 @@ class ClientConfig:
     whatsapp_api_url: str | None = None
     whatsapp_api_key: str | None = None
     enabled_tools: list[str] = field(default_factory=lambda: ["search_knowledge"])
+    conversation_examples: str | None = None
     # BYOK — Voice Pipeline
     voice_mode: str = "pipeline"
     stt_provider: str = "deepgram"
@@ -149,6 +150,7 @@ def _row_to_config(row: dict) -> ClientConfig:
         whatsapp_api_url=row.get("whatsapp_api_url"),
         whatsapp_api_key=row.get("whatsapp_api_key"),
         enabled_tools=row.get("enabled_tools") or ["search_knowledge"],
+        conversation_examples=row.get("conversation_examples"),
         voice_mode=row.get("voice_mode", "pipeline"),
         stt_provider=row.get("stt_provider", "deepgram"),
         llm_provider=row.get("llm_provider", "google"),
