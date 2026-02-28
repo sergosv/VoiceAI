@@ -275,39 +275,56 @@ export function CampaignDetail() {
               Sin contactos. Agrega contactos para iniciar la campaña.
             </p>
           ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Teléfono</Th>
-                  <Th>Estado</Th>
-                  <Th>Intento</Th>
-                  <Th>Resultado</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {calls.map(c => (
-                  <tr key={c.id}>
-                    <Td>
-                      <span className="font-mono text-xs">{c.phone}</span>
-                    </Td>
-                    <Td>
-                      <span className="flex items-center gap-1 text-xs">
-                        {callStatusIcons[c.status]}
-                        {callStatusLabels[c.status] || c.status}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="text-xs">{c.attempt}</span>
-                    </Td>
-                    <Td>
-                      <span className="text-xs text-text-secondary line-clamp-1">
-                        {c.result_summary || '—'}
-                      </span>
-                    </Td>
+            <>
+              {/* Resumen rápido */}
+              <div className="flex gap-4 mb-4 text-xs">
+                <span className="text-text-muted">
+                  {calls.filter(c => c.status === 'calling').length} en llamada
+                </span>
+                <span className="text-success">
+                  {calls.filter(c => c.status === 'completed').length} completadas
+                </span>
+                <span className="text-danger">
+                  {calls.filter(c => c.status === 'failed').length} fallidas
+                </span>
+                <span className="text-warning">
+                  {calls.filter(c => c.status === 'no_answer').length} sin respuesta
+                </span>
+              </div>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Teléfono</Th>
+                    <Th>Estado</Th>
+                    <Th>Intento</Th>
+                    <Th>Resultado</Th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
+                </thead>
+                <tbody>
+                  {calls.map(c => (
+                    <tr key={c.id}>
+                      <Td>
+                        <span className="font-mono text-xs">{c.phone}</span>
+                      </Td>
+                      <Td>
+                        <span className="flex items-center gap-1 text-xs">
+                          {callStatusIcons[c.status]}
+                          {callStatusLabels[c.status] || c.status}
+                        </span>
+                      </Td>
+                      <Td>
+                        <span className="text-xs">{c.attempt}</span>
+                      </Td>
+                      <Td>
+                        <span className="text-xs text-text-secondary line-clamp-2" title={c.result_summary || ''}>
+                          {c.result_summary || '—'}
+                        </span>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </>
           )}
         </Card>
       </div>

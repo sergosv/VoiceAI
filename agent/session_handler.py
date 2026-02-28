@@ -37,12 +37,14 @@ class SessionHandler:
         caller_number: str | None,
         callee_number: str | None,
         room_name: str | None = None,
+        campaign_id: str | None = None,
     ) -> None:
         self._config = config
         self._direction = direction
         self._caller_number = caller_number
         self._callee_number = callee_number
         self._room_name = room_name
+        self._campaign_id = campaign_id
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
 
@@ -106,19 +108,67 @@ class SessionHandler:
         call_result = sb.table("calls").insert(call_data).execute()
         call_id = call_result.data[0]["id"] if call_result.data else None
 
+        # Actualizar campaign_calls si es una llamada de campaña
+        if self._campaign_id and self._direction == "outbound":
+            try:
+                phone = self._callee_number or self._caller_number
+                if phone:
+                    # Buscar el campaign_call por campaign_id + phone + status calling
+                    cc = (
+                        sb.table("campaign_calls")
+                        .select("id, campaign_id")
+                        .eq("campaign_id", self._campaign_id)
+                        .eq("phone", phone)
+                        .eq("status", "calling")
+                        .limit(1)
+                        .execute()
+                    )
+                    if cc.data:
+                        cc_id = cc.data[0]["id"]
+                        had_conversation = len(self._transcript) > 1
+                        call_status = "completed" if had_conversation else "no_answer"
+
+                        # Generar resumen de la conversación
+                        summary_text = None
+                        if self._transcript:
+                            summary_text = " | ".join(
+                                f"{t['role']}: {t['text'][:80]}"
+                                for t in self._transcript[:6]
+                            )
+                            if len(summary_text) > 500:
+                                summary_text = summary_text[:500]
+
+                        sb.table("campaign_calls").update({
+                            "status": call_status,
+                            "call_id": call_id,
+                            "result_summary": summary_text,
+                        }).eq("id", cc_id).execute()
+
+                        # Actualizar contadores de la campaña
+                        _update_campaign_counters(sb, self._campaign_id)
+                        logger.info(
+                            "Campaign call actualizada: %s -> %s (transcript: %d entries)",
+                            phone, call_status, len(self._transcript),
+                        )
+            except Exception:
+                logger.exception("Error actualizando campaign_call")
+
         # Auto-capturar contacto del llamante
-        if self._caller_number:
+        phone_for_contact = self._caller_number
+        if self._direction == "outbound" and self._callee_number:
+            phone_for_contact = self._callee_number
+        if phone_for_contact:
             try:
                 contact_data = {
                     "client_id": self._config.id,
-                    "phone": self._caller_number,
+                    "phone": phone_for_contact,
                     "source": self._direction + "_call",
                     "metadata": {"last_call_id": call_id} if call_id else {},
                 }
                 sb.table("contacts").upsert(
                     contact_data, on_conflict="client_id,phone"
                 ).execute()
-                logger.info("Contacto auto-capturado: %s", self._caller_number)
+                logger.info("Contacto auto-capturado: %s", phone_for_contact)
             except Exception:
                 logger.exception("Error auto-capturando contacto")
 
@@ -156,3 +206,25 @@ class SessionHandler:
                 "inbound_calls": is_inbound,
                 "outbound_calls": is_outbound,
             }).execute()
+
+
+def _update_campaign_counters(sb: Client, campaign_id: str) -> None:
+    """Recalcula los contadores de una campaña basándose en los status reales."""
+    completed = (
+        sb.table("campaign_calls")
+        .select("id", count="exact")
+        .eq("campaign_id", campaign_id)
+        .in_("status", ["completed", "failed", "no_answer", "busy"])
+        .execute()
+    )
+    successful = (
+        sb.table("campaign_calls")
+        .select("id", count="exact")
+        .eq("campaign_id", campaign_id)
+        .eq("status", "completed")
+        .execute()
+    )
+    sb.table("campaigns").update({
+        "completed_contacts": completed.count or 0,
+        "successful_contacts": successful.count or 0,
+    }).eq("id", campaign_id).execute()

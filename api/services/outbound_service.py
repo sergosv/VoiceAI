@@ -127,31 +127,52 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
             logger.info("Campaña %s ya no está running, deteniendo", campaign_id)
             break
 
+        # Verificar si hay llamadas activas (calling)
+        active = (
+            sb.table("campaign_calls")
+            .select("id", count="exact")
+            .eq("campaign_id", campaign_id)
+            .eq("status", "calling")
+            .execute()
+        )
+        active_count = active.count or 0
+
         # Obtener siguiente batch de llamadas pendientes
+        slots_available = max(max_concurrent - active_count, 0)
         pending = (
             sb.table("campaign_calls")
             .select("*")
             .eq("campaign_id", campaign_id)
             .in_("status", ["pending", "retry"])
             .order("created_at")
-            .limit(max_concurrent)
+            .limit(slots_available if slots_available > 0 else 1)
             .execute()
         )
 
-        if not pending.data:
-            logger.info("Campaña %s completada: no quedan llamadas pendientes", campaign_id)
+        if not pending.data and active_count == 0:
+            logger.info("Campaña %s completada: no quedan llamadas pendientes ni activas", campaign_id)
             _complete_campaign(sb, campaign_id)
             break
+
+        if not pending.data:
+            # Hay llamadas activas pero no pendientes, esperar
+            logger.info("Campaña %s: %d llamadas activas, esperando...", campaign_id, active_count)
+            await asyncio.sleep(5)
+            continue
 
         # Lanzar llamadas concurrentes
         tasks = []
         for call_entry in pending.data:
+            if slots_available <= 0:
+                break
             tasks.append(_place_outbound_call(sb, campaign_id, call_entry, semaphore))
+            slots_available -= 1
 
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         # Pausa entre batches
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
 
 async def _place_outbound_call(
@@ -223,6 +244,7 @@ async def _place_outbound_call(
             request = CreateSIPParticipantRequest(
                 sip_trunk_id=trunk_id,
                 sip_call_to=phone,
+                sip_number=from_number,
                 room_name=room_name,
                 participant_identity=f"outbound-{call_entry_id[:8]}",
                 participant_name=f"Outbound to {phone}",
@@ -235,15 +257,8 @@ async def _place_outbound_call(
 
             logger.info("Llamada outbound colocada: %s -> %s (room: %s)", from_number, phone, room_name)
 
-            # Marcar como completed (el SessionHandler guardará los detalles)
-            sb.table("campaign_calls").update({
-                "status": "completed",
-            }).eq("id", call_entry_id).execute()
-
-            # Actualizar contadores
-            _increment_campaign_counter(sb, campaign_id, "completed_contacts")
-            _increment_campaign_counter(sb, campaign_id, "successful_contacts")
-
+            # NO marcar como completed aquí — el agent session_handler lo hará
+            # cuando la llamada realmente termine. Solo cerramos el API client.
             await lk_api.aclose()
 
         except Exception as e:
@@ -268,20 +283,34 @@ async def _place_outbound_call(
                     "status": "failed",
                     "result_summary": str(e)[:500],
                 }).eq("id", call_entry_id).execute()
-                _increment_campaign_counter(sb, campaign_id, "completed_contacts")
 
 
-def _increment_campaign_counter(sb, campaign_id: str, field: str) -> None:
-    """Incrementa un contador en la campaña."""
-    camp = sb.table("campaigns").select(field).eq("id", campaign_id).limit(1).execute()
-    if camp.data:
-        current = camp.data[0].get(field, 0)
-        sb.table("campaigns").update({field: current + 1}).eq("id", campaign_id).execute()
+def _update_campaign_counters(sb, campaign_id: str) -> None:
+    """Recalcula contadores de la campaña basándose en los status reales."""
+    completed = (
+        sb.table("campaign_calls")
+        .select("id", count="exact")
+        .eq("campaign_id", campaign_id)
+        .in_("status", ["completed", "failed", "no_answer", "busy"])
+        .execute()
+    )
+    successful = (
+        sb.table("campaign_calls")
+        .select("id", count="exact")
+        .eq("campaign_id", campaign_id)
+        .eq("status", "completed")
+        .execute()
+    )
+    sb.table("campaigns").update({
+        "completed_contacts": completed.count or 0,
+        "successful_contacts": successful.count or 0,
+    }).eq("id", campaign_id).execute()
 
 
 def _complete_campaign(sb, campaign_id: str) -> None:
-    """Marca una campaña como completada."""
+    """Marca una campaña como completada con contadores finales."""
     from datetime import datetime, timezone
+    _update_campaign_counters(sb, campaign_id)
     sb.table("campaigns").update({
         "status": "completed",
         "completed_at": datetime.now(timezone.utc).isoformat(),

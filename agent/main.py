@@ -75,6 +75,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     outbound_mode = False
     campaign_script: str | None = None
     outbound_client_id: str | None = None
+    campaign_id: str | None = None
     room_metadata = ctx.room.metadata or ""
     if room_metadata:
         try:
@@ -83,7 +84,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 outbound_mode = True
                 campaign_script = meta.get("script")
                 outbound_client_id = meta.get("client_id")
-                logger.info("Modo outbound detectado, campaign_id: %s", meta.get("campaign_id"))
+                campaign_id = meta.get("campaign_id")
+                logger.info("Modo outbound detectado, campaign_id: %s", campaign_id)
         except (json.JSONDecodeError, AttributeError):
             pass
 
@@ -142,13 +144,24 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         turn_detection=MultilingualModel(),
     )
 
+    # Para outbound, los números van al revés:
+    # - caller_number = nuestro número (el que llama)
+    # - callee_number = el número destino (sip.phoneNumber del participante SIP)
+    if outbound_mode:
+        outbound_callee = caller_number  # sip.phoneNumber = a quién llamamos
+        outbound_caller = called_number or config.phone_number if hasattr(config, 'phone_number') else None
+    else:
+        outbound_callee = None
+        outbound_caller = None
+
     # Session handler para tracking
     handler = SessionHandler(
         config=config,
         direction="outbound" if outbound_mode else "inbound",
-        caller_number=caller_number,
-        callee_number=called_number,
+        caller_number=outbound_caller if outbound_mode else caller_number,
+        callee_number=outbound_callee if outbound_mode else called_number,
         room_name=ctx.room.name,
+        campaign_id=campaign_id,
     )
 
     # Registrar transcripción
