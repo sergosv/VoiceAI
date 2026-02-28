@@ -11,15 +11,19 @@ from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user, require_admin
 from api.schemas import (
     AssignPhoneRequest,
+    AvailableNumberOut,
     ClientCreateRequest,
     ClientOut,
     ClientUpdateRequest,
     MessageResponse,
     PromptTemplateOut,
+    PurchaseNumberRequest,
     client_out_from_row,
 )
 from api.services.phone_service import (
     assign_phone_to_client,
+    purchase_phone_number,
+    search_available_numbers,
     setup_livekit_sip,
     verify_twilio_number,
 )
@@ -102,6 +106,69 @@ async def list_clients(
 
     result = query.execute()
     return [client_out_from_row(row) for row in result.data]
+
+
+@router.get("/available-numbers", response_model=list[AvailableNumberOut])
+async def list_available_numbers(
+    country: str = "MX",
+    area_code: str | None = None,
+    limit: int = 10,
+    admin: CurrentUser = Depends(require_admin),
+) -> list[AvailableNumberOut]:
+    """Busca números disponibles en Twilio (solo admin)."""
+    try:
+        numbers = await asyncio.to_thread(
+            search_available_numbers, country, area_code, limit
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error buscando números en Twilio: {e}",
+        )
+    return [AvailableNumberOut(**n) for n in numbers]
+
+
+@router.post("/{client_id}/purchase-phone", response_model=ClientOut)
+async def purchase_and_assign_phone(
+    client_id: str,
+    req: PurchaseNumberRequest,
+    admin: CurrentUser = Depends(require_admin),
+) -> ClientOut:
+    """Compra un número en Twilio y lo asigna al cliente con SIP config (solo admin)."""
+    # Comprar número
+    try:
+        phone_sid, normalized_number = await asyncio.to_thread(
+            purchase_phone_number, req.phone_number
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error comprando número en Twilio: {e}",
+        )
+
+    # Configurar SIP en LiveKit
+    try:
+        trunk_id, _ = await setup_livekit_sip(normalized_number)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Número comprado ({normalized_number}) pero error configurando SIP: {e}",
+        )
+
+    # Guardar en DB
+    sb = get_supabase()
+    row = assign_phone_to_client(
+        sb,
+        client_id=client_id,
+        phone_number=normalized_number,
+        phone_sid=phone_sid,
+        trunk_id=trunk_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado"
+        )
+    return client_out_from_row(row)
 
 
 @router.get("/{client_id}", response_model=ClientOut)

@@ -12,12 +12,51 @@ from twilio.rest import Client as TwilioClient
 logger = logging.getLogger(__name__)
 
 
-def verify_twilio_number(phone_number: str) -> str:
-    """Verifica que el número existe en Twilio. Retorna phone_sid."""
-    twilio = TwilioClient(
+def _get_twilio_client() -> TwilioClient:
+    """Crea instancia de TwilioClient con credenciales del entorno."""
+    return TwilioClient(
         os.environ["TWILIO_ACCOUNT_SID"],
         os.environ["TWILIO_AUTH_TOKEN"],
     )
+
+
+def search_available_numbers(
+    country_code: str = "MX",
+    area_code: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """Busca números disponibles en Twilio por país y código de área."""
+    twilio = _get_twilio_client()
+    kwargs: dict = {"limit": limit}
+    if area_code:
+        kwargs["area_code"] = area_code
+
+    # Intentar local primero, luego mobile (MX suele ser mobile)
+    numbers = twilio.available_phone_numbers(country_code).local.list(**kwargs)
+    if not numbers:
+        numbers = twilio.available_phone_numbers(country_code).mobile.list(**kwargs)
+
+    return [
+        {
+            "phone_number": n.phone_number,
+            "friendly_name": n.friendly_name,
+            "locality": getattr(n, "locality", None),
+            "region": getattr(n, "region", None),
+        }
+        for n in numbers
+    ]
+
+
+def purchase_phone_number(phone_number: str) -> tuple[str, str]:
+    """Compra un número en Twilio. Retorna (phone_sid, phone_number normalizado)."""
+    twilio = _get_twilio_client()
+    incoming = twilio.incoming_phone_numbers.create(phone_number=phone_number)
+    return incoming.sid, incoming.phone_number
+
+
+def verify_twilio_number(phone_number: str) -> str:
+    """Verifica que el número existe en Twilio. Retorna phone_sid."""
+    twilio = _get_twilio_client()
     incoming = twilio.incoming_phone_numbers.list(phone_number=phone_number)
     if not incoming:
         raise ValueError(f"Número {phone_number} no encontrado en tu cuenta Twilio")

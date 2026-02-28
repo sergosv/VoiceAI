@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, UserPlus, Phone } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 import { useConfirm } from '../../context/ConfirmContext'
@@ -29,8 +29,15 @@ export function ClientDetail() {
 
   // Modal: asignar teléfono
   const [showPhoneModal, setShowPhoneModal] = useState(false)
+  const [phoneTab, setPhoneTab] = useState('search') // 'search' | 'manual'
   const [phoneForm, setPhoneForm] = useState({ phone_number: '', skip_livekit: false })
   const [assigningPhone, setAssigningPhone] = useState(false)
+
+  // Buscar y comprar números
+  const [searchForm, setSearchForm] = useState({ country: 'MX', area_code: '' })
+  const [availableNumbers, setAvailableNumbers] = useState([])
+  const [searchingNumbers, setSearchingNumbers] = useState(false)
+  const [purchasingNumber, setPurchasingNumber] = useState(null)
 
   useEffect(() => {
     Promise.all([
@@ -124,6 +131,47 @@ export function ClientDetail() {
       toast.error(err.message)
     } finally {
       setAssigningPhone(false)
+    }
+  }
+
+  async function handleSearchNumbers(e) {
+    e.preventDefault()
+    setSearchingNumbers(true)
+    setAvailableNumbers([])
+    try {
+      const params = new URLSearchParams({ country: searchForm.country, limit: '10' })
+      if (searchForm.area_code) params.set('area_code', searchForm.area_code)
+      const numbers = await api.get(`/clients/available-numbers?${params}`)
+      setAvailableNumbers(numbers)
+      if (numbers.length === 0) toast.info('No se encontraron números disponibles')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSearchingNumbers(false)
+    }
+  }
+
+  async function handlePurchaseNumber(phoneNumber) {
+    const ok = await confirm({
+      title: 'Comprar número',
+      message: `¿Comprar ${phoneNumber} y asignarlo a ${client.name}? Se creará el SIP trunk automáticamente. Se aplicarán cargos de Twilio.`,
+      confirmText: 'Comprar y asignar',
+      variant: 'warning',
+    })
+    if (!ok) return
+    setPurchasingNumber(phoneNumber)
+    try {
+      const updated = await api.post(`/clients/${id}/purchase-phone`, {
+        phone_number: phoneNumber,
+      })
+      setClient(updated)
+      toast.success(`Número ${phoneNumber} comprado y asignado`)
+      setShowPhoneModal(false)
+      setAvailableNumbers([])
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setPurchasingNumber(null)
     }
   }
 
@@ -265,32 +313,120 @@ export function ClientDetail() {
         </form>
       </Modal>
 
-      {/* Modal: Asignar teléfono */}
-      <Modal open={showPhoneModal} onClose={() => setShowPhoneModal(false)} title="Asignar teléfono Twilio">
-        <form onSubmit={handleAssignPhone} className="space-y-4">
-          <Input
-            label="Número de teléfono"
-            value={phoneForm.phone_number}
-            onChange={e => setPhoneForm(f => ({ ...f, phone_number: e.target.value }))}
-            required
-            placeholder="+529994890531"
-          />
-          <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-            <input
-              type="checkbox"
-              checked={phoneForm.skip_livekit}
-              onChange={e => setPhoneForm(f => ({ ...f, skip_livekit: e.target.checked }))}
-              className="accent-accent"
+      {/* Modal: Asignar teléfono (2 tabs) */}
+      <Modal open={showPhoneModal} onClose={() => setShowPhoneModal(false)} title="Asignar teléfono" maxWidth="max-w-2xl">
+        {/* Tabs */}
+        <div className="flex gap-1 mb-4 border-b border-border">
+          <button
+            className={`px-4 py-2 text-sm font-medium cursor-pointer ${phoneTab === 'search' ? 'text-accent border-b-2 border-accent' : 'text-text-muted hover:text-text-secondary'}`}
+            onClick={() => setPhoneTab('search')}
+          >
+            <Search size={14} className="inline mr-1.5 -mt-0.5" />Buscar y comprar
+          </button>
+          <button
+            className={`px-4 py-2 text-sm font-medium cursor-pointer ${phoneTab === 'manual' ? 'text-accent border-b-2 border-accent' : 'text-text-muted hover:text-text-secondary'}`}
+            onClick={() => setPhoneTab('manual')}
+          >
+            <Phone size={14} className="inline mr-1.5 -mt-0.5" />Asignar existente
+          </button>
+        </div>
+
+        {/* Tab: Buscar y comprar */}
+        {phoneTab === 'search' && (
+          <div className="space-y-4">
+            <form onSubmit={handleSearchNumbers} className="flex gap-3 items-end">
+              <Select
+                label="País"
+                value={searchForm.country}
+                onChange={e => setSearchForm(f => ({ ...f, country: e.target.value }))}
+                options={[
+                  { value: 'MX', label: 'México (+52)' },
+                  { value: 'US', label: 'Estados Unidos (+1)' },
+                  { value: 'CO', label: 'Colombia (+57)' },
+                  { value: 'CL', label: 'Chile (+56)' },
+                  { value: 'AR', label: 'Argentina (+54)' },
+                ]}
+              />
+              <Input
+                label="Código de área"
+                value={searchForm.area_code}
+                onChange={e => setSearchForm(f => ({ ...f, area_code: e.target.value }))}
+                placeholder="999"
+              />
+              <Button type="submit" disabled={searchingNumbers} className="shrink-0">
+                <Search size={14} className="mr-1.5 inline" />
+                {searchingNumbers ? 'Buscando...' : 'Buscar'}
+              </Button>
+            </form>
+
+            {availableNumbers.length > 0 && (
+              <div className="border border-border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-bg-tertiary text-text-secondary">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium">Número</th>
+                      <th className="text-left px-3 py-2 font-medium">Localidad</th>
+                      <th className="text-left px-3 py-2 font-medium">Región</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {availableNumbers.map(n => (
+                      <tr key={n.phone_number} className="hover:bg-bg-tertiary/50">
+                        <td className="px-3 py-2 font-mono">{n.phone_number}</td>
+                        <td className="px-3 py-2 text-text-secondary">{n.locality || '—'}</td>
+                        <td className="px-3 py-2 text-text-secondary">{n.region || '—'}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Button
+                            variant="secondary"
+                            onClick={() => handlePurchaseNumber(n.phone_number)}
+                            disabled={purchasingNumber === n.phone_number}
+                            className="!py-1 !px-3 text-xs"
+                          >
+                            <ShoppingCart size={12} className="mr-1 inline" />
+                            {purchasingNumber === n.phone_number ? 'Comprando...' : 'Comprar'}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <p className="text-xs text-text-muted">
+              Busca números disponibles en Twilio. Al comprar se configura automáticamente el SIP trunk en LiveKit.
+            </p>
+          </div>
+        )}
+
+        {/* Tab: Asignar existente */}
+        {phoneTab === 'manual' && (
+          <form onSubmit={handleAssignPhone} className="space-y-4">
+            <Input
+              label="Número de teléfono"
+              value={phoneForm.phone_number}
+              onChange={e => setPhoneForm(f => ({ ...f, phone_number: e.target.value }))}
+              required
+              placeholder="+529994890531"
             />
-            Omitir configuración SIP en LiveKit (configurar manualmente)
-          </label>
-          <p className="text-xs text-text-muted">
-            El número debe existir en tu cuenta de Twilio. Se configurará el SIP trunk y dispatch rule automáticamente.
-          </p>
-          <Button type="submit" className="w-full" disabled={assigningPhone}>
-            {assigningPhone ? 'Configurando...' : 'Asignar teléfono'}
-          </Button>
-        </form>
+            <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={phoneForm.skip_livekit}
+                onChange={e => setPhoneForm(f => ({ ...f, skip_livekit: e.target.checked }))}
+                className="accent-accent"
+              />
+              Omitir configuración SIP en LiveKit (configurar manualmente)
+            </label>
+            <p className="text-xs text-text-muted">
+              El número debe existir en tu cuenta de Twilio. Se configurará el SIP trunk y dispatch rule automáticamente.
+            </p>
+            <Button type="submit" className="w-full" disabled={assigningPhone}>
+              {assigningPhone ? 'Configurando...' : 'Asignar teléfono'}
+            </Button>
+          </form>
+        )}
       </Modal>
     </div>
   )

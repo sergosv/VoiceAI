@@ -132,6 +132,17 @@ class AssignPhoneRequest(BaseModel):
     skip_livekit: bool = False
 
 
+class AvailableNumberOut(BaseModel):
+    phone_number: str
+    friendly_name: str
+    locality: str | None = None
+    region: str | None = None
+
+
+class PurchaseNumberRequest(BaseModel):
+    phone_number: str
+
+
 class PromptTemplateOut(BaseModel):
     key: str
     name: str
