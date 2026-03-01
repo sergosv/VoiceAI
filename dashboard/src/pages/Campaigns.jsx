@@ -8,6 +8,7 @@ import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
 import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { Megaphone, Plus } from 'lucide-react'
 
@@ -125,22 +126,32 @@ export function Campaigns() {
 }
 
 function CreateCampaignModal({ onClose, onCreated }) {
+  const { user } = useAuth()
   const [form, setForm] = useState({
     name: '',
     description: '',
     script: '',
+    agent_id: '',
     max_concurrent: 1,
     retry_attempts: 2,
   })
+  const [agents, setAgents] = useState([])
   const [saving, setSaving] = useState(false)
   const toast = useToast()
+
+  useEffect(() => {
+    if (!user?.client_id) return
+    api.get(`/clients/${user.client_id}/agents`).then(setAgents).catch(() => {})
+  }, [user])
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.name || !form.script) return toast.error('Nombre y script requeridos')
     setSaving(true)
     try {
-      const created = await api.post('/campaigns', form)
+      const payload = { ...form }
+      if (!payload.agent_id) delete payload.agent_id
+      const created = await api.post('/campaigns', payload)
       onCreated(created)
     } catch (err) {
       toast.error(err.message)
@@ -154,6 +165,21 @@ function CreateCampaignModal({ onClose, onCreated }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input label="Nombre *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
         <Input label="Descripción" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+        {agents.length > 1 && (
+          <div>
+            <label className="block text-xs text-text-muted mb-1">Agente</label>
+            <select
+              value={form.agent_id}
+              onChange={e => setForm(f => ({ ...f, agent_id: e.target.value }))}
+              className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
+            >
+              <option value="">Agente por defecto</option>
+              {agents.map(a => (
+                <option key={a.id} value={a.id}>{a.name} {a.phone_number ? `(${a.phone_number})` : ''}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="block text-xs text-text-muted mb-1">Script del agente (system prompt) *</label>
           <textarea

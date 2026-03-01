@@ -29,6 +29,7 @@ export function CallsTable({ calls = [] }) {
         <tr>
           <Th></Th>
           <Th>De / Para</Th>
+          <Th>Agente</Th>
           <Th>Duración</Th>
           <Th>Estado</Th>
           <Th>Fecha</Th>
@@ -50,6 +51,7 @@ export function CallsTable({ calls = [] }) {
             <Td className="font-mono text-xs">
               {call.caller_number || call.callee_number || '-'}
             </Td>
+            <Td className="text-xs text-text-secondary">{call.agent_name || '-'}</Td>
             <Td className="font-mono">{formatDuration(call.duration_seconds)}</Td>
             <Td><Badge variant={call.status}>{call.status}</Badge></Td>
             <Td className="text-text-secondary text-xs">{formatDate(call.started_at)}</Td>

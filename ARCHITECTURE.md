@@ -121,23 +121,28 @@ voice-ai-platform/
 ├── .env.example             # Template de variables de entorno
 ├── .env                     # Variables reales (gitignored)
 ├── requirements.txt         # Dependencias Python
-├── Dockerfile               # Para deploy
+├── Dockerfile               # Para deploy del agente en LiveKit Cloud
+├── Dockerfile.railway       # Para deploy de API+Dashboard en Railway
 ├── livekit.toml             # Config LiveKit agent
 │
 ├── agent/                   # === CORE: LiveKit Voice Agent ===
 │   ├── main.py              # Entrypoint LiveKit agent worker
-│   ├── agent_factory.py     # Crea agentes dinámicos por cliente
-│   ├── session_handler.py   # Maneja lifecycle de cada llamada
-│   ├── config_loader.py     # Carga config de cliente desde DB
+│   ├── agent_factory.py     # Crea agentes dinámicos por cliente (VoiceAgent + voice rules)
+│   ├── pipeline_builder.py  # Factory BYOK: build_stt(), build_llm(), build_tts(), build_realtime_model()
+│   ├── session_handler.py   # Maneja lifecycle de cada llamada (transcript, costs, DB)
+│   ├── config_loader.py     # Carga config de agente+cliente desde DB (by phone/agent_id/client_id)
+│   ├── call_analyzer.py     # Análisis post-llamada con Gemini (outbound campaigns)
+│   ├── phone_utils.py       # Utilidades de números telefónicos
+│   ├── voice_quality.py     # Constantes: filler phrases, backchannels, timing
 │   └── tools/               # Herramientas que el agente puede usar
 │       ├── __init__.py
 │       ├── file_search.py   # Gemini File Search por cliente
-│       ├── calendar.py      # Agendar citas (futuro)
-│       ├── transfer.py      # Transferir a humano (futuro)
-│       └── notify.py        # Enviar SMS/email (futuro)
+│       ├── calendar_tool.py # Google Calendar — agendar citas
+│       ├── whatsapp_tool.py # Evolution API — enviar WhatsApp
+│       └── crm_tool.py      # CRM — guardar/actualizar contactos
 │
 ├── admin/                   # === ADMIN: Scripts de gestión ===
-│   ├── cli.py               # CLI principal con typer/click
+│   ├── cli.py               # CLI principal con typer
 │   ├── create_client.py     # Crear cliente + FileSearchStore
 │   ├── upload_docs.py       # Subir docs al store del cliente
 │   ├── assign_phone.py      # Asignar número Twilio + SIP trunk
@@ -146,38 +151,80 @@ voice-ai-platform/
 │   └── test_call.py         # Test rápido de un agente
 │
 ├── api/                     # === API: FastAPI endpoints ===
-│   ├── main.py              # FastAPI app
+│   ├── main.py              # FastAPI app (API + static dashboard)
+│   ├── deps.py              # Dependencias comunes (auth, DB)
+│   ├── schemas.py           # Pydantic models para request/response
+│   ├── middleware/
+│   │   └── auth.py          # Supabase JWT auth (ES256 via JWKS)
 │   ├── routes/
+│   │   ├── auth.py          # Login, signup, me, forgot-password
 │   │   ├── clients.py       # CRUD clientes
+│   │   ├── agents.py        # CRUD agentes + assign/purchase phone
 │   │   ├── calls.py         # Historial de llamadas
-│   │   ├── documents.py     # Upload/manage docs
-│   │   └── webhooks.py      # Twilio/LiveKit webhooks
-│   └── middleware/
-│       └── auth.py          # Supabase JWT auth
+│   │   ├── documents.py     # Upload/manage docs (File Search)
+│   │   ├── contacts.py      # CRM contactos
+│   │   ├── appointments.py  # CRM citas
+│   │   ├── campaigns.py     # Campañas outbound
+│   │   ├── voices.py        # Catálogo de voces (Cartesia, ElevenLabs, OpenAI)
+│   │   ├── dashboard.py     # Stats para dashboard principal
+│   │   ├── chat.py          # Chat tester (probar agentes via texto)
+│   │   └── ai.py            # Generación/mejora de prompts con IA
+│   └── services/
+│       ├── client_service.py    # Lógica de negocio clientes
+│       ├── document_service.py  # Lógica de negocio documentos
+│       ├── outbound_service.py  # Motor de llamadas salientes
+│       ├── phone_service.py     # Twilio: search/purchase numbers
+│       ├── chat_store.py        # In-memory store de conversaciones chat
+│       └── chat_service.py      # Chat tester: Gemini multi-turn + tool simulation
 │
 ├── db/                      # === DATABASE ===
-│   ├── schema.sql           # Schema completo Supabase
+│   ├── schema.sql           # Schema base (clients, calls, documents, usage_daily)
 │   ├── seed.sql             # Datos de prueba
 │   └── migrations/
+│       ├── 002_users_table.sql
+│       ├── 003_rls_policies.sql
+│       ├── 004_phase3_tables.sql      # contacts, appointments
+│       ├── 005_outbound_tables.sql    # campaigns, campaign_calls
+│       ├── 006_byok_columns.sql       # stt/llm/tts provider + api_key per agent
+│       ├── 007_campaign_analysis.sql  # AI analysis fields on campaign_calls
+│       ├── 008_conversational_quality.sql  # contact dedup, timeline
+│       └── 009_agents_table.sql       # Multi-agent: agents table
 │
 ├── config/                  # === CONFIGURACIÓN ===
-│   ├── voices.json          # Catálogo de voces Cartesia disponibles
-│   └── prompts/             # Templates de system prompts
-│       ├── dental.md        # Prompt para dentistas
-│       ├── gym.md           # Prompt para gimnasios
-│       ├── restaurant.md    # Prompt para restaurantes
-│       └── generic.md       # Prompt genérico
+│   ├── voices.json          # Catálogo de voces por provider
+│   └── prompts/             # Templates de system prompts por industria
 │
-├── dashboard/               # === FRONTEND (Fase 2) — servido por FastAPI ===
+├── dashboard/               # === FRONTEND — servido por FastAPI ===
 │   ├── package.json
 │   ├── vite.config.js
 │   ├── src/
-│   │   ├── App.jsx
+│   │   ├── App.jsx          # Router principal
+│   │   ├── lib/api.js       # HTTP client con auth
 │   │   ├── pages/
-│   │   ├── components/
-│   │   └── hooks/
-│   ├── public/
-│   └── dist/                # Build de producción, servido por FastAPI como static
+│   │   │   ├── Login.jsx, ForgotPassword.jsx
+│   │   │   ├── Dashboard.jsx         # Overview con stats + gráficas
+│   │   │   ├── Calls.jsx             # Lista de llamadas
+│   │   │   ├── CallDetail.jsx        # Detalle + transcripción
+│   │   │   ├── Documents.jsx         # Gestión de knowledge base
+│   │   │   ├── Settings.jsx          # Config de agente + BYOK pipeline
+│   │   │   ├── AgentDetail.jsx       # Detalle/edición de agente individual
+│   │   │   ├── Contacts.jsx          # CRM contactos
+│   │   │   ├── ContactDetail.jsx     # Detalle contacto + timeline
+│   │   │   ├── Appointments.jsx      # Citas agendadas
+│   │   │   ├── Campaigns.jsx         # Campañas outbound
+│   │   │   ├── CampaignDetail.jsx    # Detalle campaña + análisis AI
+│   │   │   ├── Integrations.jsx      # Google Calendar, WhatsApp, tools
+│   │   │   └── admin/                # Solo admin: ClientsList, ClientDetail, ClientCreate
+│   │   └── components/
+│   │       ├── Sidebar.jsx           # Navegación lateral
+│   │       ├── ChatTester.jsx        # Modal para probar agentes via texto
+│   │       ├── PromptAssistant.jsx   # Asistente AI para generar prompts
+│   │       ├── TranscriptViewer.jsx  # Visualizador de transcripciones
+│   │       ├── CallsTable.jsx        # Tabla reutilizable de llamadas
+│   │       ├── ContactTimeline.jsx   # Timeline de interacciones
+│   │       ├── StatsCard.jsx, UsageChart.jsx, ClientSelector.jsx, AdminRoute.jsx
+│   │       └── ui/                   # Componentes base (Button, Input, etc.)
+│   └── dist/                # Build de producción
 │
 └── tests/                   # === TESTS ===
     ├── test_agent_factory.py
@@ -325,6 +372,108 @@ CREATE TABLE usage_daily (
 );
 
 -- ============================================
+-- TABLA: agents (migration 009)
+-- Múltiples agentes por cliente
+-- ============================================
+CREATE TABLE agents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    agent_type TEXT DEFAULT 'inbound',         -- inbound, outbound, both
+    phone_number TEXT,
+    phone_sid TEXT,
+    livekit_sip_trunk_id TEXT,
+    system_prompt TEXT NOT NULL,
+    greeting TEXT NOT NULL,
+    examples TEXT,                              -- Ejemplos de conversación
+    voice_id TEXT DEFAULT 'default',
+    transfer_number TEXT,
+    -- BYOK pipeline config
+    agent_mode TEXT DEFAULT 'pipeline',         -- pipeline, realtime
+    stt_provider TEXT DEFAULT 'deepgram',
+    llm_provider TEXT DEFAULT 'google',
+    tts_provider TEXT DEFAULT 'cartesia',
+    stt_api_key TEXT, llm_api_key TEXT, tts_api_key TEXT,
+    realtime_model TEXT DEFAULT 'gpt-4o-realtime-preview',
+    realtime_voice TEXT DEFAULT 'alloy',
+    realtime_api_key TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(client_id, slug)
+);
+
+-- ============================================
+-- TABLA: contacts (migration 004)
+-- ============================================
+CREATE TABLE contacts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+    phone TEXT NOT NULL,
+    name TEXT,
+    email TEXT,
+    notes TEXT,
+    call_count INT DEFAULT 0,
+    last_call_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(client_id, phone)
+);
+
+-- ============================================
+-- TABLA: appointments (migration 004)
+-- ============================================
+CREATE TABLE appointments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+    contact_phone TEXT,
+    patient_name TEXT NOT NULL,
+    date DATE NOT NULL,
+    time TIME NOT NULL,
+    duration_minutes INT DEFAULT 60,
+    description TEXT,
+    status TEXT DEFAULT 'scheduled',
+    google_event_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- TABLA: campaigns (migration 005)
+-- ============================================
+CREATE TABLE campaigns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+    agent_id UUID REFERENCES agents(id),
+    name TEXT NOT NULL,
+    script TEXT NOT NULL,
+    status TEXT DEFAULT 'draft',
+    phone_numbers JSONB DEFAULT '[]',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- TABLA: campaign_calls (migration 005)
+-- ============================================
+CREATE TABLE campaign_calls (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    campaign_id UUID REFERENCES campaigns(id) ON DELETE CASCADE,
+    call_id UUID REFERENCES calls(id),
+    phone_number TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    -- AI analysis fields (migration 007)
+    analysis_sentiment TEXT,
+    analysis_outcome TEXT,
+    analysis_summary TEXT,
+    analysis_interest_level INT,
+    analysis_next_steps TEXT,
+    analysis_full JSONB,
+    analyzed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
 -- INDEXES
 -- ============================================
 CREATE INDEX idx_clients_phone ON clients(phone_number);
@@ -335,6 +484,12 @@ CREATE INDEX idx_calls_started ON calls(started_at);
 CREATE INDEX idx_calls_client_date ON calls(client_id, started_at);
 CREATE INDEX idx_documents_client ON documents(client_id);
 CREATE INDEX idx_usage_client_date ON usage_daily(client_id, date);
+CREATE INDEX idx_agents_client ON agents(client_id);
+CREATE INDEX idx_contacts_client ON contacts(client_id);
+CREATE INDEX idx_contacts_phone ON contacts(client_id, phone);
+CREATE INDEX idx_appointments_client ON appointments(client_id);
+CREATE INDEX idx_campaigns_client ON campaigns(client_id);
+CREATE INDEX idx_campaign_calls_campaign ON campaign_calls(campaign_id);
 
 -- ============================================
 -- RLS (Row Level Security) — para Fase 2
@@ -413,6 +568,9 @@ DEEPGRAM_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxx
 # === Cartesia ===
 CARTESIA_API_KEY=sk-cart-xxxxxxxxxxxxxxxx
 
+# === ElevenLabs (opcional, BYOK) ===
+ELEVENLABS_API_KEY=sk_xxxxxxxxxxxxxxxx
+
 # === Twilio ===
 TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
@@ -427,6 +585,9 @@ APP_ENV=development
 LOG_LEVEL=DEBUG
 DEFAULT_LANGUAGE=es
 DEFAULT_MAX_CALL_DURATION=300
+
+# === CORS (producción) ===
+ALLOWED_ORIGINS=https://your-domain.railway.app
 ```
 
 ---
@@ -460,6 +621,8 @@ DEFAULT_MAX_CALL_DURATION=300
 │     │  Usuario habla → Deepgram STT → texto                        │
 │     │  → Gemini procesa (+ File Search si necesita)                 │
 │     │  → respuesta texto → Cartesia TTS → audio                    │
+│     │  + Filler phrases si LLM tarda >1.2s ("Déjeme ver...")       │
+│     │  + Backchannels cada ~5.5s si usuario habla largo ("Ajá")    │
 │     │                                                                │
 │  8. Llamada termina:                                                 │
 │     │  - Genera summary con Gemini                                  │
@@ -660,16 +823,47 @@ En Twilio Console:
 **Diseño**: SaaS moderno, dark theme, tech aesthetic. Ver sección de diseño abajo.
 **Deploy**: React build servido por FastAPI en Railway (mismo servicio que la API).
 
-### FASE 3 — Multi-tenant Completo (estimado: 2-4 días)
+### FASE 3 — Multi-tenant Completo ✅
 
-**Objetivo**: Producto SaaS funcional con billing.
+**Objetivo**: Plataforma SaaS funcional con herramientas de negocio.
 
 **Entregables**:
+1. ✅ Tool calling: calendar, whatsapp, CRM (contacts, appointments)
+2. ✅ CRM dashboard: Contacts, ContactDetail, Appointments pages
+3. ✅ Outbound engine: campaigns, campaign_calls, outbound_service
+4. ✅ Integrations page: Google Calendar, WhatsApp, tool toggles
+5. ✅ BYOK voice pipeline: STT/LLM/TTS provider + API key por agente
+6. ✅ Call analyzer AI: Gemini post-call analysis para campañas
+7. ✅ Multi-agent: agents table, CRUD, cada cliente múltiples agentes
+8. ✅ Phone management: search/purchase Twilio numbers desde dashboard
+
+### Mejoras Post-Fase 3 ✅
+
+**Chat Tester** — Probar agentes de voz via texto sin gastar en audio/telefonía:
+- Mismo pipeline (prompt, knowledge base, tools) pero en texto
+- Tools simulados (excepto search_knowledge que es real/read-only)
+- Soporte outbound con campaign_script
+- Integrado en AgentDetail, CampaignDetail, Settings
+
+**Voice Quality** — Mejoras de calidad de voz humana:
+- Filler phrases: "Déjeme ver..." cuando LLM tarda >1.2s
+- Backchanneling: "Ajá", "Mjm" mientras usuario habla largo
+- VAD + turn detection optimizados
+- Deepgram: filler_words, smart_format, punctuate, no_delay
+- Voice rules: precios naturales, fechas conversacionales, tono empático
+
+**AI Prompt Generation** — Asistente para crear/mejorar prompts:
+- Genera prompts por industria y configuración del negocio
+- Mejora prompts existentes con sugerencias
+
+### FASE 4 — Pendiente
+
+**Objetivos futuros**:
 1. Onboarding self-service para nuevos clientes
-2. Billing automático (Stripe o similar)
-3. Métricas avanzadas y analytics
-4. Llamadas outbound (campañas)
-5. Estructuras complejas (conmutador IVR)
+2. Billing automático (Stripe)
+3. Analytics avanzados (sentiment, conversion rates)
+4. Conmutador IVR (menú de opciones pre-agente)
+5. Deploy latest to LiveKit Cloud + Railway
 
 ---
 

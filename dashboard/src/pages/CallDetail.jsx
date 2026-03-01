@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft } from 'lucide-react'
 import { api } from '../lib/api'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
@@ -78,6 +78,12 @@ export function CallDetail() {
               <span className="text-text-muted">Número</span>
               <span className="font-mono text-xs">{call.caller_number || '-'}</span>
             </div>
+            {call.agent_name && (
+              <div className="flex justify-between">
+                <span className="text-text-muted">Agente</span>
+                <span className="text-xs font-medium">{call.agent_name}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-text-muted">Fecha</span>
               <span className="text-xs">{new Date(call.started_at).toLocaleString('es-MX')}</span>
@@ -162,6 +168,34 @@ export function CallDetail() {
                 </ul>
               </div>
             )}
+          </Card>
+        )}
+
+        {/* Agent Turns Timeline (Modo Inteligente) */}
+        {call.agent_turns?.length > 0 && (
+          <Card className="lg:col-span-3 space-y-3">
+            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+              <Zap size={16} className="text-purple-400" /> Ruteo de Agentes (Modo Inteligente)
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {call.agent_turns.map((turn, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border ${
+                    turn.switched
+                      ? 'border-purple-500/30 bg-purple-500/10'
+                      : 'border-border bg-bg-secondary'
+                  }`}
+                >
+                  <span className="text-text-muted font-mono">T{turn.turn}</span>
+                  {turn.switched && <ArrowRightLeft size={10} className="text-purple-400" />}
+                  <span className="font-medium">{turn.selected_agent_name}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-text-muted">
+              {call.agent_turns.filter(t => t.switched).length} cambio(s) de agente en {call.agent_turns.length} turno(s)
+            </p>
           </Card>
         )}
 

@@ -18,6 +18,7 @@ router = APIRouter()
 class CampaignOut(BaseModel):
     id: str
     client_id: str
+    agent_id: str | None = None
     name: str
     description: str | None = None
     script: str
@@ -38,6 +39,7 @@ class CampaignCreateRequest(BaseModel):
     name: str
     description: str | None = None
     script: str
+    agent_id: str | None = None
     max_concurrent: int = 1
     retry_attempts: int = 2
     retry_delay_minutes: int = 30
@@ -121,8 +123,25 @@ async def create_campaign(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="client_id requerido")
 
     sb = get_supabase()
+
+    # Resolver agent_id: si no viene, usar el default del client
+    agent_id = req.agent_id
+    if not agent_id:
+        default_agent = (
+            sb.table("agents")
+            .select("id")
+            .eq("client_id", effective_client_id)
+            .eq("is_active", True)
+            .order("created_at")
+            .limit(1)
+            .execute()
+        )
+        if default_agent.data:
+            agent_id = default_agent.data[0]["id"]
+
     data = {
         "client_id": effective_client_id,
+        "agent_id": agent_id,
         "name": req.name,
         "description": req.description,
         "script": req.script,

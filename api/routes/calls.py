@@ -27,8 +27,9 @@ async def list_calls(
     """Lista llamadas con filtros. Client ve solo las suyas."""
     sb = get_supabase()
     query = sb.table("calls").select(
-        "id, client_id, direction, caller_number, callee_number, "
-        "duration_seconds, cost_total, status, summary, started_at, ended_at"
+        "id, client_id, agent_id, direction, caller_number, callee_number, "
+        "duration_seconds, cost_total, status, summary, sentimiento, resumen_ia, "
+        "started_at, ended_at, metadata"
     ).order("started_at", desc=True)
 
     # Multi-tenancy
@@ -54,7 +55,13 @@ async def list_calls(
     query = query.range(offset, offset + per_page - 1)
 
     result = query.execute()
-    return [CallOut(**row) for row in result.data]
+    calls = []
+    for row in result.data:
+        # Extraer agent_name de metadata si está disponible
+        meta = row.get("metadata") or {}
+        row["agent_name"] = meta.get("agent_name")
+        calls.append(CallOut(**row))
+    return calls
 
 
 @router.get("/stats", response_model=CallStatsOut)
@@ -116,5 +123,9 @@ async def get_call_detail(
     # Multi-tenancy
     if user.role == "client" and call.get("client_id") != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    # Extraer agent_name de metadata
+    meta = call.get("metadata") or {}
+    call["agent_name"] = meta.get("agent_name")
 
     return CallDetailOut(**call)

@@ -1,4 +1,4 @@
-"""Factory para construir componentes del voice pipeline según config BYOK del cliente."""
+"""Factory para construir componentes del voice pipeline según config BYOK del agente."""
 
 from __future__ import annotations
 
@@ -6,19 +6,26 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agent.config_loader import ClientConfig
+    from agent.config_loader import AgentConfig
 
 logger = logging.getLogger(__name__)
 
 
-def build_stt(config: ClientConfig, language: str):
+def build_stt(config: AgentConfig, language: str):
     """Construye el STT según el provider del cliente."""
     provider = config.stt_provider
     api_key = config.stt_api_key  # None = env var fallback
 
     if provider == "deepgram":
         from livekit.plugins import deepgram
-        kwargs = {"model": "nova-3", "language": language}
+        kwargs = {
+            "model": "nova-3",
+            "language": language,
+            "filler_words": True,
+            "smart_format": True,
+            "punctuate": True,
+            "no_delay": True,
+        }
         if api_key:
             kwargs["api_key"] = api_key
         return deepgram.STT(**kwargs)
@@ -42,7 +49,7 @@ def build_stt(config: ClientConfig, language: str):
     return deepgram.STT(model="nova-3", language=language)
 
 
-def build_llm(config: ClientConfig):
+def build_llm(config: AgentConfig):
     """Construye el LLM según el provider del cliente."""
     provider = config.llm_provider
     api_key = config.llm_api_key
@@ -73,7 +80,7 @@ def build_llm(config: ClientConfig):
     return google.LLM(model="gemini-2.5-flash")
 
 
-def build_tts(config: ClientConfig, language: str):
+def build_tts(config: AgentConfig, language: str):
     """Construye el TTS según el provider del cliente."""
     provider = config.tts_provider
     api_key = config.tts_api_key
@@ -81,7 +88,11 @@ def build_tts(config: ClientConfig, language: str):
 
     if provider == "cartesia":
         from livekit.plugins import cartesia
-        kwargs = {"model": "sonic-3", "language": language}
+        kwargs = {
+            "model": "sonic-3",
+            "language": language,
+            "speed": 1.0,
+        }
         if voice_id:
             kwargs["voice"] = voice_id
         if api_key:
@@ -116,7 +127,7 @@ def build_tts(config: ClientConfig, language: str):
     return cartesia.TTS(**kwargs)
 
 
-def build_realtime_model(config: ClientConfig):
+def build_realtime_model(config: AgentConfig):
     """Construye el modelo OpenAI Realtime para modo realtime."""
     from livekit.plugins import openai
 

@@ -168,6 +168,19 @@ async def purchase_and_assign_phone(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado"
         )
+
+    # También actualizar el agent default
+    from api.services.phone_service import assign_phone_to_agent
+    default_agent = sb.table("agents").select("id").eq("client_id", client_id).order("created_at").limit(1).execute()
+    if default_agent.data:
+        assign_phone_to_agent(
+            sb,
+            agent_id=default_agent.data[0]["id"],
+            phone_number=normalized_number,
+            phone_sid=phone_sid,
+            trunk_id=trunk_id,
+        )
+
     return client_out_from_row(row)
 
 
@@ -231,6 +244,23 @@ async def create_client(
         store_name=store_name,
         owner_email=req.owner_email,
     )
+
+    # Crear agent default para el nuevo cliente
+    client_id = row["id"]
+    voice_config = {"provider": "cartesia", "voice_id": voice_id, "realtime_voice": "alloy", "realtime_model": "gpt-4o-realtime-preview"}
+    llm_config = {"provider": "google"}
+    stt_config = {"provider": "deepgram"}
+    sb.table("agents").insert({
+        "client_id": client_id,
+        "name": req.agent_name,
+        "slug": "default",
+        "system_prompt": system_prompt,
+        "greeting": greeting,
+        "voice_config": voice_config,
+        "llm_config": llm_config,
+        "stt_config": stt_config,
+    }).execute()
+
     return client_out_from_row(row)
 
 
@@ -255,6 +285,7 @@ async def update_client(
         "voice_mode", "stt_provider", "llm_provider", "tts_provider",
         "stt_api_key", "llm_api_key", "tts_api_key",
         "realtime_api_key", "realtime_voice", "realtime_model",
+        "orchestration_mode", "orchestrator_model", "orchestrator_prompt",
     }
 
     updates = req.model_dump(exclude_none=True)
@@ -266,8 +297,98 @@ async def update_client(
         if not updates:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin permiso para esos campos")
 
+    # Separar campos de agente de campos de cliente
+    agent_fields = {
+        "greeting", "system_prompt", "conversation_examples",
+        "agent_name", "voice_id",
+        "max_call_duration_seconds", "transfer_number", "after_hours_message",
+        "voice_mode", "stt_provider", "llm_provider", "tts_provider",
+        "stt_api_key", "llm_api_key", "tts_api_key",
+        "realtime_api_key", "realtime_voice", "realtime_model",
+    }
+    agent_updates: dict = {}
+    client_updates: dict = {}
+    for k, v in updates.items():
+        if k in agent_fields:
+            agent_updates[k] = v
+        client_updates[k] = v  # Siempre escribir en clients para backward compat
+
     sb = get_supabase()
-    result = sb.table("clients").update(updates).eq("id", client_id).execute()
+
+    # Delegar campos de agente al agent default
+    if agent_updates:
+        default_agent = (
+            sb.table("agents")
+            .select("id, voice_config, llm_config, stt_config")
+            .eq("client_id", client_id)
+            .order("created_at")
+            .limit(1)
+            .execute()
+        )
+        if default_agent.data:
+            a = default_agent.data[0]
+            a_updates: dict = {}
+            # Campos directos
+            for f in ("greeting", "system_prompt", "max_call_duration_seconds",
+                       "transfer_number", "after_hours_message"):
+                if f in agent_updates:
+                    a_updates[f] = agent_updates[f]
+            if "agent_name" in agent_updates:
+                a_updates["name"] = agent_updates["agent_name"]
+            if "conversation_examples" in agent_updates:
+                a_updates["examples"] = agent_updates["conversation_examples"]
+            if "voice_mode" in agent_updates:
+                a_updates["agent_mode"] = agent_updates["voice_mode"]
+            # JSONB voice_config
+            vc = dict(a.get("voice_config") or {})
+            vc_changed = False
+            if "voice_id" in agent_updates:
+                vc["voice_id"] = agent_updates["voice_id"]
+                vc_changed = True
+            if "tts_provider" in agent_updates:
+                vc["provider"] = agent_updates["tts_provider"]
+                vc_changed = True
+            if "tts_api_key" in agent_updates:
+                vc["api_key"] = agent_updates["tts_api_key"]
+                vc_changed = True
+            if "realtime_api_key" in agent_updates:
+                vc["realtime_api_key"] = agent_updates["realtime_api_key"]
+                vc_changed = True
+            if "realtime_voice" in agent_updates:
+                vc["realtime_voice"] = agent_updates["realtime_voice"]
+                vc_changed = True
+            if "realtime_model" in agent_updates:
+                vc["realtime_model"] = agent_updates["realtime_model"]
+                vc_changed = True
+            if vc_changed:
+                a_updates["voice_config"] = vc
+            # JSONB llm_config
+            lc = dict(a.get("llm_config") or {})
+            lc_changed = False
+            if "llm_provider" in agent_updates:
+                lc["provider"] = agent_updates["llm_provider"]
+                lc_changed = True
+            if "llm_api_key" in agent_updates:
+                lc["api_key"] = agent_updates["llm_api_key"]
+                lc_changed = True
+            if lc_changed:
+                a_updates["llm_config"] = lc
+            # JSONB stt_config
+            sc = dict(a.get("stt_config") or {})
+            sc_changed = False
+            if "stt_provider" in agent_updates:
+                sc["provider"] = agent_updates["stt_provider"]
+                sc_changed = True
+            if "stt_api_key" in agent_updates:
+                sc["api_key"] = agent_updates["stt_api_key"]
+                sc_changed = True
+            if sc_changed:
+                a_updates["stt_config"] = sc
+
+            if a_updates:
+                sb.table("agents").update(a_updates).eq("id", a["id"]).execute()
+
+    result = sb.table("clients").update(client_updates).eq("id", client_id).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
     return client_out_from_row(result.data[0])
@@ -312,6 +433,19 @@ async def assign_phone(
     )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+
+    # También actualizar el agent default
+    from api.services.phone_service import assign_phone_to_agent
+    default_agent = sb.table("agents").select("id").eq("client_id", client_id).order("created_at").limit(1).execute()
+    if default_agent.data:
+        assign_phone_to_agent(
+            sb,
+            agent_id=default_agent.data[0]["id"],
+            phone_number=req.phone_number,
+            phone_sid=phone_sid,
+            trunk_id=trunk_id,
+        )
+
     return client_out_from_row(row)
 
 

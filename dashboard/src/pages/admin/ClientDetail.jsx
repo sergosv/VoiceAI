@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useToast } from '../../context/ToastContext'
 import { useConfirm } from '../../context/ConfirmContext'
@@ -17,8 +17,8 @@ export function ClientDetail() {
   const toast = useToast()
   const confirm = useConfirm()
   const [client, setClient] = useState(null)
+  const [agents, setAgents] = useState([])
   const [calls, setCalls] = useState([])
-  const [voices, setVoices] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -27,27 +27,34 @@ export function ClientDetail() {
   const [userForm, setUserForm] = useState({ email: '', password: '', display_name: '' })
   const [creatingUser, setCreatingUser] = useState(false)
 
-  // Modal: asignar teléfono
+  // Modal: crear agente
+  const [showAgentModal, setShowAgentModal] = useState(false)
+  const [agentForm, setAgentForm] = useState({ name: '', agent_type: 'inbound' })
+  const [creatingAgent, setCreatingAgent] = useState(false)
+
+  // Modal: asignar teléfono (a nivel de agente)
   const [showPhoneModal, setShowPhoneModal] = useState(false)
-  const [phoneTab, setPhoneTab] = useState('search') // 'search' | 'manual'
+  const [phoneAgentId, setPhoneAgentId] = useState(null)
+  const [phoneTab, setPhoneTab] = useState('search')
   const [phoneForm, setPhoneForm] = useState({ phone_number: '', skip_livekit: false })
   const [assigningPhone, setAssigningPhone] = useState(false)
-
-  // Buscar y comprar números
   const [searchForm, setSearchForm] = useState({ country: 'MX', area_code: '' })
   const [availableNumbers, setAvailableNumbers] = useState([])
   const [searchingNumbers, setSearchingNumbers] = useState(false)
   const [purchasingNumber, setPurchasingNumber] = useState(null)
 
+  // Orchestration state
+  const [orchOpen, setOrchOpen] = useState(false)
+
   useEffect(() => {
     Promise.all([
       api.get(`/clients/${id}`),
+      api.get(`/clients/${id}/agents`),
       api.get(`/calls?client_id=${id}&per_page=10`),
-      api.get('/voices'),
-    ]).then(([c, cl, v]) => {
+    ]).then(([c, ag, cl]) => {
       setClient(c)
+      setAgents(ag)
       setCalls(cl)
-      setVoices(v)
     }).catch(() => navigate('/admin/clients'))
       .finally(() => setLoading(false))
   }, [id])
@@ -55,21 +62,18 @@ export function ClientDetail() {
   async function handleSave() {
     setSaving(true)
     try {
-      const updated = await api.patch(`/clients/${id}`, {
+      const payload = {
         name: client.name,
-        agent_name: client.agent_name,
-        greeting: client.greeting,
-        system_prompt: client.system_prompt,
         language: client.language,
-        voice_id: client.voice_id,
         is_active: client.is_active,
-        max_call_duration_seconds: client.max_call_duration_seconds,
         monthly_minutes_limit: client.monthly_minutes_limit,
-        transfer_number: client.transfer_number || null,
-        after_hours_message: client.after_hours_message || null,
-      })
+        orchestration_mode: client.orchestration_mode,
+        orchestrator_model: client.orchestrator_model,
+      }
+      if (client.orchestrator_prompt) payload.orchestrator_prompt = client.orchestrator_prompt
+      const updated = await api.patch(`/clients/${id}`, payload)
       setClient(updated)
-      toast.success('Configuración guardada')
+      toast.success('Configuracion guardada')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -80,7 +84,7 @@ export function ClientDetail() {
   async function handleDelete() {
     const ok = await confirm({
       title: 'Eliminar cliente',
-      message: `¿Eliminar ${client.name}? Se borrarán todos sus datos, llamadas y documentos.`,
+      message: `Eliminar ${client.name}? Se borraran todos sus datos, agentes, llamadas y documentos.`,
       confirmText: 'Eliminar',
       variant: 'danger',
     })
@@ -115,18 +119,44 @@ export function ClientDetail() {
     }
   }
 
+  async function handleCreateAgent(e) {
+    e.preventDefault()
+    setCreatingAgent(true)
+    try {
+      const newAgent = await api.post(`/clients/${id}/agents`, {
+        name: agentForm.name,
+        agent_type: agentForm.agent_type,
+      })
+      setAgents([...agents, newAgent])
+      toast.success(`Agente "${newAgent.name}" creado`)
+      setShowAgentModal(false)
+      setAgentForm({ name: '', agent_type: 'inbound' })
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setCreatingAgent(false)
+    }
+  }
+
+  function openPhoneModal(agentId) {
+    setPhoneAgentId(agentId)
+    setPhoneTab('search')
+    setPhoneForm({ phone_number: '', skip_livekit: false })
+    setAvailableNumbers([])
+    setShowPhoneModal(true)
+  }
+
   async function handleAssignPhone(e) {
     e.preventDefault()
     setAssigningPhone(true)
     try {
-      const updated = await api.post(`/clients/${id}/assign-phone`, {
+      const updated = await api.post(`/clients/${id}/agents/${phoneAgentId}/assign-phone`, {
         phone_number: phoneForm.phone_number,
         skip_livekit: phoneForm.skip_livekit,
       })
-      setClient(updated)
-      toast.success(`Teléfono ${phoneForm.phone_number} asignado`)
+      setAgents(agents.map(a => a.id === phoneAgentId ? updated : a))
+      toast.success(`Telefono ${phoneForm.phone_number} asignado`)
       setShowPhoneModal(false)
-      setPhoneForm({ phone_number: '', skip_livekit: false })
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -143,7 +173,7 @@ export function ClientDetail() {
       if (searchForm.area_code) params.set('area_code', searchForm.area_code)
       const numbers = await api.get(`/clients/available-numbers?${params}`)
       setAvailableNumbers(numbers)
-      if (numbers.length === 0) toast.info('No se encontraron números disponibles')
+      if (numbers.length === 0) toast.info('No se encontraron numeros disponibles')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -153,21 +183,20 @@ export function ClientDetail() {
 
   async function handlePurchaseNumber(phoneNumber) {
     const ok = await confirm({
-      title: 'Comprar número',
-      message: `¿Comprar ${phoneNumber} y asignarlo a ${client.name}? Se creará el SIP trunk automáticamente. Se aplicarán cargos de Twilio.`,
+      title: 'Comprar numero',
+      message: `Comprar ${phoneNumber} y asignarlo al agente? Se creara el SIP trunk automaticamente.`,
       confirmText: 'Comprar y asignar',
       variant: 'warning',
     })
     if (!ok) return
     setPurchasingNumber(phoneNumber)
     try {
-      const updated = await api.post(`/clients/${id}/purchase-phone`, {
+      const updated = await api.post(`/clients/${id}/agents/${phoneAgentId}/purchase-phone`, {
         phone_number: phoneNumber,
       })
-      setClient(updated)
-      toast.success(`Número ${phoneNumber} comprado y asignado`)
+      setAgents(agents.map(a => a.id === phoneAgentId ? updated : a))
+      toast.success(`Numero ${phoneNumber} comprado y asignado`)
       setShowPhoneModal(false)
-      setAvailableNumbers([])
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -177,9 +206,6 @@ export function ClientDetail() {
 
   if (loading) return <PageLoader />
   if (!client) return null
-
-  // Encontrar voice key actual
-  const currentVoice = voices.find(v => v.id === client.voice_id)
 
   return (
     <div className="space-y-6">
@@ -196,50 +222,30 @@ export function ClientDetail() {
         <Button variant="secondary" onClick={() => setShowUserModal(true)}>
           <UserPlus size={16} className="mr-2 inline" /> Crear acceso portal
         </Button>
-        <Button variant="secondary" onClick={() => setShowPhoneModal(true)}>
-          <Phone size={16} className="mr-2 inline" />
-          {client.phone_number ? 'Cambiar teléfono' : 'Asignar teléfono'}
+        <Button variant="secondary" onClick={() => setShowAgentModal(true)}>
+          <Plus size={16} className="mr-2 inline" /> Agregar agente
         </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="space-y-4">
-          <h2 className="text-sm font-semibold text-text-secondary">Información</h2>
+          <h2 className="text-sm font-semibold text-text-secondary">Informacion del negocio</h2>
           <Input label="Nombre" value={client.name} onChange={e => setClient({ ...client, name: e.target.value })} />
-          <Input label="Agente" value={client.agent_name} onChange={e => setClient({ ...client, agent_name: e.target.value })} />
-          <Select
-            label="Voz"
-            value={client.voice_id}
-            onChange={e => setClient({ ...client, voice_id: e.target.value })}
-            options={voices.map(v => ({ value: v.id, label: `${v.name} — ${v.description}` }))}
-          />
           <Select
             label="Idioma"
             value={client.language}
             onChange={e => setClient({ ...client, language: e.target.value })}
             options={[
-              { value: 'es', label: 'Español' },
+              { value: 'es', label: 'Espanol' },
               { value: 'en', label: 'English' },
-              { value: 'es-en', label: 'Bilingüe' },
+              { value: 'es-en', label: 'Bilingue' },
             ]}
           />
           <Input
-            label="Duración máxima (seg)"
-            type="number"
-            value={client.max_call_duration_seconds}
-            onChange={e => setClient({ ...client, max_call_duration_seconds: parseInt(e.target.value) || 300 })}
-          />
-          <Input
-            label="Límite minutos/mes"
+            label="Limite minutos/mes"
             type="number"
             value={client.monthly_minutes_limit}
             onChange={e => setClient({ ...client, monthly_minutes_limit: parseInt(e.target.value) || 500 })}
-          />
-          <Input
-            label="Número de transferencia"
-            value={client.transfer_number || ''}
-            onChange={e => setClient({ ...client, transfer_number: e.target.value })}
-            placeholder="+52..."
           />
           <Select
             label="Estado"
@@ -251,23 +257,150 @@ export function ClientDetail() {
             ]}
           />
           <div className="text-xs text-text-muted space-y-1">
-            <p>Teléfono: <span className="font-mono">{client.phone_number || 'Sin asignar'}</span></p>
             <p>Store: <span className="font-mono text-[10px]">{client.file_search_store_id || 'N/A'}</span></p>
           </div>
         </Card>
 
+        {/* Agents list */}
         <Card className="space-y-4">
-          <h2 className="text-sm font-semibold text-text-secondary">Mensajes</h2>
-          <Textarea label="Saludo" value={client.greeting} onChange={e => setClient({ ...client, greeting: e.target.value })} rows={3} />
-          <Textarea label="System prompt" value={client.system_prompt} onChange={e => setClient({ ...client, system_prompt: e.target.value })} rows={8} />
-          <Textarea
-            label="Mensaje fuera de horario"
-            value={client.after_hours_message || ''}
-            onChange={e => setClient({ ...client, after_hours_message: e.target.value })}
-            rows={2}
-          />
+          <h2 className="text-sm font-semibold text-text-secondary">
+            <Bot size={14} className="inline mr-1.5 -mt-0.5" />
+            Agentes ({agents.length})
+          </h2>
+          {agents.length === 0 ? (
+            <p className="text-sm text-text-muted">Sin agentes configurados.</p>
+          ) : (
+            <div className="space-y-2">
+              {agents.map(agent => (
+                <div
+                  key={agent.id}
+                  className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-bg-hover transition-colors cursor-pointer"
+                  onClick={() => navigate(`/agents/${agent.id}`)}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm truncate">{agent.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${agent.is_active ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                        {agent.is_active ? 'Activo' : 'Inactivo'}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent">{agent.agent_type}</span>
+                    </div>
+                    <div className="text-xs text-text-muted mt-0.5">
+                      {agent.phone_number ? (
+                        <span className="font-mono">{agent.phone_number}</span>
+                      ) : (
+                        <span className="text-yellow-400/70">Sin telefono</span>
+                      )}
+                      <span className="mx-1.5">·</span>
+                      <span>{agent.agent_mode}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>{(agent.voice_config?.provider || 'cartesia')}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {!agent.phone_number && (
+                      <Button
+                        variant="secondary"
+                        className="!py-1 !px-2 text-xs"
+                        onClick={(e) => { e.stopPropagation(); openPhoneModal(agent.id) }}
+                      >
+                        <Phone size={12} />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
+
+      {/* Modo Inteligente (Orchestration) */}
+      <Card className="space-y-0">
+        <button
+          type="button"
+          onClick={() => setOrchOpen(o => !o)}
+          className="w-full flex items-center justify-between cursor-pointer"
+        >
+          <div className="flex items-center gap-2">
+            <Zap size={20} className="text-purple-400" />
+            <h2 className="text-lg font-semibold">Modo Inteligente</h2>
+            {client.orchestration_mode === 'intelligent' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">Activo</span>
+            )}
+          </div>
+          {orchOpen
+            ? <ChevronUp size={20} className="text-text-muted" />
+            : <ChevronDown size={20} className="text-text-muted" />
+          }
+        </button>
+
+        {orchOpen && (
+          <div className="mt-4 space-y-4">
+            <p className="text-xs text-text-muted">
+              Permite que todos los agentes esten disponibles en el mismo telefono.
+              Un coordinador IA decide en tiempo real cual agente responde segun la intencion del usuario.
+            </p>
+
+            {agents.length < 2 ? (
+              <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-sm text-yellow-400">
+                Necesitas al menos 2 agentes para activar el Modo Inteligente.
+              </div>
+            ) : (
+              <>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={client.orchestration_mode === 'intelligent'}
+                    onChange={e => setClient({
+                      ...client,
+                      orchestration_mode: e.target.checked ? 'intelligent' : 'simple',
+                    })}
+                    className="accent-purple-400 w-4 h-4"
+                  />
+                  <span className="text-sm font-medium">
+                    Activar orquestacion multi-agente
+                  </span>
+                </label>
+
+                {client.orchestration_mode === 'intelligent' && (
+                  <div className="space-y-3 pl-7">
+                    <Select
+                      label="Modelo coordinador"
+                      value={client.orchestrator_model || 'gemini-2.0-flash'}
+                      onChange={e => setClient({ ...client, orchestrator_model: e.target.value })}
+                      options={[
+                        { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (rapido)' },
+                        { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (mejor)' },
+                      ]}
+                    />
+
+                    <div>
+                      <label className="block text-xs text-text-muted mb-1">Agentes en el roster</label>
+                      <div className="space-y-1.5">
+                        {agents.map(agent => (
+                          <div key={agent.id} className="flex items-center gap-3 p-2 rounded-lg bg-bg-secondary border border-border text-sm">
+                            <span className="font-medium flex-1 truncate">{agent.name}</span>
+                            <span className="text-[10px] text-text-muted truncate max-w-[200px]">
+                              {agent.role_description || 'Sin descripcion de rol'}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/10 text-accent">
+                              P:{agent.orchestrator_priority ?? 0}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-text-muted mt-1">
+                        Configura el rol y prioridad de cada agente en su pagina de detalle.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </Card>
 
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={saving}>
@@ -295,12 +428,12 @@ export function ClientDetail() {
             required
           />
           <Input
-            label="Contraseña"
+            label="Contrasena"
             type="password"
             value={userForm.password}
             onChange={e => setUserForm(f => ({ ...f, password: e.target.value }))}
             required
-            placeholder="Mínimo 6 caracteres"
+            placeholder="Minimo 6 caracteres"
           />
           <Input
             label="Nombre (opcional)"
@@ -313,9 +446,37 @@ export function ClientDetail() {
         </form>
       </Modal>
 
-      {/* Modal: Asignar teléfono (2 tabs) */}
-      <Modal open={showPhoneModal} onClose={() => setShowPhoneModal(false)} title="Asignar teléfono" maxWidth="max-w-2xl">
-        {/* Tabs */}
+      {/* Modal: Crear agente */}
+      <Modal open={showAgentModal} onClose={() => setShowAgentModal(false)} title="Agregar agente">
+        <form onSubmit={handleCreateAgent} className="space-y-4">
+          <Input
+            label="Nombre del agente"
+            value={agentForm.name}
+            onChange={e => setAgentForm(f => ({ ...f, name: e.target.value }))}
+            required
+            placeholder="Ej: Maria, Soporte, Ventas"
+          />
+          <Select
+            label="Tipo"
+            value={agentForm.agent_type}
+            onChange={e => setAgentForm(f => ({ ...f, agent_type: e.target.value }))}
+            options={[
+              { value: 'inbound', label: 'Inbound (recibe llamadas)' },
+              { value: 'outbound', label: 'Outbound (hace llamadas)' },
+              { value: 'both', label: 'Ambos' },
+            ]}
+          />
+          <p className="text-xs text-text-muted">
+            Se creara con un prompt y configuracion por defecto. Puedes editarlo despues.
+          </p>
+          <Button type="submit" className="w-full" disabled={creatingAgent}>
+            {creatingAgent ? 'Creando...' : 'Crear agente'}
+          </Button>
+        </form>
+      </Modal>
+
+      {/* Modal: Asignar telefono a agente */}
+      <Modal open={showPhoneModal} onClose={() => setShowPhoneModal(false)} title="Asignar telefono al agente" maxWidth="max-w-2xl">
         <div className="flex gap-1 mb-4 border-b border-border">
           <button
             className={`px-4 py-2 text-sm font-medium cursor-pointer ${phoneTab === 'search' ? 'text-accent border-b-2 border-accent' : 'text-text-muted hover:text-text-secondary'}`}
@@ -331,16 +492,15 @@ export function ClientDetail() {
           </button>
         </div>
 
-        {/* Tab: Buscar y comprar */}
         {phoneTab === 'search' && (
           <div className="space-y-4">
             <form onSubmit={handleSearchNumbers} className="flex gap-3 items-end">
               <Select
-                label="País"
+                label="Pais"
                 value={searchForm.country}
                 onChange={e => setSearchForm(f => ({ ...f, country: e.target.value }))}
                 options={[
-                  { value: 'MX', label: 'México (+52)' },
+                  { value: 'MX', label: 'Mexico (+52)' },
                   { value: 'US', label: 'Estados Unidos (+1)' },
                   { value: 'CO', label: 'Colombia (+57)' },
                   { value: 'CL', label: 'Chile (+56)' },
@@ -348,7 +508,7 @@ export function ClientDetail() {
                 ]}
               />
               <Input
-                label="Código de área"
+                label="Codigo de area"
                 value={searchForm.area_code}
                 onChange={e => setSearchForm(f => ({ ...f, area_code: e.target.value }))}
                 placeholder="999"
@@ -364,9 +524,9 @@ export function ClientDetail() {
                 <table className="w-full text-sm">
                   <thead className="bg-bg-tertiary text-text-secondary">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium">Número</th>
+                      <th className="text-left px-3 py-2 font-medium">Numero</th>
                       <th className="text-left px-3 py-2 font-medium">Localidad</th>
-                      <th className="text-left px-3 py-2 font-medium">Región</th>
+                      <th className="text-left px-3 py-2 font-medium">Region</th>
                       <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
@@ -393,18 +553,13 @@ export function ClientDetail() {
                 </table>
               </div>
             )}
-
-            <p className="text-xs text-text-muted">
-              Busca números disponibles en Twilio. Al comprar se configura automáticamente el SIP trunk en LiveKit.
-            </p>
           </div>
         )}
 
-        {/* Tab: Asignar existente */}
         {phoneTab === 'manual' && (
           <form onSubmit={handleAssignPhone} className="space-y-4">
             <Input
-              label="Número de teléfono"
+              label="Numero de telefono"
               value={phoneForm.phone_number}
               onChange={e => setPhoneForm(f => ({ ...f, phone_number: e.target.value }))}
               required
@@ -417,13 +572,10 @@ export function ClientDetail() {
                 onChange={e => setPhoneForm(f => ({ ...f, skip_livekit: e.target.checked }))}
                 className="accent-accent"
               />
-              Omitir configuración SIP en LiveKit (configurar manualmente)
+              Omitir configuracion SIP en LiveKit
             </label>
-            <p className="text-xs text-text-muted">
-              El número debe existir en tu cuenta de Twilio. Se configurará el SIP trunk y dispatch rule automáticamente.
-            </p>
             <Button type="submit" className="w-full" disabled={assigningPhone}>
-              {assigningPhone ? 'Configurando...' : 'Asignar teléfono'}
+              {assigningPhone ? 'Configurando...' : 'Asignar telefono'}
             </Button>
           </form>
         )}

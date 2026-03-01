@@ -11,8 +11,9 @@ livekit-plugins-anthropic>=1.4,<2
 livekit-plugins-elevenlabs>=1.4,<2
 livekit-plugins-noise-cancellation>=0.2
 
-# Google Gemini (File Search)
+# Google Gemini (File Search + ADK Orchestration)
 google-genai>=1.65
+google-adk>=1.0
 
 # Database
 supabase>=2.0

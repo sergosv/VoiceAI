@@ -120,3 +120,23 @@ def assign_phone_to_client(
 
     result = sb.table("clients").update(update_data).eq("id", client_id).execute()
     return result.data[0] if result.data else {}
+
+
+def assign_phone_to_agent(
+    sb: Client,
+    *,
+    agent_id: str,
+    phone_number: str,
+    phone_sid: str,
+    trunk_id: str | None = None,
+) -> dict:
+    """Actualiza un agente con el número de teléfono."""
+    update_data: dict = {
+        "phone_number": phone_number,
+        "phone_sid": phone_sid,
+    }
+    if trunk_id:
+        update_data["livekit_sip_trunk_id"] = trunk_id
+
+    result = sb.table("agents").update(update_data).eq("id", agent_id).execute()
+    return result.data[0] if result.data else {}

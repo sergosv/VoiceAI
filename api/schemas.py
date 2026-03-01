@@ -38,6 +38,88 @@ class VoiceOut(BaseModel):
     description: str
 
 
+# ── Agents ───────────────────────────────────────────
+
+class AgentOut(BaseModel):
+    id: str
+    client_id: str
+    name: str
+    slug: str
+    phone_number: str | None = None
+    system_prompt: str = ""
+    greeting: str = ""
+    examples: str | None = None
+    voice_config: dict = Field(default_factory=dict)
+    llm_config: dict = Field(default_factory=dict)
+    stt_config: dict = Field(default_factory=dict)
+    agent_mode: str = "pipeline"
+    agent_type: str = "inbound"
+    transfer_number: str | None = None
+    after_hours_message: str | None = None
+    max_call_duration_seconds: int = 300
+    is_active: bool = True
+    # Orchestration
+    role_description: str | None = None
+    orchestrator_enabled: bool = True
+    orchestrator_priority: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class AgentCreateRequest(BaseModel):
+    name: str
+    slug: str | None = None
+    system_prompt: str | None = None
+    greeting: str | None = None
+    examples: str | None = None
+    agent_mode: str = "pipeline"
+    agent_type: str = "inbound"
+    transfer_number: str | None = None
+    after_hours_message: str | None = None
+    max_call_duration_seconds: int = 300
+    voice_key: str = "es_female_warm"
+    stt_provider: str = "deepgram"
+    llm_provider: str = "google"
+    tts_provider: str = "cartesia"
+    stt_api_key: str | None = None
+    llm_api_key: str | None = None
+    tts_api_key: str | None = None
+    realtime_api_key: str | None = None
+    realtime_voice: str = "alloy"
+    realtime_model: str = "gpt-4o-realtime-preview"
+    # Orchestration
+    role_description: str | None = None
+    orchestrator_enabled: bool = True
+    orchestrator_priority: int = 0
+
+
+class AgentUpdateRequest(BaseModel):
+    name: str | None = None
+    system_prompt: str | None = None
+    greeting: str | None = None
+    examples: str | None = None
+    agent_mode: str | None = None
+    agent_type: str | None = None
+    transfer_number: str | None = None
+    after_hours_message: str | None = None
+    max_call_duration_seconds: int | None = None
+    is_active: bool | None = None
+    voice_id: str | None = None
+    stt_provider: str | None = None
+    llm_provider: str | None = None
+    tts_provider: str | None = None
+    stt_api_key: str | None = None
+    llm_api_key: str | None = None
+    tts_api_key: str | None = None
+    realtime_api_key: str | None = None
+    realtime_voice: str | None = None
+    realtime_model: str | None = None
+    # Orchestration
+    role_description: str | None = None
+    orchestrator_enabled: bool | None = None
+    orchestrator_priority: int | None = None
+
+
 # ── Clients ───────────────────────────────────────────
 
 class ClientOut(BaseModel):
@@ -77,6 +159,10 @@ class ClientOut(BaseModel):
     has_realtime_api_key: bool = False
     realtime_voice: str = "alloy"
     realtime_model: str = "gpt-4o-realtime-preview"
+    # Orchestration
+    orchestration_mode: str = "simple"
+    orchestrator_model: str = "gemini-2.0-flash"
+    orchestrator_prompt: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -125,6 +211,10 @@ class ClientUpdateRequest(BaseModel):
     realtime_api_key: str | None = None
     realtime_voice: str | None = None
     realtime_model: str | None = None
+    # Orchestration
+    orchestration_mode: str | None = None
+    orchestrator_model: str | None = None
+    orchestrator_prompt: str | None = None
 
 
 class AssignPhoneRequest(BaseModel):
@@ -154,6 +244,8 @@ class PromptTemplateOut(BaseModel):
 class CallOut(BaseModel):
     id: str
     client_id: str
+    agent_id: str | None = None
+    agent_name: str | None = None
     direction: str
     caller_number: str | None = None
     callee_number: str | None = None
@@ -176,6 +268,7 @@ class CallDetailOut(CallOut):
     cost_tts: Decimal = Decimal("0")
     cost_telephony: Decimal = Decimal("0")
     transcript: list[dict] | None = None
+    agent_turns: list[dict] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
     intencion: str | None = None
     lead_score: int | None = None
@@ -296,7 +389,51 @@ class AppointmentUpdateRequest(BaseModel):
     status: str | None = None
 
 
+# ── AI Prompt Assistant ──────────────────────────────
+
+class GeneratePromptRequest(BaseModel):
+    type: str = "agent"  # "agent" | "campaign"
+    business_name: str | None = None
+    business_type: str | None = None
+    agent_name: str | None = None
+    tone: str | None = None
+    main_function: str | None = None
+    # Campaign-specific
+    objective: str | None = None
+    product: str | None = None
+    hook: str | None = None
+    data_to_capture: str | None = None
+    objection_handling: str | None = None
+
+
+class ImprovePromptRequest(BaseModel):
+    prompt: str
+    type: str = "agent"
+
+
+class PromptAIResponse(BaseModel):
+    prompt: str
+
+
 # ── Generic ───────────────────────────────────────────
+
+class ChatMessageRequest(BaseModel):
+    conversation_id: str | None = None
+    message: str = ""
+    contact_name: str | None = None  # outbound: nombre del contacto
+    campaign_script: str | None = None  # script de campaña que reemplaza el prompt
+
+
+class ChatMessageResponse(BaseModel):
+    conversation_id: str
+    role: str = "agent"
+    text: str
+    tool_calls: list[dict] = Field(default_factory=list)
+
+
+class ChatResetResponse(BaseModel):
+    message: str
+
 
 class MessageResponse(BaseModel):
     message: str
@@ -322,3 +459,22 @@ def client_out_from_row(row: dict) -> ClientOut:
     # Eliminar google_service_account_key del output (es un JSON grande)
     data.pop("google_service_account_key", None)
     return ClientOut(**data)
+
+
+def agent_out_from_row(row: dict) -> AgentOut:
+    """Convierte un row de DB agents a AgentOut, strip API keys."""
+    data = dict(row)
+    # Strip API keys de voice_config, llm_config, stt_config
+    for config_key in ("voice_config", "llm_config", "stt_config"):
+        cfg = data.get(config_key) or {}
+        if isinstance(cfg, dict):
+            stripped = dict(cfg)
+            has_key = bool(stripped.pop("api_key", None))
+            has_realtime = bool(stripped.pop("realtime_api_key", None))
+            stripped["has_api_key"] = has_key
+            if config_key == "voice_config":
+                stripped["has_realtime_api_key"] = has_realtime
+            data[config_key] = stripped
+    # Eliminar columna clients si viene del join
+    data.pop("clients", None)
+    return AgentOut(**data)

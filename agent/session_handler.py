@@ -11,7 +11,7 @@ from decimal import Decimal
 from supabase import create_client, Client
 
 from agent.call_analyzer import analyze_call_transcript, analyze_call_universal
-from agent.config_loader import ClientConfig
+from agent.config_loader import ResolvedConfig
 from agent.phone_utils import normalize_phone
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class SessionHandler:
 
     def __init__(
         self,
-        config: ClientConfig,
+        config: ResolvedConfig,
         direction: str,
         caller_number: str | None,
         callee_number: str | None,
@@ -44,6 +44,8 @@ class SessionHandler:
         campaign_script: str | None = None,
     ) -> None:
         self._config = config
+        self._client_id = config.client.id
+        self._agent_id = config.agent.id
         self._direction = direction
         self._caller_number = caller_number
         self._callee_number = callee_number
@@ -52,6 +54,11 @@ class SessionHandler:
         self._campaign_script = campaign_script
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
+        self._agent_turns: list[dict] = []
+
+    def set_agent_turns(self, turns: list[dict]) -> None:
+        """Establece el historial de ruteo de agentes (modo orquestado)."""
+        self._agent_turns = turns
 
     def add_transcript_entry(self, role: str, text: str) -> None:
         """Agrega una entrada a la transcripción."""
@@ -82,8 +89,9 @@ class SessionHandler:
         total_cost = sum(costs.values())
 
         logger.info(
-            "Llamada finalizada para '%s': %ds, $%.4f USD",
-            self._config.slug,
+            "Llamada finalizada para '%s/%s': %ds, $%.4f USD",
+            self._config.client.slug,
+            self._config.agent.slug,
             duration_seconds,
             total_cost,
         )
@@ -92,7 +100,8 @@ class SessionHandler:
 
         # Guardar call log
         call_data = {
-            "client_id": self._config.id,
+            "client_id": self._client_id,
+            "agent_id": self._agent_id,
             "direction": self._direction,
             "caller_number": self._caller_number,
             "callee_number": self._callee_number,
@@ -110,12 +119,15 @@ class SessionHandler:
             "started_at": self._started_at.isoformat(),
             "ended_at": ended_at.isoformat(),
             "metadata": {
-                "voice_mode": self._config.voice_mode,
-                "stt_provider": self._config.stt_provider,
-                "llm_provider": self._config.llm_provider,
-                "tts_provider": self._config.tts_provider,
+                "voice_mode": self._config.agent.agent_mode,
+                "stt_provider": self._config.agent.stt_provider,
+                "llm_provider": self._config.agent.llm_provider,
+                "tts_provider": self._config.agent.tts_provider,
+                "agent_name": self._config.agent.name,
             },
         }
+        if self._agent_turns:
+            call_data["agent_turns"] = self._agent_turns
         call_result = sb.table("calls").insert(call_data).execute()
         call_id = call_result.data[0]["id"] if call_result.data else None
 
@@ -124,7 +136,6 @@ class SessionHandler:
             try:
                 phone = self._callee_number or self._caller_number
                 if phone:
-                    # Buscar el campaign_call por campaign_id + phone + status calling
                     cc = (
                         sb.table("campaign_calls")
                         .select("id, campaign_id")
@@ -139,7 +150,6 @@ class SessionHandler:
                         had_conversation = len(self._transcript) > 1
                         call_status = "completed" if had_conversation else "no_answer"
 
-                        # Generar resumen de la conversación
                         summary_text = None
                         if self._transcript:
                             summary_text = " | ".join(
@@ -155,17 +165,15 @@ class SessionHandler:
                             "result_summary": summary_text,
                         }
 
-                        # Análisis IA de la transcripción
                         if had_conversation:
                             analysis = await analyze_call_transcript(
                                 self._transcript, self._campaign_script
                             )
                             if analysis:
                                 update_data["analysis_data"] = analysis
-                                # Enriquecer contacto con datos extraídos
                                 _enrich_contact(
                                     sb,
-                                    self._config.id,
+                                    self._client_id,
                                     phone,
                                     cc.data[0].get("contact_id"),
                                     analysis,
@@ -175,7 +183,6 @@ class SessionHandler:
                             update_data
                         ).eq("id", cc_id).execute()
 
-                        # Actualizar contadores de la campaña
                         _update_campaign_counters(sb, self._campaign_id)
                         logger.info(
                             "Campaign call actualizada: %s -> %s (transcript: %d entries)",
@@ -191,7 +198,7 @@ class SessionHandler:
         if phone_for_contact:
             try:
                 _smart_upsert_contact(
-                    sb, self._config.id, phone_for_contact,
+                    sb, self._client_id, phone_for_contact,
                     self._direction + "_call", call_id,
                 )
             except Exception:
@@ -204,8 +211,8 @@ class SessionHandler:
                     call_id=call_id,
                     transcript=list(self._transcript),
                     direction=self._direction,
-                    client_id=self._config.id,
-                    business_type=self._config.business_type,
+                    client_id=self._client_id,
+                    business_type=self._config.client.business_type,
                     phone_for_contact=phone_for_contact,
                 )
             )
@@ -215,11 +222,10 @@ class SessionHandler:
         is_inbound = 1 if self._direction == "inbound" else 0
         is_outbound = 1 if self._direction == "outbound" else 0
 
-        # Buscar registro existente
         existing = (
             sb.table("usage_daily")
             .select("*")
-            .eq("client_id", self._config.id)
+            .eq("client_id", self._client_id)
             .eq("date", today)
             .limit(1)
             .execute()
@@ -236,7 +242,7 @@ class SessionHandler:
             }).eq("id", row["id"]).execute()
         else:
             sb.table("usage_daily").insert({
-                "client_id": self._config.id,
+                "client_id": self._client_id,
                 "date": today,
                 "total_calls": 1,
                 "total_minutes": float(duration_minutes),
@@ -256,7 +262,6 @@ def _smart_upsert_contact(
     """Upsert inteligente de contacto con normalización y deduplicación."""
     normalized = normalize_phone(phone)
 
-    # Buscar contacto existente por teléfono normalizado
     result = (
         sb.table("contacts").select("*")
         .eq("client_id", client_id)
@@ -268,13 +273,11 @@ def _smart_upsert_contact(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if result.data:
-        # Contacto existente: incrementar call_count, actualizar last_call_at
         contact = result.data[0]
         updates: dict = {
             "call_count": (contact.get("call_count") or 0) + 1,
             "last_call_at": now_iso,
         }
-        # Merge metadata con last_call_id
         metadata = contact.get("metadata") or {}
         if call_id:
             metadata["last_call_id"] = call_id
@@ -283,7 +286,6 @@ def _smart_upsert_contact(
         sb.table("contacts").update(updates).eq("id", contact["id"]).execute()
         logger.info("Contacto actualizado (call_count +1): %s", normalized)
     else:
-        # Nuevo contacto
         contact_data = {
             "client_id": client_id,
             "phone": normalized,
@@ -306,7 +308,6 @@ def _enrich_contact(
     """Enriquece el contacto con datos extraídos del análisis de la llamada."""
     try:
         normalized = normalize_phone(phone)
-        # Buscar contacto por ID o por teléfono normalizado
         if contact_id:
             result = sb.table("contacts").select("*").eq("id", contact_id).limit(1).execute()
         else:
@@ -324,7 +325,6 @@ def _enrich_contact(
         contact = result.data[0]
         updates: dict = {}
 
-        # Solo llenar campos vacíos
         extracted_name = analysis.get("contact_name")
         if extracted_name and not contact.get("name"):
             updates["name"] = extracted_name
@@ -333,12 +333,10 @@ def _enrich_contact(
         if extracted_email and not contact.get("email"):
             updates["email"] = extracted_email
 
-        # lead_score solo sube, nunca baja
         new_lead = analysis.get("calificacion_lead")
         if new_lead and new_lead > (contact.get("lead_score") or 0):
             updates["lead_score"] = new_lead
 
-        # Merge tags (union)
         existing_tags = contact.get("tags") or []
         new_tags = analysis.get("tags") or []
         if new_tags:
@@ -346,7 +344,6 @@ def _enrich_contact(
             if merged != existing_tags:
                 updates["tags"] = merged
 
-        # Siempre actualizar metadata con el último análisis
         metadata = contact.get("metadata") or {}
         metadata["last_analysis"] = {
             "result": analysis.get("result"),
@@ -378,7 +375,6 @@ async def _async_universal_analysis(
 
         sb = _get_supabase()
 
-        # Actualizar la llamada con las columnas de análisis
         call_updates = {
             "sentimiento": analysis.get("sentimiento"),
             "intencion": analysis.get("intencion_detectada"),
@@ -390,7 +386,6 @@ async def _async_universal_analysis(
         sb.table("calls").update(call_updates).eq("id", call_id).execute()
         logger.info("Análisis universal guardado para call %s", call_id)
 
-        # Enriquecer contacto con datos del análisis universal
         if phone_for_contact:
             _enrich_contact(sb, client_id, phone_for_contact, None, analysis)
 

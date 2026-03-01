@@ -7,7 +7,7 @@ import logging
 from livekit.agents import Agent, RunContext
 from livekit.agents.llm import function_tool
 
-from agent.config_loader import ClientConfig
+from agent.config_loader import ResolvedConfig
 from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
 from agent.tools.whatsapp_tool import send_whatsapp_message
@@ -19,22 +19,22 @@ logger = logging.getLogger(__name__)
 class VoiceAgent(Agent):
     """Agente de voz personalizado por cliente.
 
-    Cada instancia se configura dinámicamente según el ClientConfig
-    del negocio al que pertenece la llamada. Las herramientas se habilitan
-    según `enabled_tools` del cliente.
+    Cada instancia se configura dinámicamente según el ResolvedConfig
+    del negocio + agente al que pertenece la llamada. Las herramientas
+    se habilitan según `enabled_tools` del cliente.
     """
 
-    def __init__(self, config: ClientConfig) -> None:
-        super().__init__(instructions=config.system_prompt)
+    def __init__(self, config: ResolvedConfig) -> None:
+        super().__init__(instructions=config.agent.system_prompt)
         self._config = config
 
     @property
-    def config(self) -> ClientConfig:
+    def config(self) -> ResolvedConfig:
         return self._config
 
     def _tool_enabled(self, tool_name: str) -> bool:
         """Verifica si una herramienta está habilitada para este cliente."""
-        return tool_name in self._config.enabled_tools
+        return tool_name in self._config.client.enabled_tools
 
     # ── Herramientas del agente ─────────────────────────────
 
@@ -51,11 +51,11 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("search_knowledge"):
             return "Herramienta de búsqueda no disponible."
 
-        store_id = self._config.file_search_store_id
+        store_id = self._config.client.file_search_store_id
         if not store_id:
             return "No hay base de conocimientos configurada."
 
-        logger.info("File Search query para '%s': %s", self._config.slug, query)
+        logger.info("File Search query para '%s': %s", self._config.client.slug, query)
         return await search_knowledge_base(query, store_id)
 
     @function_tool()
@@ -68,7 +68,7 @@ class VoiceAgent(Agent):
         Args:
             reason: Motivo de la transferencia.
         """
-        transfer_number = self._config.transfer_number
+        transfer_number = self._config.agent.transfer_number
         if not transfer_number:
             return (
                 "No hay número de transferencia configurado. "
@@ -77,7 +77,7 @@ class VoiceAgent(Agent):
 
         logger.info(
             "Solicitud de transferencia para '%s': %s",
-            self._config.slug,
+            self._config.agent.slug,
             reason,
         )
         return (
@@ -111,19 +111,18 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("schedule_appointment"):
             return "La función de agendar citas no está habilitada."
 
-        # Obtener teléfono del llamante del contexto de la sesión
         caller_phone = getattr(context, "_caller_phone", None) or ""
 
         return await schedule_appointment(
-            client_id=self._config.id,
+            client_id=self._config.client.id,
             caller_phone=caller_phone,
             patient_name=patient_name,
             date=date,
             time=time,
             duration_minutes=duration_minutes,
             description=description,
-            google_calendar_id=self._config.google_calendar_id,
-            google_service_account_key=self._config.google_service_account_key,
+            google_calendar_id=self._config.client.google_calendar_id,
+            google_service_account_key=self._config.client.google_service_account_key,
         )
 
     @function_tool()
@@ -145,7 +144,7 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("send_whatsapp"):
             return "El envío de WhatsApp no está habilitado."
 
-        cfg = self._config
+        cfg = self._config.client
         if not cfg.whatsapp_instance_id or not cfg.whatsapp_api_url or not cfg.whatsapp_api_key:
             return "WhatsApp no está configurado para este negocio."
 
@@ -180,13 +179,12 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("save_contact"):
             return "La captura de contactos no está habilitada."
 
-        # Usar el teléfono del llamante si no se proporciona otro
         contact_phone = phone or getattr(context, "_caller_phone", None) or ""
         if not contact_phone:
             return "No tengo un número de teléfono para guardar el contacto."
 
         return await save_contact(
-            client_id=self._config.id,
+            client_id=self._config.client.id,
             phone=contact_phone,
             name=name,
             email=email,
@@ -215,13 +213,13 @@ class VoiceAgent(Agent):
             return "No puedo identificar el contacto para actualizar notas."
 
         return await update_contact_notes(
-            client_id=self._config.id,
+            client_id=self._config.client.id,
             phone=caller_phone,
             notes=notes,
         )
 
 
-def _voice_rules(config: ClientConfig) -> str:
+def _voice_rules(config: ResolvedConfig) -> str:
     """Genera reglas de voz con fecha/hora actual y datos del agente."""
     from datetime import datetime, timezone, timedelta
     try:
@@ -248,8 +246,8 @@ def _voice_rules(config: ClientConfig) -> str:
 
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    agent_name = config.agent_name
-    business_name = config.name
+    agent_name = config.agent.name
+    business_name = config.client.name
 
     return (
         f"\n\n## Contexto temporal\n"
@@ -258,18 +256,30 @@ def _voice_rules(config: ClientConfig) -> str:
         f"- Cuando el usuario diga 'mañana', 'pasado mañana', 'el lunes', etc., calcula la fecha EXACTA "
         f"basándote en que hoy es {now.strftime('%Y-%m-%d')}.\n"
         f"\n## Reglas de voz (OBLIGATORIAS)\n"
-        "- Máximo 2 frases por respuesta. Si necesitas decir más, pausa y pregunta si quieren que continúes.\n"
-        "- Siempre termina con pregunta o siguiente paso. Nunca dejes silencio abierto.\n"
-        '- Usa muletillas naturales al inicio: "Mire...", "Claro que sí...", "Ah ok...", "Perfecto...", "Fíjese que..."\n'
+        "- MÁXIMO 2 frases por respuesta. Si necesitas decir más, pregunta si quieren que continúes.\n"
+        "- SIEMPRE termina con pregunta corta: '¿le parece?', '¿verdad?', '¿qué dice?', '¿le queda bien?'\n"
+        "- SIEMPRE empieza con muletilla natural: 'Claro', 'Ah ok', 'Mire', 'Sí', 'Ajá', "
+        "'Perfecto', 'Con gusto', 'Fíjese que'\n"
         "- Si te interrumpen, cede la palabra inmediatamente.\n"
         '- Confirma datos repitiendo: "Su nombre es Juan Pérez, ¿verdad?"\n'
-        "- Números de teléfono: repite dígito por dígito.\n"
-        '- Fechas: incluye el día de la semana. "El lunes 3 de marzo".\n'
+        "- Números de teléfono: di dígito por dígito con pausa: 'nueve-nueve-nueve, uno-dos-tres'.\n"
+        "- Precios: redondea natural: 'son como mil doscientos pesos', NO 'mil doscientos pesos con cero centavos'.\n"
+        "- Fechas: di natural: 'el martes que viene', NO 'el martes 15 de abril de 2026'.\n"
+        "- Horarios: di simple: 'a las diez de la mañana', NO 'a las 10:00 horas'.\n"
         "- Despedida siempre con resumen de lo acordado.\n"
         "- NUNCA digas que eres inteligencia artificial, asistente virtual ni robot.\n"
         f'- Si preguntan si eres robot, di que eres {agent_name} de {business_name}.\n'
         "- NUNCA deletrees palabras ni nombres.\n"
         "- No uses siglas ni abreviaturas.\n"
+        "- NUNCA generes listas con números o bullets. Di opciones de forma conversacional: "
+        "'Tenemos martes a las 10 o jueves a las 3, ¿cuál le queda?'\n"
+        "- NUNCA uses estas palabras: 'permítame', 'con mucho gusto le informo', "
+        "'nuestro sistema', 'base de datos', 'procesando'.\n"
+        "- Si no sabes algo: 'Déjeme verificar' o 'No tengo esa info ahorita, ¿quiere que le averigüe?'\n"
+        "- Si el usuario se oye molesto, cambia a tono empático: "
+        "'Entiendo, tiene toda la razón, déjeme ayudarle'.\n"
+        "- Si necesitas pensar o buscar información, empieza diciendo 'Déjeme ver...', "
+        "'Un momento...' o 'Ok, déjeme checar...' para llenar el silencio.\n"
     )
 
 TOOL_INSTRUCTIONS = {
@@ -304,23 +314,96 @@ def _build_tool_instructions(enabled_tools: list[str]) -> str:
     return "\n\n## Herramientas disponibles\n" + "\n".join(lines)
 
 
-def build_agent(config: ClientConfig) -> VoiceAgent:
-    """Construye un VoiceAgent configurado para un cliente específico."""
-    # Inyectar contexto temporal + reglas de voz + instrucciones de herramientas
+def build_orchestrated_agent(
+    configs: list[ResolvedConfig],
+    primary_config: ResolvedConfig,
+) -> "OrchestratorAgent":
+    """Construye un OrchestratorAgent con múltiples sub-agentes.
+
+    Cada sub-agente tiene su propio LLM y TTS. El coordinador ADK
+    decide qué agente responde en cada turno.
+    """
+    from agent.orchestrator import OrchestratorAgent, SubAgent
+    from agent.pipeline_builder import build_llm, build_tts
+
+    sub_agents: dict[str, SubAgent] = {}
+    agents_metadata: list[dict] = []
+    default_agent_id: str | None = None
+
+    for cfg in configs:
+        agent_id = cfg.agent.id
+
+        # Augmentar instrucciones igual que build_agent
+        tool_instructions = _build_tool_instructions(cfg.client.enabled_tools)
+        augmented_prompt = cfg.agent.system_prompt + _voice_rules(cfg) + tool_instructions
+        if cfg.agent.examples:
+            augmented_prompt += f"\n\n## Ejemplos de conversación\n{cfg.agent.examples}"
+
+        stt_language = "es" if cfg.client.language in ("es", "es-en") else "en"
+
+        sub = SubAgent(
+            id=agent_id,
+            name=cfg.agent.name,
+            instructions=augmented_prompt,
+            role_description=cfg.agent.role_description or f"Agente {cfg.agent.name}",
+            llm_instance=build_llm(cfg.agent),
+            tts_instance=build_tts(cfg.agent, stt_language),
+            tools=[],  # Tools se manejan a nivel del Agent base
+            config=cfg,
+            priority=cfg.agent.orchestrator_priority,
+        )
+        sub_agents[agent_id] = sub
+        agents_metadata.append({
+            "id": agent_id,
+            "name": cfg.agent.name,
+            "role_description": sub.role_description,
+        })
+
+        # El agente con mayor prioridad es el default
+        if default_agent_id is None:
+            default_agent_id = agent_id
+
+    if not default_agent_id:
+        raise ValueError("No hay agentes disponibles para orquestación")
+
+    orchestrator = OrchestratorAgent(
+        primary_config=primary_config,
+        sub_agents=sub_agents,
+        agents_metadata=agents_metadata,
+        default_agent_id=default_agent_id,
+        coordinator_model=primary_config.client.orchestrator_model,
+        coordinator_prompt=primary_config.client.orchestrator_prompt,
+    )
+
+    logger.info(
+        "OrchestratorAgent creado para '%s' — %d sub-agentes, default: '%s'",
+        primary_config.client.name,
+        len(sub_agents),
+        sub_agents[default_agent_id].name,
+    )
+    return orchestrator
+
+
+def build_agent(config: ResolvedConfig) -> VoiceAgent:
+    """Construye un VoiceAgent configurado para un cliente + agente específico."""
     from dataclasses import replace
-    tool_instructions = _build_tool_instructions(config.enabled_tools)
-    augmented_prompt = config.system_prompt + _voice_rules(config) + tool_instructions
+
+    # Inyectar contexto temporal + reglas de voz + instrucciones de herramientas
+    tool_instructions = _build_tool_instructions(config.client.enabled_tools)
+    augmented_prompt = config.agent.system_prompt + _voice_rules(config) + tool_instructions
     # Agregar ejemplos de conversación si existen
-    if config.conversation_examples:
-        augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.conversation_examples}"
-    config = replace(config, system_prompt=augmented_prompt)
+    if config.agent.examples:
+        augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
+    # Crear copia con prompt aumentado
+    updated_agent = replace(config.agent, system_prompt=augmented_prompt)
+    config = ResolvedConfig(agent=updated_agent, client=config.client)
 
     agent = VoiceAgent(config)
     logger.info(
-        "Agente creado para '%s' (%s) — voz: %s, tools: %s",
-        config.name,
-        config.slug,
-        config.voice_id,
-        config.enabled_tools,
+        "Agente creado para '%s' / '%s' — voz: %s, tools: %s",
+        config.client.name,
+        config.agent.name,
+        config.agent.voice_id,
+        config.client.enabled_tools,
     )
     return agent

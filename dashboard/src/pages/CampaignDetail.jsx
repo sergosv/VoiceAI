@@ -8,6 +8,8 @@ import { Badge } from '../components/ui/Badge'
 import { Table, Th, Td } from '../components/ui/Table'
 import { Modal } from '../components/ui/Modal'
 import { PageLoader } from '../components/ui/Spinner'
+import { PromptAssistant } from '../components/PromptAssistant'
+import { ChatTesterButton } from '../components/ChatTester'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
 import {
@@ -326,10 +328,26 @@ export function CampaignDetail() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold">{campaign.name}</h1>
-            <Badge variant={campaign.status}>{statusLabels[campaign.status]}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant={campaign.status}>{statusLabels[campaign.status]}</Badge>
+              {campaign.agent_name && (
+                <span className="text-xs text-text-muted">
+                  Agente: <span className="text-text-secondary font-medium">{campaign.agent_name}</span>
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex gap-2">
+          {campaign.agent_id && (
+            <ChatTesterButton
+              agentId={campaign.agent_id}
+              agentName={campaign.agent_name || 'Agente'}
+              agentType="outbound"
+              campaignScript={campaign.script}
+              label="Probar script"
+            />
+          )}
           {campaign.status === 'running' ? (
             <Button variant="secondary" onClick={handlePause}>
               <Pause size={16} className="mr-1" /> Pausar
@@ -393,7 +411,18 @@ export function CampaignDetail() {
               disabled={!editable}
             />
             <div>
-              <label className="block text-xs text-text-muted mb-1">Script del agente</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs text-text-muted">Script del agente</label>
+                {editable && (
+                  <PromptAssistant
+                    type="campaign"
+                    currentPrompt={form.script || ''}
+                    onApply={prompt => setForm(f => ({ ...f, script: prompt }))}
+                    agentName={campaign.client_name || ''}
+                    businessName=""
+                  />
+                )}
+              </div>
               <textarea
                 value={form.script || ''}
                 onChange={e => setForm(f => ({ ...f, script: e.target.value }))}

@@ -206,21 +206,31 @@ async def _place_outbound_call(
                 api_secret=os.environ["LIVEKIT_API_SECRET"],
             )
 
-            # Obtener la campaña para el script
-            camp = sb.table("campaigns").select("client_id, script").eq("id", campaign_id).limit(1).execute()
+            # Obtener la campaña para el script y agent_id
+            camp = sb.table("campaigns").select("client_id, agent_id, script").eq("id", campaign_id).limit(1).execute()
             if not camp.data:
                 raise ValueError("Campaña no encontrada")
 
             client_id = camp.data[0]["client_id"]
+            agent_id = camp.data[0].get("agent_id")
             script = camp.data[0]["script"]
 
-            # Obtener trunk del cliente
-            client = sb.table("clients").select("phone_number, livekit_sip_trunk_id").eq("id", client_id).limit(1).execute()
-            if not client.data or not client.data[0].get("livekit_sip_trunk_id"):
-                raise ValueError("Cliente sin SIP trunk configurado")
+            # Intentar leer phone/trunk desde agents si hay agent_id
+            trunk_id = None
+            from_number = ""
+            if agent_id:
+                agent_row = sb.table("agents").select("phone_number, livekit_sip_trunk_id").eq("id", agent_id).limit(1).execute()
+                if agent_row.data and agent_row.data[0].get("livekit_sip_trunk_id"):
+                    trunk_id = agent_row.data[0]["livekit_sip_trunk_id"]
+                    from_number = agent_row.data[0].get("phone_number", "")
 
-            trunk_id = client.data[0]["livekit_sip_trunk_id"]
-            from_number = client.data[0].get("phone_number", "")
+            # Fallback: leer de clients si no hay trunk en agent
+            if not trunk_id:
+                client = sb.table("clients").select("phone_number, livekit_sip_trunk_id").eq("id", client_id).limit(1).execute()
+                if not client.data or not client.data[0].get("livekit_sip_trunk_id"):
+                    raise ValueError("Cliente sin SIP trunk configurado")
+                trunk_id = client.data[0]["livekit_sip_trunk_id"]
+                from_number = client.data[0].get("phone_number", "")
 
             room_name = f"campaign-{campaign_id[:8]}-{call_entry_id[:8]}"
 
@@ -229,6 +239,7 @@ async def _place_outbound_call(
                 "type": "outbound",
                 "campaign_id": campaign_id,
                 "client_id": client_id,
+                "agent_id": agent_id,
                 "script": script,
             })
 

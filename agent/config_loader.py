@@ -1,9 +1,10 @@
-"""Carga configuración de clientes desde Supabase."""
+"""Carga configuración de clientes y agentes desde Supabase."""
 
 from __future__ import annotations
 
 import logging
 import os
+import warnings
 from dataclasses import dataclass, field
 
 from supabase import create_client, Client
@@ -11,9 +12,128 @@ from supabase import create_client, Client
 logger = logging.getLogger(__name__)
 
 
+# ── Nuevos dataclasses (multi-agent) ────────────────────
+
+
+@dataclass(frozen=True)
+class AgentConfig:
+    """Configuración de un agente individual."""
+
+    id: str
+    client_id: str
+    name: str
+    slug: str
+    phone_number: str | None
+    phone_sid: str | None
+    livekit_sip_trunk_id: str | None
+    system_prompt: str
+    greeting: str
+    examples: str | None
+    voice_config: dict = field(default_factory=dict)
+    llm_config: dict = field(default_factory=dict)
+    stt_config: dict = field(default_factory=dict)
+    agent_mode: str = "pipeline"
+    agent_type: str = "inbound"
+    transfer_number: str | None = None
+    after_hours_message: str | None = None
+    max_call_duration_seconds: int = 300
+    is_active: bool = True
+    # Orchestration fields
+    role_description: str | None = None
+    orchestrator_enabled: bool = True
+    orchestrator_priority: int = 0
+
+    # Properties de conveniencia (compatibilidad con pipeline_builder)
+    @property
+    def tts_provider(self) -> str:
+        return self.voice_config.get("provider", "cartesia")
+
+    @property
+    def voice_id(self) -> str:
+        return self.voice_config.get("voice_id", "default")
+
+    @property
+    def tts_api_key(self) -> str | None:
+        return self.voice_config.get("api_key")
+
+    @property
+    def llm_provider(self) -> str:
+        return self.llm_config.get("provider", "google")
+
+    @property
+    def llm_api_key(self) -> str | None:
+        return self.llm_config.get("api_key")
+
+    @property
+    def stt_provider(self) -> str:
+        return self.stt_config.get("provider", "deepgram")
+
+    @property
+    def stt_api_key(self) -> str | None:
+        return self.stt_config.get("api_key")
+
+    @property
+    def realtime_voice(self) -> str:
+        return self.voice_config.get("realtime_voice", "alloy")
+
+    @property
+    def realtime_model(self) -> str:
+        return self.voice_config.get("realtime_model", "gpt-4o-realtime-preview")
+
+    @property
+    def realtime_api_key(self) -> str | None:
+        return self.voice_config.get("realtime_api_key")
+
+    @property
+    def voice_mode(self) -> str:
+        """Alias de agent_mode para backward compat."""
+        return self.agent_mode
+
+
+@dataclass(frozen=True)
+class SlimClientConfig:
+    """Configuración del negocio (sin datos de agente)."""
+
+    id: str
+    name: str
+    slug: str
+    business_type: str
+    language: str
+    file_search_store_id: str | None
+    file_search_store_name: str | None = None
+    google_calendar_id: str | None = None
+    google_service_account_key: dict | None = None
+    whatsapp_instance_id: str | None = None
+    whatsapp_api_url: str | None = None
+    whatsapp_api_key: str | None = None
+    enabled_tools: list[str] = field(default_factory=lambda: ["search_knowledge"])
+    business_hours: dict | None = None
+    is_active: bool = True
+    owner_email: str | None = None
+    monthly_minutes_limit: int = 500
+    # Orchestration fields
+    orchestration_mode: str = "simple"
+    orchestrator_model: str = "gemini-2.0-flash"
+    orchestrator_prompt: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedConfig:
+    """Configuración combinada de agente + cliente para una llamada."""
+
+    agent: AgentConfig
+    client: SlimClientConfig
+
+
+# ── Legacy dataclass (deprecated, mantener para backward compat) ─────
+
+
 @dataclass(frozen=True)
 class ClientConfig:
-    """Configuración completa de un cliente para el agente de voz."""
+    """Configuración completa de un cliente para el agente de voz.
+
+    DEPRECATED: Usar ResolvedConfig con AgentConfig + SlimClientConfig.
+    """
 
     id: str
     name: str
@@ -51,6 +171,9 @@ class ClientConfig:
     realtime_model: str = "gpt-4o-realtime-preview"
 
 
+# ── Supabase helper ─────────────────────────────────────
+
+
 def _get_supabase() -> Client:
     """Crea cliente Supabase con service key."""
     url = os.environ["SUPABASE_URL"]
@@ -58,15 +181,164 @@ def _get_supabase() -> Client:
     return create_client(url, key)
 
 
-async def load_client_config_by_phone(phone_number: str) -> ClientConfig | None:
-    """Carga config de cliente buscando por número de teléfono.
+# ── Nuevas funciones de carga (multi-agent) ─────────────
 
-    Busca coincidencia exacta o sin prefijo de país.
-    Retorna None si no se encuentra cliente activo.
-    """
+
+async def load_config_by_phone(phone_number: str) -> ResolvedConfig | None:
+    """Carga config buscando por número de teléfono del agente."""
     sb = _get_supabase()
 
-    # Buscar por número exacto
+    # Buscar en agents por número exacto
+    result = (
+        sb.table("agents")
+        .select("*, clients(*)")
+        .eq("phone_number", phone_number)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data:
+        # Buscar con variantes de número
+        clean = phone_number.lstrip("+")
+        all_agents = (
+            sb.table("agents")
+            .select("*, clients(*)")
+            .eq("is_active", True)
+            .execute()
+        )
+        for row in all_agents.data:
+            db_phone = (row.get("phone_number") or "").lstrip("+")
+            if db_phone and (
+                db_phone == clean
+                or clean.endswith(db_phone)
+                or db_phone.endswith(clean)
+            ):
+                return _rows_to_resolved(row)
+        return None
+
+    return _rows_to_resolved(result.data[0])
+
+
+async def load_config_by_agent_id(agent_id: str) -> ResolvedConfig | None:
+    """Carga config por UUID del agente."""
+    sb = _get_supabase()
+    result = (
+        sb.table("agents")
+        .select("*, clients(*)")
+        .eq("id", agent_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return _rows_to_resolved(result.data[0])
+
+
+async def load_config_by_client_id(client_id: str) -> ResolvedConfig | None:
+    """Carga config del primer agente activo del cliente."""
+    sb = _get_supabase()
+    result = (
+        sb.table("agents")
+        .select("*, clients(*)")
+        .eq("client_id", client_id)
+        .eq("is_active", True)
+        .order("created_at")
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return _rows_to_resolved(result.data[0])
+
+
+async def load_orchestrated_configs(client_id: str) -> list[ResolvedConfig]:
+    """Carga todos los agentes habilitados para orquestación de un cliente.
+
+    Retorna lista ordenada por orchestrator_priority DESC.
+    """
+    sb = _get_supabase()
+    result = (
+        sb.table("agents")
+        .select("*, clients(*)")
+        .eq("client_id", client_id)
+        .eq("is_active", True)
+        .eq("orchestrator_enabled", True)
+        .order("orchestrator_priority", desc=True)
+        .execute()
+    )
+    if not result.data:
+        return []
+    return [_rows_to_resolved(row) for row in result.data]
+
+
+def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
+    """Convierte un row de agents con join clients a ResolvedConfig."""
+    client_row = agent_row.get("clients") or {}
+
+    agent = AgentConfig(
+        id=str(agent_row["id"]),
+        client_id=str(agent_row["client_id"]),
+        name=agent_row["name"],
+        slug=agent_row["slug"],
+        phone_number=agent_row.get("phone_number"),
+        phone_sid=agent_row.get("phone_sid"),
+        livekit_sip_trunk_id=agent_row.get("livekit_sip_trunk_id"),
+        system_prompt=agent_row.get("system_prompt", ""),
+        greeting=agent_row.get("greeting", ""),
+        examples=agent_row.get("examples"),
+        voice_config=agent_row.get("voice_config") or {},
+        llm_config=agent_row.get("llm_config") or {},
+        stt_config=agent_row.get("stt_config") or {},
+        agent_mode=agent_row.get("agent_mode", "pipeline"),
+        agent_type=agent_row.get("agent_type", "inbound"),
+        transfer_number=agent_row.get("transfer_number"),
+        after_hours_message=agent_row.get("after_hours_message"),
+        max_call_duration_seconds=agent_row.get("max_call_duration_seconds", 300),
+        is_active=agent_row.get("is_active", True),
+        role_description=agent_row.get("role_description"),
+        orchestrator_enabled=agent_row.get("orchestrator_enabled", True),
+        orchestrator_priority=agent_row.get("orchestrator_priority", 0),
+    )
+
+    client = SlimClientConfig(
+        id=str(client_row.get("id", agent_row["client_id"])),
+        name=client_row.get("name", ""),
+        slug=client_row.get("slug", ""),
+        business_type=client_row.get("business_type", "generic"),
+        language=client_row.get("language", "es"),
+        file_search_store_id=client_row.get("file_search_store_id"),
+        file_search_store_name=client_row.get("file_search_store_name"),
+        google_calendar_id=client_row.get("google_calendar_id"),
+        google_service_account_key=client_row.get("google_service_account_key"),
+        whatsapp_instance_id=client_row.get("whatsapp_instance_id"),
+        whatsapp_api_url=client_row.get("whatsapp_api_url"),
+        whatsapp_api_key=client_row.get("whatsapp_api_key"),
+        enabled_tools=client_row.get("enabled_tools") or ["search_knowledge"],
+        business_hours=client_row.get("business_hours"),
+        is_active=client_row.get("is_active", True),
+        owner_email=client_row.get("owner_email"),
+        monthly_minutes_limit=client_row.get("monthly_minutes_limit", 500),
+        orchestration_mode=client_row.get("orchestration_mode", "simple"),
+        orchestrator_model=client_row.get("orchestrator_model", "gemini-2.0-flash"),
+        orchestrator_prompt=client_row.get("orchestrator_prompt"),
+    )
+
+    return ResolvedConfig(agent=agent, client=client)
+
+
+# ── Legacy funciones (deprecated) ───────────────────────
+
+
+async def load_client_config_by_phone(phone_number: str) -> ClientConfig | None:
+    """DEPRECATED: Usar load_config_by_phone(). Mantiene firma para backward compat."""
+    warnings.warn(
+        "load_client_config_by_phone está deprecated, usar load_config_by_phone",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    sb = _get_supabase()
+
     result = (
         sb.table("clients")
         .select("*")
@@ -77,7 +349,6 @@ async def load_client_config_by_phone(phone_number: str) -> ClientConfig | None:
     )
 
     if not result.data:
-        # Intentar variantes del número (con/sin +52, etc.)
         clean = phone_number.lstrip("+")
         result = (
             sb.table("clients")
@@ -85,10 +356,13 @@ async def load_client_config_by_phone(phone_number: str) -> ClientConfig | None:
             .eq("is_active", True)
             .execute()
         )
-        # Buscar coincidencia flexible
         for row in result.data:
             db_phone = (row.get("phone_number") or "").lstrip("+")
-            if db_phone and (db_phone == clean or clean.endswith(db_phone) or db_phone.endswith(clean)):
+            if db_phone and (
+                db_phone == clean
+                or clean.endswith(db_phone)
+                or db_phone.endswith(clean)
+            ):
                 return _row_to_config(row)
         return None
 
@@ -96,7 +370,12 @@ async def load_client_config_by_phone(phone_number: str) -> ClientConfig | None:
 
 
 async def load_client_config_by_slug(slug: str) -> ClientConfig | None:
-    """Carga config de cliente por slug."""
+    """DEPRECATED: Carga config de cliente por slug."""
+    warnings.warn(
+        "load_client_config_by_slug está deprecated",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     sb = _get_supabase()
     result = (
         sb.table("clients")
@@ -112,7 +391,12 @@ async def load_client_config_by_slug(slug: str) -> ClientConfig | None:
 
 
 async def load_client_config_by_id(client_id: str) -> ClientConfig | None:
-    """Carga config de cliente por UUID."""
+    """DEPRECATED: Usar load_config_by_client_id(). Carga config por UUID."""
+    warnings.warn(
+        "load_client_config_by_id está deprecated, usar load_config_by_client_id",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     sb = _get_supabase()
     result = (
         sb.table("clients")
@@ -127,7 +411,7 @@ async def load_client_config_by_id(client_id: str) -> ClientConfig | None:
 
 
 def _row_to_config(row: dict) -> ClientConfig:
-    """Convierte un row de Supabase a ClientConfig."""
+    """Convierte un row de Supabase a ClientConfig (legacy)."""
     return ClientConfig(
         id=str(row["id"]),
         name=row["name"],

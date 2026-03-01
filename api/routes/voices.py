@@ -51,26 +51,39 @@ async def list_voices() -> list[VoiceOut]:
 @router.get("/provider/{client_id}", response_model=list[VoiceOut])
 async def list_provider_voices(
     client_id: str,
+    agent_id: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[VoiceOut]:
-    """Retorna voces según el TTS provider del cliente."""
+    """Retorna voces según el TTS provider del agente o cliente."""
     if user.role == "client" and user.client_id != client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
     sb = get_supabase()
-    result = (
-        sb.table("clients")
-        .select("tts_provider, tts_api_key")
-        .eq("id", client_id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
 
-    client = result.data[0]
-    provider = client.get("tts_provider", "cartesia")
-    api_key = client.get("tts_api_key")
+    # Intentar leer de agents si hay agent_id
+    provider = "cartesia"
+    api_key = None
+    if agent_id:
+        agent_result = sb.table("agents").select("voice_config").eq("id", agent_id).limit(1).execute()
+        if agent_result.data:
+            vc = agent_result.data[0].get("voice_config") or {}
+            provider = vc.get("provider", "cartesia")
+            api_key = vc.get("api_key")
+
+    if not agent_id or not provider:
+        # Fallback a clients
+        result = (
+            sb.table("clients")
+            .select("tts_provider, tts_api_key")
+            .eq("id", client_id)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+        client = result.data[0]
+        provider = client.get("tts_provider", "cartesia")
+        api_key = client.get("tts_api_key")
 
     if provider == "elevenlabs":
         if not api_key:
