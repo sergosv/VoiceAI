@@ -179,7 +179,11 @@ async def test_mcp_server(
 
         servers = build_mcp_servers([row])
         if not servers:
-            return McpTestResult(success=False, error="No se pudo construir el servidor MCP")
+            return McpTestResult(
+                success=False,
+                error="No se pudo construir el servidor MCP. "
+                "Verifica que 'mcp' esté instalado: pip install 'livekit-agents[mcp]'",
+            )
 
         server = servers[0]
 

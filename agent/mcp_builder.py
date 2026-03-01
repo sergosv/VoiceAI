@@ -32,6 +32,7 @@ def build_mcp_servers(server_configs: list[dict[str, Any]]) -> list[Any]:
     """Convierte rows de la tabla mcp_servers a instancias MCPServerHTTP/MCPServerStdio.
 
     Cada server se construye de forma aislada: un config malo no afecta a los demás.
+    Si el paquete mcp no está instalado, retorna lista vacía (el agente funciona sin MCP).
 
     Args:
         server_configs: Lista de dicts con la config de cada MCP server (rows de DB).
@@ -39,7 +40,15 @@ def build_mcp_servers(server_configs: list[dict[str, Any]]) -> list[Any]:
     Returns:
         Lista de MCPServerHTTP o MCPServerStdio listos para pasar al Agent.
     """
-    from livekit.agents.llm.mcp import MCPServerHTTP, MCPServerStdio
+    try:
+        from livekit.agents.llm.mcp import MCPServerHTTP, MCPServerStdio
+    except ImportError:
+        logger.warning(
+            "Paquete 'mcp' no disponible — instalar con: pip install 'livekit-agents[mcp]'. "
+            "Omitiendo %d MCP server(s) configurados.",
+            len(server_configs),
+        )
+        return []
 
     servers = []
 
