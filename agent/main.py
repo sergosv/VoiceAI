@@ -23,8 +23,10 @@ from agent.config_loader import (
     load_config_by_agent_id,
     load_config_by_client_id,
     load_config_by_phone,
+    load_mcp_servers,
     load_orchestrated_configs,
 )
+from agent.mcp_builder import build_mcp_servers
 from agent.pipeline_builder import build_llm, build_realtime_model, build_stt, build_tts
 from agent.session_handler import SessionHandler
 from agent.voice_quality import (
@@ -157,6 +159,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         updated_agent = replace(config.agent, system_prompt=campaign_script)
         config = ResolvedConfig(agent=updated_agent, client=config.client)
 
+    # Cargar MCP servers configurados para este cliente/agente
+    mcp_configs = await load_mcp_servers(config.client.id, config.agent.id)
+    mcp_servers = build_mcp_servers(mcp_configs) if mcp_configs else None
+    if mcp_servers:
+        logger.info(
+            "MCP servers cargados para '%s/%s': %d servidor(es)",
+            config.client.slug, config.agent.slug, len(mcp_servers),
+        )
+
     # Construir agente dinámico
     is_orchestrated = False
     if (
@@ -166,7 +177,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Modo inteligente: cargar todos los agentes del cliente
         all_configs = await load_orchestrated_configs(config.client.id)
         if len(all_configs) >= 2:
-            voice_agent = build_orchestrated_agent(all_configs, config)
+            voice_agent = build_orchestrated_agent(all_configs, config, mcp_servers=mcp_servers)
             is_orchestrated = True
             logger.info(
                 "Modo inteligente activado para '%s' — %d agentes",
@@ -174,13 +185,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 len(all_configs),
             )
         else:
-            voice_agent = build_agent(config)
+            voice_agent = build_agent(config, mcp_servers=mcp_servers)
             logger.info(
                 "Modo inteligente solicitado pero solo %d agente(s), usando simple",
                 len(all_configs),
             )
     else:
-        voice_agent = build_agent(config)
+        voice_agent = build_agent(config, mcp_servers=mcp_servers)
 
     # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.client.language in ("es", "es-en") else "en"

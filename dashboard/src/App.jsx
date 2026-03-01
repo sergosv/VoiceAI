@@ -25,6 +25,7 @@ const Appointments = lazy(() => import('./pages/Appointments').then(m => ({ defa
 const Campaigns = lazy(() => import('./pages/Campaigns').then(m => ({ default: m.Campaigns })))
 const CampaignDetail = lazy(() => import('./pages/CampaignDetail').then(m => ({ default: m.CampaignDetail })))
 const Integrations = lazy(() => import('./pages/Integrations').then(m => ({ default: m.Integrations })))
+const McpServers = lazy(() => import('./pages/McpServers').then(m => ({ default: m.McpServers })))
 const AgentDetail = lazy(() => import('./pages/AgentDetail').then(m => ({ default: m.AgentDetail })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
@@ -54,6 +55,7 @@ export default function App() {
                 <Route path="/campaigns/:id" element={<CampaignDetail />} />
                 <Route path="/documents" element={<Documents />} />
                 <Route path="/integrations" element={<Integrations />} />
+                <Route path="/integrations/mcp" element={<McpServers />} />
                 <Route path="/agents/:agentId" element={<AgentDetail />} />
                 <Route path="/settings" element={<Settings />} />
 

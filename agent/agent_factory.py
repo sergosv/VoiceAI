@@ -24,8 +24,15 @@ class VoiceAgent(Agent):
     se habilitan según `enabled_tools` del cliente.
     """
 
-    def __init__(self, config: ResolvedConfig) -> None:
-        super().__init__(instructions=config.agent.system_prompt)
+    def __init__(
+        self,
+        config: ResolvedConfig,
+        mcp_servers: list | None = None,
+    ) -> None:
+        kwargs: dict = {"instructions": config.agent.system_prompt}
+        if mcp_servers:
+            kwargs["mcp_servers"] = mcp_servers
+        super().__init__(**kwargs)
         self._config = config
 
     @property
@@ -317,6 +324,7 @@ def _build_tool_instructions(enabled_tools: list[str]) -> str:
 def build_orchestrated_agent(
     configs: list[ResolvedConfig],
     primary_config: ResolvedConfig,
+    mcp_servers: list | None = None,
 ) -> "OrchestratorAgent":
     """Construye un OrchestratorAgent con múltiples sub-agentes.
 
@@ -373,6 +381,7 @@ def build_orchestrated_agent(
         default_agent_id=default_agent_id,
         coordinator_model=primary_config.client.orchestrator_model,
         coordinator_prompt=primary_config.client.orchestrator_prompt,
+        mcp_servers=mcp_servers,
     )
 
     logger.info(
@@ -384,7 +393,10 @@ def build_orchestrated_agent(
     return orchestrator
 
 
-def build_agent(config: ResolvedConfig) -> VoiceAgent:
+def build_agent(
+    config: ResolvedConfig,
+    mcp_servers: list | None = None,
+) -> VoiceAgent:
     """Construye un VoiceAgent configurado para un cliente + agente específico."""
     from dataclasses import replace
 
@@ -398,7 +410,7 @@ def build_agent(config: ResolvedConfig) -> VoiceAgent:
     updated_agent = replace(config.agent, system_prompt=augmented_prompt)
     config = ResolvedConfig(agent=updated_agent, client=config.client)
 
-    agent = VoiceAgent(config)
+    agent = VoiceAgent(config, mcp_servers=mcp_servers)
     logger.info(
         "Agente creado para '%s' / '%s' — voz: %s, tools: %s",
         config.client.name,

@@ -8,7 +8,9 @@ import { Input } from '../components/ui/Input'
 import { PageLoader } from '../components/ui/Spinner'
 import {
   Calendar, MessageCircle, Wrench, Save, TestTube, Check,
+  Server, ChevronRight,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 const allTools = [
   { key: 'search_knowledge', label: 'Busqueda de conocimientos', desc: 'Consultar base de documentos del negocio' },
@@ -190,6 +192,25 @@ export function Integrations() {
           </div>
         </Card>
       </div>
+
+      {/* MCP Servers */}
+      <Card>
+        <Link to="/integrations/mcp" className="flex items-center justify-between group">
+          <div className="flex items-center gap-3">
+            <Server size={20} className="text-accent" />
+            <div>
+              <h2 className="text-lg font-semibold group-hover:text-accent transition-colors">
+                MCP Servers
+              </h2>
+              <p className="text-xs text-text-muted">
+                Conecta herramientas externas (CRMs, hojas de calculo, APIs)
+                via Model Context Protocol para que tus agentes las usen en llamadas.
+              </p>
+            </div>
+          </div>
+          <ChevronRight size={20} className="text-text-muted group-hover:text-accent transition-colors" />
+        </Link>
+      </Card>
 
       {/* Herramientas del agente */}
       <Card>

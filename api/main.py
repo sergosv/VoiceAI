@@ -15,7 +15,7 @@ load_dotenv()
 
 from api.routes import (
     agents, ai, auth, calls, campaigns, chat, clients, contacts,
-    appointments, dashboard, documents, voices,
+    appointments, dashboard, documents, mcp, voices,
 )
 from api.services.chat_store import start_cleanup_loop
 
@@ -62,6 +62,8 @@ app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"]
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
+app.include_router(mcp.router, prefix="/api/clients", tags=["mcp"])
+app.include_router(mcp.templates_router, prefix="/api", tags=["mcp-templates"])
 
 @app.on_event("startup")
 async def startup_chat_cleanup() -> None:

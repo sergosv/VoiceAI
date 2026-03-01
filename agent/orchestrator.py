@@ -124,10 +124,14 @@ class OrchestratorAgent(Agent):
         default_agent_id: str,
         coordinator_model: str = "gemini-2.0-flash",
         coordinator_prompt: str | None = None,
+        mcp_servers: list | None = None,
     ) -> None:
         # Inicializar con el prompt del agente default
         default_sub = sub_agents[default_agent_id]
-        super().__init__(instructions=default_sub.instructions)
+        kwargs: dict = {"instructions": default_sub.instructions}
+        if mcp_servers:
+            kwargs["mcp_servers"] = mcp_servers
+        super().__init__(**kwargs)
 
         self._primary_config = primary_config
         self._sub_agents = sub_agents

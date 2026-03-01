@@ -1,6 +1,6 @@
 # LiveKit Agents
 livekit>=1.0
-livekit-agents[codecs]>=1.4,<2
+livekit-agents[codecs,mcp]>=1.4,<2
 livekit-plugins-deepgram>=1.4,<2
 livekit-plugins-cartesia>=1.4,<2
 livekit-plugins-google>=1.2,<2
@@ -11,9 +11,8 @@ livekit-plugins-anthropic>=1.4,<2
 livekit-plugins-elevenlabs>=1.4,<2
 livekit-plugins-noise-cancellation>=0.2
 
-# Google Gemini (File Search + ADK Orchestration)
+# Google Gemini (File Search)
 google-genai>=1.65
-google-adk>=1.0
 
 # Database
 supabase>=2.0

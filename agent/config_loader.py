@@ -252,6 +252,41 @@ async def load_config_by_client_id(client_id: str) -> ResolvedConfig | None:
     return _rows_to_resolved(result.data[0])
 
 
+async def load_mcp_servers(client_id: str, agent_id: str | None = None) -> list[dict]:
+    """Carga MCP servers activos para un cliente, filtrados por agent_id si aplica.
+
+    Args:
+        client_id: UUID del cliente.
+        agent_id: UUID del agente (opcional). Si se da, filtra servers asignados
+                  a ese agente o a todos los agentes (agent_ids IS NULL).
+
+    Returns:
+        Lista de dicts con la config de cada MCP server.
+    """
+    sb = _get_supabase()
+    result = (
+        sb.table("mcp_servers")
+        .select("*")
+        .eq("client_id", client_id)
+        .eq("is_active", True)
+        .execute()
+    )
+
+    if not result.data:
+        return []
+
+    servers = []
+    for row in result.data:
+        agent_ids = row.get("agent_ids")
+        # agent_ids null = disponible para todos los agentes
+        if agent_ids is not None and agent_id:
+            if agent_id not in agent_ids:
+                continue
+        servers.append(row)
+
+    return servers
+
+
 async def load_orchestrated_configs(client_id: str) -> list[ResolvedConfig]:
     """Carga todos los agentes habilitados para orquestación de un cliente.
 

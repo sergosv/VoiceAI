@@ -415,6 +415,79 @@ class PromptAIResponse(BaseModel):
     prompt: str
 
 
+# ── MCP Servers ──────────────────────────────────────
+
+class McpServerOut(BaseModel):
+    id: str
+    client_id: str
+    name: str
+    description: str | None = None
+    connection_type: str = "http"
+    url: str | None = None
+    transport_type: str = "sse"
+    has_headers: bool = False
+    command: str | None = None
+    command_args: list[str] = Field(default_factory=list)
+    has_env_vars: bool = False
+    allowed_tools: list[str] | None = None
+    agent_ids: list[str] | None = None
+    is_active: bool = True
+    tools_cache: list[dict] | None = None
+    last_connected_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class McpServerCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+    connection_type: str = "http"
+    url: str | None = None
+    transport_type: str = "sse"
+    headers: dict[str, str] = Field(default_factory=dict)
+    command: str | None = None
+    command_args: list[str] = Field(default_factory=list)
+    env_vars: dict[str, str] = Field(default_factory=dict)
+    allowed_tools: list[str] | None = None
+    agent_ids: list[str] | None = None
+    template_id: str | None = None
+
+
+class McpServerUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    url: str | None = None
+    transport_type: str | None = None
+    headers: dict[str, str] | None = None
+    command: str | None = None
+    command_args: list[str] | None = None
+    env_vars: dict[str, str] | None = None
+    allowed_tools: list[str] | None = None
+    agent_ids: list[str] | None = None
+    is_active: bool | None = None
+
+
+class McpTestResult(BaseModel):
+    success: bool
+    tools: list[dict] = Field(default_factory=list)
+    error: str | None = None
+
+
+class McpServerTemplateOut(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    icon: str | None = None
+    category: str = "general"
+    connection_type: str = "http"
+    default_url: str | None = None
+    default_transport_type: str = "sse"
+    default_command: str | None = None
+    default_command_args: list[str] = Field(default_factory=list)
+    required_env_vars: list[str] = Field(default_factory=list)
+    documentation_url: str | None = None
+
+
 # ── Generic ───────────────────────────────────────────
 
 class ChatMessageRequest(BaseModel):
@@ -459,6 +532,15 @@ def client_out_from_row(row: dict) -> ClientOut:
     # Eliminar google_service_account_key del output (es un JSON grande)
     data.pop("google_service_account_key", None)
     return ClientOut(**data)
+
+
+def mcp_server_out_from_row(row: dict) -> McpServerOut:
+    """Convierte un row de DB mcp_servers a McpServerOut, ocultando secrets."""
+    data = dict(row)
+    # Convertir presencia de secrets a booleans
+    data["has_headers"] = bool(data.pop("headers", None))
+    data["has_env_vars"] = bool(data.pop("env_vars", None))
+    return McpServerOut(**data)
 
 
 def agent_out_from_row(row: dict) -> AgentOut:
