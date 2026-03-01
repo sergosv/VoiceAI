@@ -148,17 +148,36 @@ async def delete_contact(
     contact_id: str,
     user: CurrentUser = Depends(get_current_user),
 ) -> MessageResponse:
-    """Elimina un contacto."""
+    """Elimina un contacto y todo su historial (llamadas, memorias, identificadores, citas)."""
     sb = get_supabase()
 
-    existing = sb.table("contacts").select("client_id").eq("id", contact_id).limit(1).execute()
+    existing = sb.table("contacts").select("client_id, phone").eq("id", contact_id).limit(1).execute()
     if not existing.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
-    if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
+
+    row = existing.data[0]
+    if user.role == "client" and row.get("client_id") != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
+    client_id = row["client_id"]
+    phone = row.get("phone")
+
+    # Borrar llamadas asociadas (por teléfono)
+    if phone:
+        sb.table("calls").delete().eq("client_id", client_id).or_(
+            f"caller_number.eq.{phone},callee_number.eq.{phone}"
+        ).execute()
+
+    # Borrar citas del contacto
+    sb.table("appointments").delete().eq("contact_id", contact_id).execute()
+
+    # Borrar campaign_calls por teléfono
+    if phone:
+        sb.table("campaign_calls").delete().eq("phone", phone).execute()
+
+    # contact_identifiers y memories se borran por CASCADE
     sb.table("contacts").delete().eq("id", contact_id).execute()
-    return MessageResponse(message="Contacto eliminado")
+    return MessageResponse(message="Contacto y su historial eliminados")
 
 
 @router.get("/{contact_id}/calls")
