@@ -187,10 +187,15 @@ async def test_mcp_server(
         await server.initialize()
         tools = await server.list_tools()
 
-        tools_list = [
-            {"name": t.name, "description": t.description or ""}
-            for t in tools
-        ]
+        from livekit.agents.llm.tool_context import get_raw_function_info
+
+        tools_list = []
+        for t in tools:
+            info = get_raw_function_info(t)
+            tools_list.append({
+                "name": info.name,
+                "description": info.raw_schema.get("description", ""),
+            })
 
         # Actualizar cache y timestamp en DB
         sb.table("mcp_servers").update({

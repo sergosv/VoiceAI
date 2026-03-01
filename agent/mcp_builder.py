@@ -62,12 +62,12 @@ def build_mcp_servers(server_configs: list[dict[str, Any]]) -> list[Any]:
 
                 kwargs: dict[str, Any] = {
                     "url": url,
-                    "transport": transport,
+                    "transport_type": transport,
                 }
                 if headers:
                     kwargs["headers"] = headers
                 if allowed_tools is not None:
-                    kwargs["tool_filter"] = allowed_tools
+                    kwargs["allowed_tools"] = allowed_tools
 
                 server = MCPServerHTTP(**kwargs)
                 servers.append(server)
@@ -91,8 +91,6 @@ def build_mcp_servers(server_configs: list[dict[str, Any]]) -> list[Any]:
                 }
                 if env_vars:
                     kwargs["env"] = env_vars
-                if allowed_tools is not None:
-                    kwargs["tool_filter"] = allowed_tools
 
                 server = MCPServerStdio(**kwargs)
                 servers.append(server)
