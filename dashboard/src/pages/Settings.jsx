@@ -32,7 +32,7 @@ export function Settings() {
   const [saving, setSaving] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [showCreateAgent, setShowCreateAgent] = useState(false)
-  const [newAgentForm, setNewAgentForm] = useState({ name: '', agent_type: 'inbound' })
+  const [newAgentForm, setNewAgentForm] = useState({ name: '', agent_type: 'inbound', role_description: '' })
   const [creatingAgent, setCreatingAgent] = useState(false)
 
   useEffect(() => {
@@ -107,11 +107,12 @@ export function Settings() {
       const created = await api.post(`/clients/${client.id}/agents`, {
         name: newAgentForm.name,
         agent_type: newAgentForm.agent_type,
+        role_description: newAgentForm.role_description || null,
       })
       setAgents(prev => [...prev, created])
       setSelectedAgent(created)
       setShowCreateAgent(false)
-      setNewAgentForm({ name: '', agent_type: 'inbound' })
+      setNewAgentForm({ name: '', agent_type: 'inbound', role_description: '' })
       toast.success(`Agente "${created.name}" creado`)
       await loadVoicesForAgent(created, client.id)
     } catch (err) {
@@ -465,8 +466,15 @@ export function Settings() {
                 { value: 'both', label: 'Ambos' },
               ]}
             />
+            <Textarea
+              label="Rol del agente (para el coordinador IA)"
+              value={newAgentForm.role_description}
+              onChange={e => setNewAgentForm(f => ({ ...f, role_description: e.target.value }))}
+              rows={2}
+              placeholder="Ej: Agente de ventas que maneja cotizaciones. Soporte tecnico que resuelve problemas."
+            />
             <p className="text-xs text-text-muted">
-              Se generara un prompt y saludo automaticamente. Podras editarlos despues.
+              El rol describe que hace este agente para que el coordinador sepa cuando derivar llamadas.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="secondary" type="button" onClick={() => setShowCreateAgent(false)}>Cancelar</Button>

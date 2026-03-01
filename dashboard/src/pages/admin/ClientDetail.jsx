@@ -29,7 +29,7 @@ export function ClientDetail() {
 
   // Modal: crear agente
   const [showAgentModal, setShowAgentModal] = useState(false)
-  const [agentForm, setAgentForm] = useState({ name: '', agent_type: 'inbound' })
+  const [agentForm, setAgentForm] = useState({ name: '', agent_type: 'inbound', role_description: '' })
   const [creatingAgent, setCreatingAgent] = useState(false)
 
   // Modal: asignar teléfono (a nivel de agente)
@@ -126,11 +126,12 @@ export function ClientDetail() {
       const newAgent = await api.post(`/clients/${id}/agents`, {
         name: agentForm.name,
         agent_type: agentForm.agent_type,
+        role_description: agentForm.role_description || null,
       })
       setAgents([...agents, newAgent])
       toast.success(`Agente "${newAgent.name}" creado`)
       setShowAgentModal(false)
-      setAgentForm({ name: '', agent_type: 'inbound' })
+      setAgentForm({ name: '', agent_type: 'inbound', role_description: '' })
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -466,8 +467,15 @@ export function ClientDetail() {
               { value: 'both', label: 'Ambos' },
             ]}
           />
+          <Textarea
+            label="Rol del agente (para el coordinador IA)"
+            value={agentForm.role_description}
+            onChange={e => setAgentForm(f => ({ ...f, role_description: e.target.value }))}
+            rows={2}
+            placeholder="Ej: Agente de ventas que maneja cotizaciones y cierre. Agente de soporte que resuelve problemas tecnicos."
+          />
           <p className="text-xs text-text-muted">
-            Se creara con un prompt y configuracion por defecto. Puedes editarlo despues.
+            El rol describe que hace este agente para que el coordinador sepa cuando derivar llamadas. Se creara con prompt y configuracion por defecto.
           </p>
           <Button type="submit" className="w-full" disabled={creatingAgent}>
             {creatingAgent ? 'Creando...' : 'Crear agente'}

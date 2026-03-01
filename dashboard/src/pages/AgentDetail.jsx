@@ -769,40 +769,44 @@ export function AgentDetail() {
         )}
       </Card>
 
-      {/* Orchestration card — solo si el cliente tiene modo inteligente */}
-      {clientData?.orchestration_mode === 'intelligent' && (
-        <Card className="space-y-4">
-          <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
-            <Zap size={16} className="text-purple-400" />
-            Orquestacion (Modo Inteligente)
-          </h2>
-          <p className="text-xs text-text-muted">
-            Este cliente tiene Modo Inteligente activo. Configura como el coordinador percibe este agente.
-          </p>
-          <Textarea
-            label="Descripcion del rol"
-            value={form.role_description}
-            onChange={e => setForm(f => ({ ...f, role_description: e.target.value }))}
-            rows={3}
-            placeholder="Ej: Agente de ventas especializado en cotizaciones y cierre de ventas. Responde preguntas sobre precios, paquetes y promociones."
+      {/* Rol del agente — siempre visible para configurar antes de activar orquestacion */}
+      <Card className="space-y-4">
+        <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+          <Zap size={16} className="text-purple-400" />
+          Rol para Orquestacion
+          {clientData?.orchestration_mode === 'intelligent' && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">Modo Inteligente activo</span>
+          )}
+        </h2>
+        <p className="text-xs text-text-muted">
+          Describe que hace este agente para que el coordinador IA sepa cuando derivarle llamadas.
+          {clientData?.orchestration_mode !== 'intelligent' && (
+            <span className="text-yellow-400/80"> El Modo Inteligente no esta activo aun — puedes configurar el rol ahora y activarlo despues.</span>
+          )}
+        </p>
+        <Textarea
+          label="Descripcion del rol"
+          value={form.role_description}
+          onChange={e => setForm(f => ({ ...f, role_description: e.target.value }))}
+          rows={3}
+          placeholder="Ej: Agente de ventas especializado en cotizaciones y cierre de ventas. Responde preguntas sobre precios, paquetes y promociones."
+        />
+        <Input
+          label="Prioridad (mayor = mas probable como default)"
+          type="number"
+          value={form.orchestrator_priority}
+          onChange={e => setForm(f => ({ ...f, orchestrator_priority: parseInt(e.target.value) || 0 }))}
+        />
+        <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.orchestrator_enabled}
+            onChange={e => setForm(f => ({ ...f, orchestrator_enabled: e.target.checked }))}
+            className="accent-purple-400"
           />
-          <Input
-            label="Prioridad (mayor = mas probable como default)"
-            type="number"
-            value={form.orchestrator_priority}
-            onChange={e => setForm(f => ({ ...f, orchestrator_priority: parseInt(e.target.value) || 0 }))}
-          />
-          <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.orchestrator_enabled}
-              onChange={e => setForm(f => ({ ...f, orchestrator_enabled: e.target.checked }))}
-              className="accent-purple-400"
-            />
-            Habilitado para orquestacion
-          </label>
-        </Card>
-      )}
+          Habilitado para orquestacion
+        </label>
+      </Card>
 
       {/* Action buttons */}
       <div className="flex items-center gap-3">
