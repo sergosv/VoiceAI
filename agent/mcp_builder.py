@@ -5,9 +5,19 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# pywin32 en venvs de Windows necesita que su directorio de DLLs esté registrado
+# antes de poder importar pywintypes (requerido por mcp en Windows).
+if sys.platform == "win32":
+    _pywin32_dll_dir = os.path.join(sys.prefix, "Lib", "site-packages", "pywin32_system32")
+    if os.path.isdir(_pywin32_dll_dir):
+        os.add_dll_directory(_pywin32_dll_dir)
+        if _pywin32_dll_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = _pywin32_dll_dir + os.pathsep + os.environ.get("PATH", "")
 
 # Regex para resolver placeholders ${VAR} en strings
 _ENV_PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
@@ -42,11 +52,11 @@ def build_mcp_servers(server_configs: list[dict[str, Any]]) -> list[Any]:
     """
     try:
         from livekit.agents.llm.mcp import MCPServerHTTP, MCPServerStdio
-    except ImportError:
-        logger.warning(
-            "Paquete 'mcp' no disponible — instalar con: pip install 'livekit-agents[mcp]'. "
-            "Omitiendo %d MCP server(s) configurados.",
-            len(server_configs),
+    except ImportError as exc:
+        logger.error(
+            "No se pudo importar livekit MCP: %s — Causa original: %s",
+            exc,
+            exc.__cause__,
         )
         return []
 
