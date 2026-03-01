@@ -337,6 +337,13 @@ class ContactOut(BaseModel):
     call_count: int = 0
     last_call_at: datetime | None = None
     lead_score: int = 0
+    # Campos de memoria
+    summary: str | None = None
+    preferences: dict = Field(default_factory=dict)
+    key_facts: list = Field(default_factory=list)
+    last_interaction_channel: str | None = None
+    average_sentiment: str | None = None
+    first_interaction_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -354,6 +361,35 @@ class ContactUpdateRequest(BaseModel):
     email: str | None = None
     notes: str | None = None
     tags: list[str] | None = None
+
+
+# ── Memories ─────────────────────────────────────────
+
+class MemoryOut(BaseModel):
+    id: str
+    summary: str
+    channel: str = "call"
+    agent_name: str | None = None
+    duration_seconds: int | None = None
+    sentiment: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    action_items: list[str] = Field(default_factory=list)
+    extracted_data: dict = Field(default_factory=dict)
+    created_at: datetime | None = None
+
+
+class IdentifierOut(BaseModel):
+    id: str
+    identifier_type: str
+    identifier_value: str
+    is_primary: bool = False
+    is_verified: bool = False
+    created_at: datetime | None = None
+
+
+class IdentifierCreateRequest(BaseModel):
+    identifier_type: str
+    identifier_value: str
 
 
 # ── Appointments ─────────────────────────────────────

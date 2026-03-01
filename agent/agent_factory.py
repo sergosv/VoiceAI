@@ -324,6 +324,7 @@ def _build_tool_instructions(enabled_tools: list[str]) -> str:
 def build_orchestrated_agent(
     configs: list[ResolvedConfig],
     primary_config: ResolvedConfig,
+    memory_context: str = "",
     mcp_servers: list | None = None,
 ) -> "OrchestratorAgent":
     """Construye un OrchestratorAgent con múltiples sub-agentes.
@@ -343,7 +344,10 @@ def build_orchestrated_agent(
 
         # Augmentar instrucciones igual que build_agent
         tool_instructions = _build_tool_instructions(cfg.client.enabled_tools)
-        augmented_prompt = cfg.agent.system_prompt + _voice_rules(cfg) + tool_instructions
+        augmented_prompt = cfg.agent.system_prompt
+        if memory_context:
+            augmented_prompt += "\n" + memory_context
+        augmented_prompt += _voice_rules(cfg) + tool_instructions
         if cfg.agent.examples:
             augmented_prompt += f"\n\n## Ejemplos de conversación\n{cfg.agent.examples}"
 
@@ -395,14 +399,18 @@ def build_orchestrated_agent(
 
 def build_agent(
     config: ResolvedConfig,
+    memory_context: str = "",
     mcp_servers: list | None = None,
 ) -> VoiceAgent:
     """Construye un VoiceAgent configurado para un cliente + agente específico."""
     from dataclasses import replace
 
-    # Inyectar contexto temporal + reglas de voz + instrucciones de herramientas
+    # Inyectar contexto temporal + memoria + reglas de voz + instrucciones de herramientas
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
-    augmented_prompt = config.agent.system_prompt + _voice_rules(config) + tool_instructions
+    augmented_prompt = config.agent.system_prompt
+    if memory_context:
+        augmented_prompt += "\n" + memory_context
+    augmented_prompt += _voice_rules(config) + tool_instructions
     # Agregar ejemplos de conversación si existen
     if config.agent.examples:
         augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"

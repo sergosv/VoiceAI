@@ -10,6 +10,9 @@ from api.schemas import (
     ContactCreateRequest,
     ContactOut,
     ContactUpdateRequest,
+    IdentifierCreateRequest,
+    IdentifierOut,
+    MemoryOut,
     MessageResponse,
 )
 from agent.phone_utils import normalize_phone
@@ -281,3 +284,103 @@ async def get_contact_timeline(
             "next_appointment": next_appointment,
         },
     }
+
+
+@router.get("/{contact_id}/memories", response_model=list[MemoryOut])
+async def get_contact_memories(
+    contact_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    channel: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+) -> list[MemoryOut]:
+    """Obtiene las memorias de un contacto, opcionalmente filtradas por canal."""
+    sb = get_supabase()
+
+    # Verificar acceso
+    contact = sb.table("contacts").select("client_id").eq("id", contact_id).limit(1).execute()
+    if not contact.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+    if user.role == "client" and contact.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    query = (
+        sb.table("memories")
+        .select("id, summary, channel, agent_name, duration_seconds, sentiment, topics, action_items, extracted_data, created_at")
+        .eq("contact_id", contact_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if channel:
+        query = query.eq("channel", channel)
+
+    result = query.execute()
+    return [MemoryOut(**row) for row in (result.data or [])]
+
+
+@router.get("/{contact_id}/identifiers", response_model=list[IdentifierOut])
+async def get_contact_identifiers(
+    contact_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> list[IdentifierOut]:
+    """Lista todos los identificadores de un contacto."""
+    sb = get_supabase()
+
+    contact = sb.table("contacts").select("client_id").eq("id", contact_id).limit(1).execute()
+    if not contact.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+    if user.role == "client" and contact.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    result = (
+        sb.table("contact_identifiers")
+        .select("id, identifier_type, identifier_value, is_primary, is_verified, created_at")
+        .eq("contact_id", contact_id)
+        .order("created_at")
+        .execute()
+    )
+    return [IdentifierOut(**row) for row in (result.data or [])]
+
+
+@router.post("/{contact_id}/identifiers", response_model=IdentifierOut, status_code=201)
+async def add_contact_identifier(
+    contact_id: str,
+    req: IdentifierCreateRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> IdentifierOut:
+    """Vincula un nuevo identificador a un contacto."""
+    sb = get_supabase()
+
+    contact = sb.table("contacts").select("client_id").eq("id", contact_id).limit(1).execute()
+    if not contact.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+
+    client_id = contact.data[0]["client_id"]
+    if user.role == "client" and client_id != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    # Verificar que no exista ya
+    existing = (
+        sb.table("contact_identifiers")
+        .select("id")
+        .eq("client_id", client_id)
+        .eq("identifier_type", req.identifier_type)
+        .eq("identifier_value", req.identifier_value)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ya existe un identificador con ese tipo y valor",
+        )
+
+    data = {
+        "client_id": client_id,
+        "contact_id": contact_id,
+        "identifier_type": req.identifier_type,
+        "identifier_value": req.identifier_value,
+    }
+    result = sb.table("contact_identifiers").insert(data).execute()
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creando identificador")
+    return IdentifierOut(**result.data[0])

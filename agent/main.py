@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from livekit import agents, rtc
@@ -16,6 +17,7 @@ from livekit.plugins import silero, noise_cancellation
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent, build_orchestrated_agent
+from agent.memory import AgentMemory
 from agent.config_loader import (
     AgentConfig,
     ResolvedConfig,
@@ -168,6 +170,30 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             config.client.slug, config.agent.slug, len(mcp_servers),
         )
 
+    # Memoria de largo plazo: identificar contacto y cargar contexto
+    memory_context = ""
+    memory: AgentMemory | None = None
+    contact_phone_for_memory = caller_number
+    if outbound_mode and caller_number:
+        # En outbound, caller_number es el destino
+        contact_phone_for_memory = caller_number
+
+    if contact_phone_for_memory:
+        try:
+            channel = "outbound_call" if outbound_mode else "call"
+            memory = AgentMemory(config.client.id, channel=channel)
+            await memory.identify(contact_phone_for_memory, "phone")
+            memory_context = memory.build_memory_context()
+            if memory_context:
+                logger.info(
+                    "Contexto de memoria cargado para '%s' (%d memorias)",
+                    contact_phone_for_memory,
+                    len(memory.memories),
+                )
+        except Exception:
+            logger.exception("Error cargando memoria, continuando sin contexto")
+            memory = None
+
     # Construir agente dinámico
     is_orchestrated = False
     if (
@@ -177,7 +203,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Modo inteligente: cargar todos los agentes del cliente
         all_configs = await load_orchestrated_configs(config.client.id)
         if len(all_configs) >= 2:
-            voice_agent = build_orchestrated_agent(all_configs, config, mcp_servers=mcp_servers)
+            voice_agent = build_orchestrated_agent(
+                all_configs, config, memory_context=memory_context, mcp_servers=mcp_servers,
+            )
             is_orchestrated = True
             logger.info(
                 "Modo inteligente activado para '%s' — %d agentes",
@@ -185,13 +213,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 len(all_configs),
             )
         else:
-            voice_agent = build_agent(config, mcp_servers=mcp_servers)
+            voice_agent = build_agent(config, memory_context=memory_context, mcp_servers=mcp_servers)
             logger.info(
                 "Modo inteligente solicitado pero solo %d agente(s), usando simple",
                 len(all_configs),
             )
     else:
-        voice_agent = build_agent(config, mcp_servers=mcp_servers)
+        voice_agent = build_agent(config, memory_context=memory_context, mcp_servers=mcp_servers)
 
     # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.client.language in ("es", "es-en") else "en"
@@ -351,6 +379,24 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if is_orchestrated and hasattr(voice_agent, "agent_turns"):
             handler.set_agent_turns(voice_agent.agent_turns)
         await handler.finalize(status="completed")
+
+        # Almacenar memoria de largo plazo
+        if memory and memory.contact_id and handler._transcript and len(handler._transcript) >= 2:
+            try:
+                transcript_text = "\n".join(
+                    f"{'Cliente' if e['role'] == 'user' else 'Agente'}: {e['text']}"
+                    for e in handler._transcript
+                )
+                await memory.store(
+                    transcript=transcript_text,
+                    agent_id=config.agent.id,
+                    agent_name=config.agent.name,
+                    duration_seconds=int(
+                        (datetime.now(timezone.utc) - handler._started_at).total_seconds()
+                    ),
+                )
+            except Exception:
+                logger.exception("Error almacenando memoria de largo plazo")
 
     ctx.add_shutdown_callback(on_shutdown)
 
