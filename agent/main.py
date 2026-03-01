@@ -420,6 +420,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         await session.generate_reply(
             instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
         )
+    elif memory and memory.contact_id and not memory._is_new_contact and memory.contact and memory.contact.get("name"):
+        contact_name = memory.contact["name"].split()[0]  # Primer nombre
+        await session.generate_reply(
+            instructions=(
+                f"Este es un cliente que ya conoces. Se llama {memory.contact['name']}. "
+                f"Salúdalo de forma cálida y personal, por ejemplo: "
+                f"'¡Qué gusto saludarle, {contact_name}! ¿En qué puedo ayudarle hoy?' "
+                f"NO digas tu nombre ni te presentes, ya te conoce. Sé breve y natural."
+            )
+        )
     else:
         await session.generate_reply(instructions=f"Saluda al usuario con: {config.agent.greeting}")
 

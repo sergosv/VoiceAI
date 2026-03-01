@@ -292,28 +292,45 @@ class AgentMemory:
             duration_seconds: Duración de la interacción en segundos
         """
         if not self.contact_id or not transcript or len(transcript) < 20:
+            logger.info("store() skip: contact_id=%s, transcript_len=%d", self.contact_id, len(transcript or ""))
             return
 
+        # 1. Analizar conversación con Gemini
+        logger.info("Analizando conversación para memoria (contacto %s)...", self.contact_id)
         try:
-            # 1. Analizar conversación con Gemini
             analysis = await self._analyze_conversation(transcript)
-            if not analysis:
-                logger.warning("No se pudo analizar la conversación para memoria")
-                return
+        except Exception:
+            logger.exception("Error en _analyze_conversation")
+            analysis = None
 
-            summary = analysis.get("summary", "")
-            if not summary:
-                return
+        if not analysis:
+            logger.warning("No se pudo analizar la conversación para memoria")
+            return
 
-            # 2. Generar embedding del resumen
+        summary = analysis.get("summary", "")
+        if not summary:
+            logger.warning("Análisis sin summary, abortando store")
+            return
+
+        logger.info("Análisis OK: summary='%s...', sentiment=%s", summary[:60], analysis.get("sentiment"))
+
+        # 2. Generar embedding del resumen
+        try:
             embedding = await generate_embedding(summary)
+            logger.info("Embedding generado: %d dims", len(embedding))
+        except Exception:
+            logger.exception("Error generando embedding")
+            return
 
-            # 3. Guardar memoria
+        # 3. Guardar memoria
+        try:
+            # pgvector espera formato string "[0.1, 0.2, ...]"
+            embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
             memory_data = {
                 "client_id": self._client_id,
                 "contact_id": self.contact_id,
                 "summary": summary,
-                "embedding": str(embedding),
+                "embedding": embedding_str,
                 "channel": self._channel,
                 "agent_id": agent_id,
                 "agent_name": agent_name,
@@ -325,15 +342,21 @@ class AgentMemory:
             }
             self._sb.table("memories").insert(memory_data).execute()
             logger.info("Memoria guardada para contacto %s", self.contact_id)
-
-            # 4. Actualizar perfil del contacto
-            await self._update_contact_profile(analysis, embedding)
-
-            # 5. Vincular identificadores detectados
-            await self._link_detected_identifiers(analysis)
-
         except Exception:
-            logger.exception("Error almacenando memoria para contacto %s", self.contact_id)
+            logger.exception("Error insertando memoria en DB")
+            return
+
+        # 4. Actualizar perfil del contacto
+        try:
+            await self._update_contact_profile(analysis, embedding)
+        except Exception:
+            logger.exception("Error actualizando perfil de contacto")
+
+        # 5. Vincular identificadores detectados
+        try:
+            await self._link_detected_identifiers(analysis)
+        except Exception:
+            logger.exception("Error vinculando identificadores")
 
     async def _analyze_conversation(self, transcript: str) -> dict | None:
         """Analiza la conversación con Gemini Flash para extraer datos estructurados."""
@@ -407,7 +430,8 @@ Responde SOLO con JSON válido, sin markdown:
                 updates["summary"] = combined
             else:
                 updates["summary"] = new_summary
-            updates["summary_embedding"] = str(summary_embedding)
+            # pgvector espera formato string "[0.1, 0.2, ...]"
+            updates["summary_embedding"] = "[" + ",".join(str(v) for v in summary_embedding) + "]"
 
         # Preferencias: merge con existentes
         new_prefs = analysis.get("preferences") or {}
