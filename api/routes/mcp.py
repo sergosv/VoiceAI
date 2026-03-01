@@ -179,10 +179,16 @@ async def test_mcp_server(
 
         servers = build_mcp_servers([row])
         if not servers:
+            # Intentar import directo para dar un error más específico
+            import_error = None
+            try:
+                from livekit.agents.llm.mcp import MCPServerHTTP  # noqa: F401
+            except ImportError as ie:
+                import_error = f"{ie} (causa: {ie.__cause__})"
             return McpTestResult(
                 success=False,
-                error="No se pudo construir el servidor MCP. "
-                "Verifica que 'mcp' esté instalado: pip install 'livekit-agents[mcp]'",
+                error=import_error or f"No se pudo construir el servidor MCP con config: "
+                f"type={row.get('connection_type')}, url={row.get('url')}, cmd={row.get('command')}",
             )
 
         server = servers[0]
@@ -214,7 +220,22 @@ async def test_mcp_server(
         return McpTestResult(success=True, tools=tools_list)
 
     except Exception as e:
-        return McpTestResult(success=False, error=str(e))
+        error_msg = str(e)
+        # "Connection closed" sin más contexto no ayuda — dar pistas
+        if "Connection closed" in error_msg:
+            conn_type = row.get("connection_type", "http")
+            if conn_type == "stdio":
+                error_msg = (
+                    f"Connection closed — el proceso '{row.get('command')} "
+                    f"{' '.join(row.get('command_args') or [])}' terminó inesperadamente. "
+                    "Verifica que el comando y paquete existan (ej: npm install -g <paquete>)."
+                )
+            else:
+                error_msg = (
+                    f"Connection closed — no se pudo conectar a {row.get('url')}. "
+                    "Verifica que la URL sea correcta y el servidor esté activo."
+                )
+        return McpTestResult(success=False, error=error_msg)
 
 
 # ── Templates (router separado, montado en /api) ────
