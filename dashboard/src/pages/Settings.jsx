@@ -417,11 +417,9 @@ export function Settings() {
             <span className="text-xs text-text-muted">
               Voz: {providerLabel}
             </span>
-            {multiAgent && (
-              <Button variant="secondary" type="button" onClick={() => navigate(`/agents/${selectedAgent.id}`)}>
-                Configuracion avanzada
-              </Button>
-            )}
+            <Button variant="secondary" type="button" onClick={() => navigate(`/agents/${selectedAgent.id}`)}>
+              Configuracion avanzada
+            </Button>
           </div>
         </form>
       )}
