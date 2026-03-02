@@ -281,6 +281,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         room_name=ctx.room.name,
         campaign_id=campaign_id,
         campaign_script=campaign_script,
+        memory_contact_id=memory.contact_id if memory else None,
     )
 
     # ── Filler phrases (solo Pipeline mode) ─────────────────

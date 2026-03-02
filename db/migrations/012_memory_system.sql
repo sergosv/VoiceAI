@@ -71,7 +71,7 @@ ON memories(client_id, created_at DESC);
 
 -- ── 5. Funciones SQL ──────────────────────────────────
 
--- Resolver contacto por identificador
+-- Resolver contacto por identificador (con fallback a contacts.phone)
 CREATE OR REPLACE FUNCTION resolve_contact(
     p_client_id UUID,
     p_identifier_type TEXT,
@@ -80,6 +80,7 @@ CREATE OR REPLACE FUNCTION resolve_contact(
 DECLARE
     v_contact_id UUID;
 BEGIN
+    -- Primary: check contact_identifiers
     SELECT contact_id INTO v_contact_id
     FROM contact_identifiers
     WHERE client_id = p_client_id
@@ -87,11 +88,23 @@ BEGIN
       AND identifier_value = p_identifier_value
     LIMIT 1;
 
+    IF v_contact_id IS NOT NULL THEN
+        RETURN v_contact_id;
+    END IF;
+
+    -- Fallback: check contacts.phone directly (for legacy contacts)
+    IF p_identifier_type = 'phone' THEN
+        SELECT id INTO v_contact_id
+        FROM contacts
+        WHERE client_id = p_client_id AND phone = p_identifier_value
+        LIMIT 1;
+    END IF;
+
     RETURN v_contact_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Crear contacto con identificador inicial
+-- Crear contacto con identificador (o retornar existente si ya existe)
 CREATE OR REPLACE FUNCTION create_contact_with_identifier(
     p_client_id UUID,
     p_identifier_type TEXT,
@@ -101,7 +114,34 @@ CREATE OR REPLACE FUNCTION create_contact_with_identifier(
 DECLARE
     v_contact_id UUID;
 BEGIN
-    -- Crear el contacto
+    -- Check if contact with this phone already exists
+    IF p_identifier_type = 'phone' THEN
+        SELECT id INTO v_contact_id
+        FROM contacts
+        WHERE client_id = p_client_id AND phone = p_identifier_value
+        LIMIT 1;
+
+        IF v_contact_id IS NOT NULL THEN
+            INSERT INTO contact_identifiers (client_id, contact_id, identifier_type, identifier_value, is_primary)
+            VALUES (p_client_id, v_contact_id, p_identifier_type, p_identifier_value, true)
+            ON CONFLICT DO NOTHING;
+            RETURN v_contact_id;
+        END IF;
+    END IF;
+
+    -- Check contact_identifiers
+    SELECT contact_id INTO v_contact_id
+    FROM contact_identifiers
+    WHERE client_id = p_client_id
+      AND identifier_type = p_identifier_type
+      AND identifier_value = p_identifier_value
+    LIMIT 1;
+
+    IF v_contact_id IS NOT NULL THEN
+        RETURN v_contact_id;
+    END IF;
+
+    -- Create new contact
     INSERT INTO contacts (client_id, phone, name, source, call_count, first_interaction_at)
     VALUES (
         p_client_id,
@@ -113,7 +153,6 @@ BEGIN
     )
     RETURNING id INTO v_contact_id;
 
-    -- Crear el identificador
     INSERT INTO contact_identifiers (client_id, contact_id, identifier_type, identifier_value, is_primary)
     VALUES (p_client_id, v_contact_id, p_identifier_type, p_identifier_value, true)
     ON CONFLICT DO NOTHING;

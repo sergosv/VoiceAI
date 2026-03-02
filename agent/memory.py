@@ -16,8 +16,15 @@ from google.genai import types as genai_types
 from supabase import Client, create_client
 
 from agent.embeddings import generate_embedding
+from agent.phone_utils import normalize_phone
 
 logger = logging.getLogger(__name__)
+
+
+def _looks_like_phone(value: str) -> bool:
+    """Verifica que un string parece un número de teléfono real."""
+    digits = "".join(c for c in value if c.isdigit())
+    return len(digits) >= 7
 
 # Modelo para análisis de conversaciones
 ANALYSIS_MODEL = "gemini-2.5-flash"
@@ -73,7 +80,15 @@ class AgentMemory:
         if not identifier_value:
             return None
 
+        # Normalizar teléfonos para consistencia
+        if identifier_type == "phone":
+            identifier_value = normalize_phone(identifier_value)
+            if not _looks_like_phone(identifier_value):
+                logger.warning("Teléfono inválido, ignorando: %s", identifier_value)
+                return None
+
         # Intentar resolver via RPC
+        contact_id: str | None = None
         try:
             result = self._sb.rpc(
                 "resolve_contact",
@@ -87,12 +102,30 @@ class AgentMemory:
             contact_id = result.data if isinstance(result.data, str) else None
         except Exception:
             logger.exception("Error en resolve_contact RPC")
-            contact_id = None
+
+        # Fallback: buscar directamente en contacts.phone
+        if not contact_id and identifier_type == "phone":
+            contact_id = self._fallback_find_by_phone(identifier_value)
 
         if contact_id:
             # Contacto conocido — cargar datos
             self.contact_id = contact_id
             await self._load_contact_data()
+            # Asegurar que tiene identifier (puede ser contacto legacy sin entry en contact_identifiers)
+            existing_ids = {i.get("identifier_value") for i in self.identifiers}
+            if identifier_value not in existing_ids:
+                try:
+                    self._sb.rpc(
+                        "link_identifier_to_contact",
+                        {
+                            "p_client_id": self._client_id,
+                            "p_contact_id": contact_id,
+                            "p_identifier_type": identifier_type,
+                            "p_identifier_value": identifier_value,
+                        },
+                    ).execute()
+                except Exception:
+                    pass  # No crítico
             logger.info(
                 "Contacto reconocido: %s (%s) — %d memorias previas",
                 self.contact.get("name") or "Sin nombre",
@@ -113,9 +146,6 @@ class AgentMemory:
                 contact_id = result.data if isinstance(result.data, str) else None
             except Exception:
                 logger.exception("Error en create_contact_with_identifier RPC")
-                # Fallback: buscar por teléfono en tabla contacts directamente
-                if identifier_type == "phone":
-                    contact_id = self._fallback_find_by_phone(identifier_value)
 
             if contact_id:
                 self.contact_id = contact_id
@@ -316,10 +346,12 @@ class AgentMemory:
 
         # 2. Generar embedding del resumen
         try:
-            embedding = await generate_embedding(summary)
+            # Limitar texto para embedding (max ~2000 chars)
+            embed_text = summary[:2000]
+            embedding = await generate_embedding(embed_text)
             logger.info("Embedding generado: %d dims", len(embedding))
-        except Exception:
-            logger.exception("Error generando embedding")
+        except Exception as e:
+            logger.exception("Error generando embedding: %s", e)
             return
 
         # 3. Guardar memoria
@@ -332,7 +364,6 @@ class AgentMemory:
                 "summary": summary,
                 "embedding": embedding_str,
                 "channel": self._channel,
-                "agent_id": agent_id,
                 "agent_name": agent_name,
                 "duration_seconds": duration_seconds,
                 "sentiment": analysis.get("sentiment"),
@@ -340,10 +371,17 @@ class AgentMemory:
                 "action_items": analysis.get("action_items", []),
                 "extracted_data": analysis.get("extracted_data", {}),
             }
-            self._sb.table("memories").insert(memory_data).execute()
-            logger.info("Memoria guardada para contacto %s", self.contact_id)
-        except Exception:
-            logger.exception("Error insertando memoria en DB")
+            # agent_id es FK opcional — solo incluir si es UUID válido
+            if agent_id and agent_id != "00000000-0000-0000-0000-000000000000":
+                memory_data["agent_id"] = agent_id
+            result = self._sb.table("memories").insert(memory_data).execute()
+            logger.info(
+                "Memoria guardada para contacto %s (rows=%d)",
+                self.contact_id,
+                len(result.data) if result.data else 0,
+            )
+        except Exception as e:
+            logger.exception("Error insertando memoria en DB: %s", e)
             return
 
         # 4. Actualizar perfil del contacto
@@ -468,12 +506,14 @@ Responde SOLO con JSON válido, sin markdown:
         identifiers_to_link: list[tuple[str, str]] = []
 
         email = analysis.get("contact_email")
-        if email and email not in existing_values:
+        if email and "@" in email and email not in existing_values:
             identifiers_to_link.append(("email", email))
 
         phone = analysis.get("contact_phone")
-        if phone and phone not in existing_values:
-            identifiers_to_link.append(("phone", phone))
+        if phone and _looks_like_phone(phone):
+            normalized = normalize_phone(phone)
+            if normalized not in existing_values:
+                identifiers_to_link.append(("phone", normalized))
 
         for id_type, id_value in identifiers_to_link:
             try:

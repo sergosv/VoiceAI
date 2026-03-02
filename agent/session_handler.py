@@ -42,6 +42,7 @@ class SessionHandler:
         room_name: str | None = None,
         campaign_id: str | None = None,
         campaign_script: str | None = None,
+        memory_contact_id: str | None = None,
     ) -> None:
         self._config = config
         self._client_id = config.client.id
@@ -52,6 +53,7 @@ class SessionHandler:
         self._room_name = room_name
         self._campaign_id = campaign_id
         self._campaign_script = campaign_script
+        self._memory_contact_id = memory_contact_id
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
         self._agent_turns: list[dict] = []
@@ -192,10 +194,17 @@ class SessionHandler:
                 logger.exception("Error actualizando campaign_call")
 
         # Auto-capturar contacto con deduplicación inteligente
+        # Si memory ya identificó el contacto, usamos ese directamente
         phone_for_contact = self._caller_number
         if self._direction == "outbound" and self._callee_number:
             phone_for_contact = self._callee_number
-        if phone_for_contact:
+        if self._memory_contact_id and phone_for_contact:
+            # Memory ya manejó la creación/resolución — solo actualizar stats
+            try:
+                _update_contact_stats(sb, self._memory_contact_id, call_id)
+            except Exception:
+                logger.exception("Error actualizando stats de contacto (memory)")
+        elif phone_for_contact:
             try:
                 _smart_upsert_contact(
                     sb, self._client_id, phone_for_contact,
@@ -252,6 +261,36 @@ class SessionHandler:
             }).execute()
 
 
+def _update_contact_stats(
+    sb: Client,
+    contact_id: str,
+    call_id: str | None,
+) -> None:
+    """Actualiza call_count y last_call_at de un contacto ya identificado por memory."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    result = (
+        sb.table("contacts").select("id, call_count, metadata")
+        .eq("id", contact_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return
+
+    contact = result.data[0]
+    updates: dict = {
+        "call_count": (contact.get("call_count") or 0) + 1,
+        "last_call_at": now_iso,
+    }
+    metadata = contact.get("metadata") or {}
+    if call_id:
+        metadata["last_call_id"] = call_id
+    updates["metadata"] = metadata
+
+    sb.table("contacts").update(updates).eq("id", contact_id).execute()
+    logger.info("Contact stats actualizados (memory): %s", contact_id)
+
+
 def _smart_upsert_contact(
     sb: Client,
     client_id: str,
@@ -261,6 +300,12 @@ def _smart_upsert_contact(
 ) -> None:
     """Upsert inteligente de contacto con normalización y deduplicación."""
     normalized = normalize_phone(phone)
+
+    # Validar que parece un teléfono real (al menos 7 dígitos)
+    digits = "".join(c for c in normalized if c.isdigit())
+    if len(digits) < 7:
+        logger.warning("Teléfono inválido, ignorando upsert: %s", phone)
+        return
 
     result = (
         sb.table("contacts").select("*")
