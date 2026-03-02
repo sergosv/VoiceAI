@@ -325,11 +325,14 @@ def _enrich_contact(
         contact = result.data[0]
         updates: dict = {}
 
-        extracted_name = analysis.get("contact_name")
+        # Nombre: buscar en ambos formatos (outbound y universal)
+        datos = analysis.get("datos_capturados") or {}
+        extracted_name = analysis.get("contact_name") or datos.get("nombre")
         if extracted_name and not contact.get("name"):
             updates["name"] = extracted_name
 
-        extracted_email = analysis.get("contact_email")
+        # Email: buscar en ambos formatos
+        extracted_email = analysis.get("contact_email") or datos.get("email")
         if extracted_email and not contact.get("email"):
             updates["email"] = extracted_email
 
