@@ -24,6 +24,7 @@ from agent.config_loader import (
     AgentConfig,
     ResolvedConfig,
     SlimClientConfig,
+    load_api_integrations,
     load_config_by_agent_id,
     load_config_by_client_id,
     load_config_by_phone,
@@ -193,6 +194,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             config.client.slug, config.agent.slug, len(mcp_servers),
         )
 
+    # Cargar API integrations configuradas para este cliente/agente
+    api_integrations = await load_api_integrations(config.client.id, config.agent.id)
+    if api_integrations:
+        logger.info(
+            "API integrations cargadas para '%s/%s': %d integración(es)",
+            config.client.slug, config.agent.slug, len(api_integrations),
+        )
+
     # Memoria de largo plazo: identificar contacto y cargar contexto
     memory_context = ""
     memory: AgentMemory | None = None
@@ -227,7 +236,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         all_configs = await load_orchestrated_configs(config.client.id)
         if len(all_configs) >= 2:
             voice_agent = build_orchestrated_agent(
-                all_configs, config, memory_context=memory_context, mcp_servers=mcp_servers,
+                all_configs, config, memory_context=memory_context,
+                mcp_servers=mcp_servers, api_integrations=api_integrations,
             )
             is_orchestrated = True
             logger.info(
@@ -236,13 +246,19 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 len(all_configs),
             )
         else:
-            voice_agent = build_agent(config, memory_context=memory_context, mcp_servers=mcp_servers)
+            voice_agent = build_agent(
+                config, memory_context=memory_context,
+                mcp_servers=mcp_servers, api_integrations=api_integrations,
+            )
             logger.info(
                 "Modo inteligente solicitado pero solo %d agente(s), usando simple",
                 len(all_configs),
             )
     else:
-        voice_agent = build_agent(config, memory_context=memory_context, mcp_servers=mcp_servers)
+        voice_agent = build_agent(
+            config, memory_context=memory_context,
+            mcp_servers=mcp_servers, api_integrations=api_integrations,
+        )
 
     # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.client.language in ("es", "es-en") else "en"
@@ -472,6 +488,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if outbound_mode:
         await session.generate_reply(
             instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
+        )
+    elif hasattr(voice_agent, '_flow_engine') and hasattr(voice_agent, '_flow_state'):
+        # Modo flow: usar greeting del nodo Start
+        flow_greeting = voice_agent.flow_engine.get_greeting(voice_agent.flow_state)
+        await session.generate_reply(
+            instructions=f"Saluda al usuario con: {flow_greeting}"
         )
     elif memory and memory.contact_id and not memory._is_new_contact and memory.contact and memory.contact.get("name"):
         contact_name = memory.contact["name"].split()[0]  # Primer nombre

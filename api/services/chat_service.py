@@ -8,8 +8,9 @@ import os
 from google import genai
 from google.genai import types
 
-from agent.agent_factory import _voice_rules, _build_tool_instructions
+from agent.agent_factory import _voice_rules, _build_tool_instructions, _build_api_instructions
 from agent.config_loader import ResolvedConfig
+from agent.flow_engine import FlowEngine, FlowState
 from agent.tools.file_search import search_knowledge_base
 from api.services.chat_store import Conversation
 
@@ -27,6 +28,29 @@ def _get_gemini() -> genai.Client:
 
 
 # ── Tool declarations ─────────────────────────────────────
+
+CALL_API_SCHEMA = types.FunctionDeclaration(
+    name="call_api",
+    description=(
+        "Llama a una API externa configurada para este negocio. "
+        "Usa esta herramienta cuando necesites consultar o enviar datos "
+        "a un sistema externo."
+    ),
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "integration_name": types.Schema(
+                type="STRING",
+                description="Nombre de la integración API a llamar.",
+            ),
+            "parameters": types.Schema(
+                type="STRING",
+                description="JSON string con los parámetros requeridos por la API.",
+            ),
+        },
+        required=["integration_name"],
+    ),
+)
 
 TOOL_SCHEMAS: dict[str, types.FunctionDeclaration] = {
     "search_knowledge": types.FunctionDeclaration(
@@ -110,7 +134,10 @@ TOOL_SCHEMAS: dict[str, types.FunctionDeclaration] = {
 }
 
 
-def _build_tool_declarations(config: ResolvedConfig) -> list[types.Tool]:
+def _build_tool_declarations(
+    config: ResolvedConfig,
+    api_integrations: list[dict] | None = None,
+) -> list[types.Tool]:
     """Construye las declaraciones de tools para Gemini según las habilitadas."""
     enabled = config.client.enabled_tools or []
     declarations: list[types.FunctionDeclaration] = []
@@ -126,6 +153,10 @@ def _build_tool_declarations(config: ResolvedConfig) -> list[types.Tool]:
         if tool_name in enabled and fn_name in TOOL_SCHEMAS:
             declarations.append(TOOL_SCHEMAS[fn_name])
 
+    # call_api si hay API integrations
+    if api_integrations:
+        declarations.append(CALL_API_SCHEMA)
+
     if not declarations:
         return []
     return [types.Tool(function_declarations=declarations)]
@@ -137,14 +168,43 @@ async def _execute_tool(
     tool_name: str,
     args: dict,
     config: ResolvedConfig,
+    api_integrations: list[dict] | None = None,
 ) -> str:
-    """Ejecuta un tool: search_knowledge es real, el resto simulado."""
+    """Ejecuta un tool: search_knowledge y call_api son reales, el resto simulado."""
     if tool_name == "search_knowledge":
         store_id = config.client.file_search_store_id
         if not store_id:
             return "No hay base de conocimientos configurada."
         query = args.get("query", "")
         return await search_knowledge_base(query, store_id)
+
+    if tool_name == "call_api":
+        if not api_integrations:
+            return "No hay integraciones API configuradas."
+
+        integ_name = args.get("integration_name", "")
+        integ = next(
+            (i for i in api_integrations if i.get("name") == integ_name), None
+        )
+        if not integ:
+            available = ", ".join(i.get("name", "") for i in api_integrations)
+            return f"Integración '{integ_name}' no encontrada. Disponibles: {available}"
+
+        import json
+        params_str = args.get("parameters", "{}")
+        try:
+            params = json.loads(params_str) if isinstance(params_str, str) else params_str
+        except json.JSONDecodeError:
+            params = {}
+
+        from agent.api_executor import execute_api_call
+
+        status_code, response_text = await execute_api_call(integ, params)
+        if status_code == 0:
+            return f"Error al llamar a la API: {response_text}"
+        if status_code >= 400:
+            return f"La API respondió con error (HTTP {status_code}): {response_text}"
+        return response_text
 
     # Simulaciones
     if tool_name == "transfer_to_human":
@@ -174,14 +234,16 @@ def build_chat_system_prompt(
     config: ResolvedConfig,
     contact_name: str | None = None,
     campaign_script: str | None = None,
+    api_integrations: list[dict] | None = None,
 ) -> str:
     """Construye el system prompt completo para el chat tester."""
     # Si hay script de campaña, reemplaza el prompt base (igual que outbound real)
     base = campaign_script if campaign_script else config.agent.system_prompt
     voice_rules = _voice_rules(config)
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
+    api_instructions = _build_api_instructions(api_integrations or [])
 
-    prompt = base + voice_rules + tool_instructions
+    prompt = base + voice_rules + tool_instructions + api_instructions
 
     # Ejemplos de conversación
     if config.agent.examples:
@@ -206,22 +268,83 @@ def build_chat_system_prompt(
     return prompt
 
 
+# ── Flow mode helpers ────────────────────────────────────
+
+def init_flow_state(conversation: Conversation) -> None:
+    """Inicializa el FlowEngine y FlowState en la conversación si es flow mode."""
+    config = conversation.config
+    if config.agent.conversation_mode != "flow" or not config.agent.conversation_flow:
+        return
+
+    if hasattr(conversation, "_flow_engine"):
+        return  # Ya inicializado
+
+    engine = FlowEngine(config.agent.conversation_flow)
+    state = engine.start()
+    conversation._flow_engine = engine  # type: ignore[attr-defined]
+    conversation._flow_state = state  # type: ignore[attr-defined]
+
+    # Actualizar system prompt con instrucciones del nodo actual
+    base_rules = _voice_rules(config)
+    flow_prompt = engine.build_system_prompt(state, base_rules)
+    flow_prompt += (
+        "\n\n## Modo de prueba (texto)\n"
+        "Esta es una conversación de texto para probar tu comportamiento. "
+        "Responde como lo harías en una llamada telefónica real, pero en texto."
+    )
+    conversation.system_prompt = flow_prompt
+
+
+def _advance_flow(conversation: Conversation, user_message: str) -> None:
+    """Avanza el flow state después de cada turno del usuario."""
+    if not hasattr(conversation, "_flow_engine"):
+        return
+
+    engine: FlowEngine = conversation._flow_engine  # type: ignore[attr-defined]
+    state: FlowState = conversation._flow_state  # type: ignore[attr-defined]
+
+    if state.completed:
+        return
+
+    # Procesar input del usuario y avanzar
+    state, action = engine.process_user_input(state, user_message)
+    conversation._flow_state = state  # type: ignore[attr-defined]
+
+    # Reconstruir system prompt para el nuevo nodo
+    base_rules = _voice_rules(conversation.config)
+    flow_prompt = engine.build_system_prompt(state, base_rules)
+    flow_prompt += (
+        "\n\n## Modo de prueba (texto)\n"
+        "Esta es una conversación de texto para probar tu comportamiento. "
+        "Responde como lo harías en una llamada telefónica real, pero en texto."
+    )
+    conversation.system_prompt = flow_prompt
+
+
 # ── Chat turn ─────────────────────────────────────────────
 
 async def chat_turn(
     conversation: Conversation,
     user_message: str,
+    api_integrations: list[dict] | None = None,
 ) -> tuple[str, list[dict]]:
     """Ejecuta un turno de chat. Retorna (agent_text, tool_calls)."""
     client = _get_gemini()
     config = conversation.config
+
+    # Inicializar flow si es primera vez
+    init_flow_state(conversation)
+
+    # Avanzar flow con el input del usuario (si aplica)
+    if conversation.turn_count > 0:
+        _advance_flow(conversation, user_message)
 
     # Agregar mensaje del usuario al historial
     conversation.history.append(
         types.Content(role="user", parts=[types.Part.from_text(text=user_message)])
     )
 
-    tool_declarations = _build_tool_declarations(config)
+    tool_declarations = _build_tool_declarations(config, api_integrations=api_integrations)
     tool_calls_log: list[dict] = []
     max_tool_rounds = 5
 
@@ -261,7 +384,9 @@ async def chat_turn(
             tool_args = dict(fc.args) if fc.args else {}
 
             logger.info("Chat tool call: %s(%s)", tool_name, tool_args)
-            result = await _execute_tool(tool_name, tool_args, config)
+            result = await _execute_tool(
+                tool_name, tool_args, config, api_integrations=api_integrations
+            )
 
             tool_calls_log.append({
                 "name": tool_name,

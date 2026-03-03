@@ -42,6 +42,9 @@ class AgentConfig:
     role_description: str | None = None
     orchestrator_enabled: bool = True
     orchestrator_priority: int = 0
+    # Flow builder
+    conversation_mode: str = "prompt"
+    conversation_flow: dict | None = None
 
     # Properties de conveniencia (compatibilidad con pipeline_builder)
     @property
@@ -287,6 +290,42 @@ async def load_mcp_servers(client_id: str, agent_id: str | None = None) -> list[
     return servers
 
 
+async def load_api_integrations(
+    client_id: str, agent_id: str | None = None
+) -> list[dict]:
+    """Carga API integrations activas para un cliente, filtradas por agent_id.
+
+    Args:
+        client_id: UUID del cliente.
+        agent_id: UUID del agente (opcional). Si se da, filtra integrations
+                  asignadas a ese agente o a todos (agent_ids IS NULL).
+
+    Returns:
+        Lista de dicts con la config de cada API integration.
+    """
+    sb = _get_supabase()
+    result = (
+        sb.table("api_integrations")
+        .select("*")
+        .eq("client_id", client_id)
+        .eq("is_active", True)
+        .execute()
+    )
+
+    if not result.data:
+        return []
+
+    integrations = []
+    for row in result.data:
+        agent_ids = row.get("agent_ids")
+        if agent_ids is not None and agent_id:
+            if agent_id not in agent_ids:
+                continue
+        integrations.append(row)
+
+    return integrations
+
+
 async def load_orchestrated_configs(client_id: str) -> list[ResolvedConfig]:
     """Carga todos los agentes habilitados para orquestación de un cliente.
 
@@ -334,6 +373,8 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         role_description=agent_row.get("role_description"),
         orchestrator_enabled=agent_row.get("orchestrator_enabled", True),
         orchestrator_priority=agent_row.get("orchestrator_priority", 0),
+        conversation_mode=agent_row.get("conversation_mode", "prompt"),
+        conversation_flow=agent_row.get("conversation_flow"),
     )
 
     client = SlimClientConfig(

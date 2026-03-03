@@ -227,6 +227,8 @@ export function AgentDetail() {
     role_description: '',
     orchestrator_enabled: true,
     orchestrator_priority: 0,
+    // Flow builder
+    conversation_mode: 'prompt',
   })
 
   // Track si las API keys existen en el servidor
@@ -303,6 +305,7 @@ export function AgentDetail() {
         role_description: agentData.role_description || '',
         orchestrator_enabled: agentData.orchestrator_enabled !== false,
         orchestrator_priority: agentData.orchestrator_priority || 0,
+        conversation_mode: agentData.conversation_mode || 'prompt',
       })
 
       // Cargar datos del cliente para saber si orchestration_mode es intelligent
@@ -390,6 +393,7 @@ export function AgentDetail() {
         role_description: form.role_description || null,
         orchestrator_enabled: form.orchestrator_enabled,
         orchestrator_priority: form.orchestrator_priority,
+        conversation_mode: form.conversation_mode,
       }
 
       // Solo enviar API keys si se escribieron nuevas
@@ -564,8 +568,59 @@ export function AgentDetail() {
           />
         </Card>
 
-        {/* Right: Mensajes */}
+        {/* Right: Modo + Mensajes */}
         <Card className="space-y-4">
+          {/* Modo de conversacion */}
+          <div>
+            <h2 className="text-sm font-semibold text-text-secondary mb-3">Modo de conversacion</h2>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, conversation_mode: 'prompt' }))}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm border transition-colors ${
+                  form.conversation_mode === 'prompt'
+                    ? 'border-accent bg-accent/10 text-accent'
+                    : 'border-border text-text-muted hover:border-text-muted'
+                }`}
+              >
+                Prompt libre
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, conversation_mode: 'flow' }))}
+                className={`flex-1 px-3 py-2 rounded-lg text-sm border transition-colors ${
+                  form.conversation_mode === 'flow'
+                    ? 'border-accent bg-accent/10 text-accent'
+                    : 'border-border text-text-muted hover:border-text-muted'
+                }`}
+              >
+                Flujo visual
+              </button>
+            </div>
+            {form.conversation_mode === 'flow' && (
+              <button
+                type="button"
+                onClick={() => navigate(`/agents/${agentId}/flow`)}
+                className="mt-3 w-full px-4 py-2.5 rounded-lg border border-accent/30 bg-accent/5
+                           text-accent text-sm font-medium hover:bg-accent/10 transition-colors
+                           flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                </svg>
+                Editar flujo de conversacion
+              </button>
+            )}
+            <p className="text-[10px] text-text-muted mt-2">
+              {form.conversation_mode === 'prompt'
+                ? 'El agente usa el system prompt para improvisar la conversacion.'
+                : 'El agente sigue un flujo predefinido con pasos y condiciones.'}
+            </p>
+          </div>
+
+          <div className="border-t border-border" />
+
           <h2 className="text-sm font-semibold text-text-secondary">Mensajes</h2>
 
           <Textarea

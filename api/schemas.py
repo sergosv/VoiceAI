@@ -62,6 +62,9 @@ class AgentOut(BaseModel):
     role_description: str | None = None
     orchestrator_enabled: bool = True
     orchestrator_priority: int = 0
+    # Flow builder
+    conversation_mode: str = "prompt"
+    conversation_flow: dict | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -91,6 +94,9 @@ class AgentCreateRequest(BaseModel):
     role_description: str | None = None
     orchestrator_enabled: bool = True
     orchestrator_priority: int = 0
+    # Flow builder
+    conversation_mode: str = "prompt"
+    conversation_flow: dict | None = None
 
 
 class AgentUpdateRequest(BaseModel):
@@ -118,6 +124,9 @@ class AgentUpdateRequest(BaseModel):
     role_description: str | None = None
     orchestrator_enabled: bool | None = None
     orchestrator_priority: int | None = None
+    # Flow builder
+    conversation_mode: str | None = None
+    conversation_flow: dict | None = None
 
 
 # ── Clients ───────────────────────────────────────────
@@ -654,6 +663,79 @@ class GiftCreditsRequest(BaseModel):
 
 # ── Generic ───────────────────────────────────────────
 
+# ── API Integrations ────────────────────────────────
+
+class ApiIntegrationOut(BaseModel):
+    id: str
+    client_id: str
+    name: str
+    description: str = ""
+    url: str
+    method: str = "POST"
+    has_headers: bool = False
+    has_auth_config: bool = False
+    auth_type: str = "none"
+    response_type: str = "json"
+    response_path: str = ""
+    query_params: dict = Field(default_factory=dict)
+    body_template: dict | None = None
+    agent_ids: list[str] | None = None
+    is_active: bool = True
+    input_schema: dict = Field(default_factory=lambda: {"parameters": []})
+    last_tested_at: datetime | None = None
+    last_test_status: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ApiIntegrationCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    url: str
+    method: str = "POST"
+    headers: dict[str, str] = Field(default_factory=dict)
+    body_template: dict | None = None
+    query_params: dict[str, str] = Field(default_factory=dict)
+    auth_type: str = "none"
+    auth_config: dict = Field(default_factory=dict)
+    response_type: str = "json"
+    response_path: str = ""
+    agent_ids: list[str] | None = None
+    input_schema: dict = Field(default_factory=lambda: {"parameters": []})
+
+
+class ApiIntegrationUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    url: str | None = None
+    method: str | None = None
+    headers: dict[str, str] | None = None
+    body_template: dict | None = None
+    query_params: dict[str, str] | None = None
+    auth_type: str | None = None
+    auth_config: dict | None = None
+    response_type: str | None = None
+    response_path: str | None = None
+    agent_ids: list[str] | None = None
+    is_active: bool | None = None
+    input_schema: dict | None = None
+
+
+class ApiIntegrationTestResult(BaseModel):
+    success: bool
+    status_code: int | None = None
+    response_preview: str | None = None
+    error: str | None = None
+
+
+class FlowValidationResult(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    node_count: int = 0
+    edge_count: int = 0
+
+
 class ChatMessageRequest(BaseModel):
     conversation_id: str | None = None
     message: str = ""
@@ -724,3 +806,11 @@ def agent_out_from_row(row: dict) -> AgentOut:
     # Eliminar columna clients si viene del join
     data.pop("clients", None)
     return AgentOut(**data)
+
+
+def api_integration_out_from_row(row: dict) -> ApiIntegrationOut:
+    """Convierte un row de DB api_integrations a ApiIntegrationOut, ocultando secrets."""
+    data = dict(row)
+    data["has_headers"] = bool(data.pop("headers", None))
+    data["has_auth_config"] = bool(data.pop("auth_config", None))
+    return ApiIntegrationOut(**data)

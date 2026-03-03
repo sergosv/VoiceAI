@@ -26,9 +26,11 @@ const Campaigns = lazy(() => import('./pages/Campaigns').then(m => ({ default: m
 const CampaignDetail = lazy(() => import('./pages/CampaignDetail').then(m => ({ default: m.CampaignDetail })))
 const Integrations = lazy(() => import('./pages/Integrations').then(m => ({ default: m.Integrations })))
 const McpServers = lazy(() => import('./pages/McpServers').then(m => ({ default: m.McpServers })))
+const ApiIntegrations = lazy(() => import('./pages/ApiIntegrations').then(m => ({ default: m.ApiIntegrations })))
 const AgentDetail = lazy(() => import('./pages/AgentDetail').then(m => ({ default: m.AgentDetail })))
 const Billing = lazy(() => import('./pages/Billing').then(m => ({ default: m.Billing })))
 const PricingConfig = lazy(() => import('./pages/admin/PricingConfig').then(m => ({ default: m.PricingConfig })))
+const FlowBuilder = lazy(() => import('./pages/FlowBuilder').then(m => ({ default: m.FlowBuilder })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
                 <Route path="/documents" element={<Documents />} />
                 <Route path="/integrations" element={<Integrations />} />
                 <Route path="/integrations/mcp" element={<McpServers />} />
+                <Route path="/integrations/api" element={<ApiIntegrations />} />
                 <Route path="/agents/:agentId" element={<AgentDetail />} />
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/settings" element={<Settings />} />
@@ -68,6 +71,9 @@ export default function App() {
                 <Route path="/admin/clients/:id" element={<AdminRoute><ClientDetail /></AdminRoute>} />
                 <Route path="/admin/pricing" element={<AdminRoute><PricingConfig /></AdminRoute>} />
               </Route>
+
+              {/* Flow Builder — fullscreen sin sidebar */}
+              <Route path="/agents/:agentId/flow" element={<FlowBuilder />} />
 
               {/* 404 */}
               <Route path="*" element={<NotFound />} />

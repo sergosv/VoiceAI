@@ -14,8 +14,9 @@ from fastapi.staticfiles import StaticFiles
 load_dotenv()
 
 from api.routes import (
-    agents, ai, auth, billing, calls, campaigns, chat, clients, contacts,
-    appointments, costs, dashboard, documents, mcp, voices, webhooks,
+    agents, ai, api_integrations, auth, billing, calls, campaigns, chat,
+    clients, contacts, appointments, costs, dashboard, documents, mcp,
+    voices, webhooks,
 )
 from api.services.chat_store import start_cleanup_loop
 
@@ -67,6 +68,7 @@ app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(mcp.router, prefix="/api/clients", tags=["mcp"])
 app.include_router(mcp.templates_router, prefix="/api", tags=["mcp-templates"])
+app.include_router(api_integrations.router, prefix="/api/clients", tags=["api-integrations"])
 
 @app.on_event("startup")
 async def startup_chat_cleanup() -> None:

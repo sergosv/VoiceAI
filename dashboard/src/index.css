@@ -35,3 +35,36 @@ body {
   to { transform: translateX(0); opacity: 1; }
 }
 .animate-slide-in { animation: slide-in 0.2s ease-out; }
+
+/* React Flow dark theme overrides */
+.react-flow {
+  --xy-background-color: var(--color-bg-primary);
+  --xy-node-background-color: var(--color-bg-card);
+  --xy-node-border-color: var(--color-border);
+  --xy-node-color: var(--color-text-primary);
+  --xy-edge-stroke: var(--color-text-muted);
+  --xy-edge-stroke-selected: var(--color-accent);
+  --xy-edge-stroke-width: 2;
+  --xy-handle-background-color: var(--color-accent);
+  --xy-handle-border-color: var(--color-bg-primary);
+  --xy-selection-background-color: rgba(0, 240, 255, 0.08);
+  --xy-selection-border-color: var(--color-accent);
+  --xy-controls-button-background-color: var(--color-bg-card);
+  --xy-controls-button-color: var(--color-text-primary);
+  --xy-controls-button-border-color: var(--color-border);
+  --xy-minimap-background-color: var(--color-bg-secondary);
+  --xy-minimap-mask-background-color: rgba(10, 10, 15, 0.7);
+}
+
+.react-flow .react-flow__handle {
+  width: 10px;
+  height: 10px;
+}
+
+.react-flow .react-flow__edge-path {
+  stroke-width: 2;
+}
+
+.react-flow .react-flow__controls button:hover {
+  background-color: var(--color-bg-hover);
+}

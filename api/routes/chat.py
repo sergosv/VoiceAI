@@ -6,10 +6,10 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from agent.config_loader import load_config_by_agent_id
+from agent.config_loader import load_api_integrations, load_config_by_agent_id
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import ChatMessageRequest, ChatMessageResponse, ChatResetResponse
-from api.services.chat_service import build_chat_system_prompt, chat_turn
+from api.services.chat_service import build_chat_system_prompt, chat_turn, init_flow_state
 from api.services.chat_store import (
     MAX_TURNS,
     create_conversation,
@@ -46,7 +46,12 @@ async def chat_with_agent(
                 detail=f"Límite de {MAX_TURNS} turnos alcanzado. Reinicia la conversación.",
             )
 
-        text, tool_calls = await chat_turn(conv, req.message)
+        # Cargar API integrations para este agente
+        api_integrations = await load_api_integrations(
+            conv.config.client.id, conv.config.agent.id
+        )
+
+        text, tool_calls = await chat_turn(conv, req.message, api_integrations=api_integrations)
         return ChatMessageResponse(
             conversation_id=conv.id,
             text=text,
@@ -64,12 +69,29 @@ async def chat_with_agent(
     if user.role == "client" and config.client.id != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
-    system_prompt = build_chat_system_prompt(config, req.contact_name, req.campaign_script)
+    # Cargar API integrations
+    api_integrations = await load_api_integrations(config.client.id, config.agent.id)
+
+    system_prompt = build_chat_system_prompt(
+        config, req.contact_name, req.campaign_script,
+        api_integrations=api_integrations,
+    )
     conv = create_conversation(config, system_prompt, req.contact_name)
+
+    # Inicializar flow state si es flow mode
+    init_flow_state(conv)
 
     # Si no hay mensaje o es greeting, devolver el saludo del agente
     if not req.message or req.message == "__greeting__":
-        greeting = config.agent.greeting
+        # En flow mode, usar greeting del nodo Start
+        if (
+            config.agent.conversation_mode == "flow"
+            and hasattr(conv, "_flow_engine")
+            and hasattr(conv, "_flow_state")
+        ):
+            greeting = conv._flow_engine.get_greeting(conv._flow_state)
+        else:
+            greeting = config.agent.greeting
         if not greeting:
             greeting = f"Hola, soy {config.agent.name}. ¿En qué puedo ayudarte?"
         return ChatMessageResponse(
@@ -79,7 +101,7 @@ async def chat_with_agent(
         )
 
     # Mensaje inicial con contenido
-    text, tool_calls = await chat_turn(conv, req.message)
+    text, tool_calls = await chat_turn(conv, req.message, api_integrations=api_integrations)
     return ChatMessageResponse(
         conversation_id=conv.id,
         text=text,

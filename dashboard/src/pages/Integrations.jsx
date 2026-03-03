@@ -8,7 +8,7 @@ import { Input } from '../components/ui/Input'
 import { PageLoader } from '../components/ui/Spinner'
 import {
   Calendar, MessageCircle, Wrench, Save, TestTube, Check,
-  Server, ChevronRight,
+  Server, Globe, ChevronRight,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -228,6 +228,25 @@ export function Integrations() {
               <p className="text-xs text-text-muted">
                 Conecta herramientas externas (CRMs, hojas de calculo, APIs)
                 via Model Context Protocol para que tus agentes las usen en llamadas.
+              </p>
+            </div>
+          </div>
+          <ChevronRight size={20} className="text-text-muted group-hover:text-accent transition-colors" />
+        </Link>
+      </Card>
+
+      {/* API Integrations */}
+      <Card>
+        <Link to="/integrations/api" className="flex items-center justify-between group">
+          <div className="flex items-center gap-3">
+            <Globe size={20} className="text-accent" />
+            <div>
+              <h2 className="text-lg font-semibold group-hover:text-accent transition-colors">
+                API Integrations
+              </h2>
+              <p className="text-xs text-text-muted">
+                Conecta endpoints HTTP directamente como herramientas del agente
+                (consultar stock, verificar precios, registrar datos) sin necesidad de MCP.
               </p>
             </div>
           </div>

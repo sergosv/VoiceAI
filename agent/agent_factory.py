@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 
-from livekit.agents import Agent, RunContext
+from livekit.agents import Agent, RunContext, llm
 from livekit.agents.llm import function_tool
 
 from agent.config_loader import ResolvedConfig
+from agent.flow_engine import FlowEngine, FlowState
 from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
 from agent.tools.whatsapp_tool import send_whatsapp_message
@@ -28,12 +30,16 @@ class VoiceAgent(Agent):
         self,
         config: ResolvedConfig,
         mcp_servers: list | None = None,
+        api_integrations: list[dict] | None = None,
     ) -> None:
         kwargs: dict = {"instructions": config.agent.system_prompt}
         if mcp_servers:
             kwargs["mcp_servers"] = mcp_servers
         super().__init__(**kwargs)
         self._config = config
+        self._api_integrations = {
+            integ["name"]: integ for integ in (api_integrations or [])
+        }
 
     @property
     def config(self) -> ResolvedConfig:
@@ -225,6 +231,142 @@ class VoiceAgent(Agent):
             notes=notes,
         )
 
+    @function_tool()
+    async def call_api(
+        self,
+        context: RunContext,
+        integration_name: str,
+        parameters: str = "{}",
+    ) -> str:
+        """Llama a una API externa configurada para este negocio.
+
+        Usa esta herramienta cuando necesites consultar o enviar datos
+        a un sistema externo (stock, precios, CRM, etc.).
+
+        Args:
+            integration_name: Nombre de la integración API a llamar.
+            parameters: JSON string con los parámetros requeridos por la API.
+        """
+        if not self._api_integrations:
+            return "No hay integraciones API configuradas."
+
+        integ = self._api_integrations.get(integration_name)
+        if not integ:
+            available = ", ".join(self._api_integrations.keys())
+            return f"Integración '{integration_name}' no encontrada. Disponibles: {available}"
+
+        import json
+        try:
+            params = json.loads(parameters) if isinstance(parameters, str) else parameters
+        except json.JSONDecodeError:
+            params = {}
+
+        from agent.api_executor import execute_api_call
+
+        logger.info(
+            "API call '%s' para '%s': params=%s",
+            integration_name, self._config.client.slug, params,
+        )
+
+        status_code, response_text = await execute_api_call(integ, params)
+
+        if status_code == 0:
+            return f"Error al llamar a la API: {response_text}"
+        if status_code >= 400:
+            return f"La API respondió con error (HTTP {status_code}): {response_text}"
+
+        return response_text
+
+
+class FlowVoiceAgent(VoiceAgent):
+    """Agente de voz que sigue un flujo de conversación visual.
+
+    Usa FlowEngine para generar prompts dinámicos por nodo,
+    cambiando el system prompt en cada turno via _swap_system_prompt()
+    (mismo patrón que el orchestrator).
+    """
+
+    def __init__(
+        self,
+        config: ResolvedConfig,
+        flow_engine: FlowEngine,
+        base_rules: str = "",
+        mcp_servers: list | None = None,
+        api_integrations: list[dict] | None = None,
+        initial_variables: dict | None = None,
+    ) -> None:
+        super().__init__(config, mcp_servers=mcp_servers, api_integrations=api_integrations)
+        self._flow_engine = flow_engine
+        self._flow_state: FlowState = flow_engine.start(initial_variables)
+        self._base_rules = base_rules
+        self._turn_count = 0
+
+    @property
+    def flow_state(self) -> FlowState:
+        return self._flow_state
+
+    @property
+    def flow_engine(self) -> FlowEngine:
+        return self._flow_engine
+
+    def _swap_system_prompt(self, chat_ctx: llm.ChatContext, new_instructions: str) -> None:
+        """Reemplaza el system prompt en el chat context."""
+        for item in chat_ctx.items:
+            if hasattr(item, "role") and item.role == "system":
+                if hasattr(item, "content"):
+                    item.content = new_instructions
+                return
+        from livekit.agents.llm import ChatMessage
+        chat_ctx.items.insert(0, ChatMessage(role="system", content=new_instructions))
+
+    def _extract_last_user_message(self, chat_ctx: llm.ChatContext) -> str | None:
+        """Extrae el último mensaje del usuario del chat context."""
+        for item in reversed(chat_ctx.items):
+            if hasattr(item, "role") and item.role == "user":
+                if hasattr(item, "content"):
+                    content = item.content
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, str):
+                                return part
+                            if hasattr(part, "text"):
+                                return part.text
+        return None
+
+    async def llm_node(
+        self,
+        chat_ctx: llm.ChatContext,
+        tools: list,
+        model_settings: llm.ModelSettings,
+    ) -> AsyncIterator:
+        """Intercepta el LLM para inyectar el prompt del nodo actual del flujo."""
+        self._turn_count += 1
+
+        user_msg = self._extract_last_user_message(chat_ctx)
+
+        # Avanzar el flujo con el input del usuario (excepto turno 1 = saludo)
+        if self._turn_count > 1 and user_msg:
+            self._flow_state, action = self._flow_engine.process_user_input(
+                self._flow_state, user_msg
+            )
+            logger.info(
+                "Flow avanzó a nodo '%s' (action=%s, completed=%s)",
+                self._flow_state.current_node_id,
+                action.type,
+                self._flow_state.completed,
+            )
+
+        # Generar prompt dinámico del nodo actual
+        flow_prompt = self._flow_engine.build_system_prompt(
+            self._flow_state, self._base_rules
+        )
+        self._swap_system_prompt(chat_ctx, flow_prompt)
+
+        # Delegar al LLM base
+        return Agent.llm_node(self, chat_ctx, tools, model_settings)
+
 
 def _voice_rules(config: ResolvedConfig) -> str:
     """Genera reglas de voz con fecha/hora actual y datos del agente."""
@@ -321,11 +463,43 @@ def _build_tool_instructions(enabled_tools: list[str]) -> str:
     return "\n\n## Herramientas disponibles\n" + "\n".join(lines)
 
 
+def _build_api_instructions(api_integrations: list[dict]) -> str:
+    """Genera instrucciones para las API integrations configuradas."""
+    if not api_integrations:
+        return ""
+    lines = ["\n\n## APIs externas disponibles"]
+    lines.append(
+        "Usa la herramienta `call_api` para llamar a estas APIs. "
+        "Pasa el nombre exacto de la integración y los parámetros como JSON."
+    )
+    for integ in api_integrations:
+        name = integ.get("name", "")
+        desc = integ.get("description", "")
+        input_schema = integ.get("input_schema") or {}
+        params = input_schema.get("parameters", [])
+
+        param_strs = []
+        for p in params:
+            pname = p.get("name", "")
+            ptype = p.get("type", "string")
+            pdesc = p.get("description", "")
+            required = "requerido" if p.get("required") else "opcional"
+            param_strs.append(f"  - {pname} ({ptype}, {required}): {pdesc}")
+
+        lines.append(f"- **{name}**: {desc}")
+        if param_strs:
+            lines.append("  Parámetros:")
+            lines.extend(param_strs)
+
+    return "\n".join(lines)
+
+
 def build_orchestrated_agent(
     configs: list[ResolvedConfig],
     primary_config: ResolvedConfig,
     memory_context: str = "",
     mcp_servers: list | None = None,
+    api_integrations: list[dict] | None = None,
 ) -> "OrchestratorAgent":
     """Construye un OrchestratorAgent con múltiples sub-agentes.
 
@@ -344,10 +518,11 @@ def build_orchestrated_agent(
 
         # Augmentar instrucciones igual que build_agent
         tool_instructions = _build_tool_instructions(cfg.client.enabled_tools)
+        api_instructions = _build_api_instructions(api_integrations or [])
         augmented_prompt = cfg.agent.system_prompt
         if memory_context:
             augmented_prompt += "\n" + memory_context
-        augmented_prompt += _voice_rules(cfg) + tool_instructions
+        augmented_prompt += _voice_rules(cfg) + tool_instructions + api_instructions
         if cfg.agent.examples:
             augmented_prompt += f"\n\n## Ejemplos de conversación\n{cfg.agent.examples}"
 
@@ -401,16 +576,28 @@ def build_agent(
     config: ResolvedConfig,
     memory_context: str = "",
     mcp_servers: list | None = None,
+    api_integrations: list[dict] | None = None,
+    caller_number: str | None = None,
 ) -> VoiceAgent:
     """Construye un VoiceAgent configurado para un cliente + agente específico."""
     from dataclasses import replace
 
+    # Si el agente está en modo flow, construir FlowVoiceAgent
+    if (
+        config.agent.conversation_mode == "flow"
+        and config.agent.conversation_flow
+    ):
+        return _build_flow_agent(
+            config, memory_context, mcp_servers, api_integrations, caller_number
+        )
+
     # Inyectar contexto temporal + memoria + reglas de voz + instrucciones de herramientas
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
+    api_instructions = _build_api_instructions(api_integrations or [])
     augmented_prompt = config.agent.system_prompt
     if memory_context:
         augmented_prompt += "\n" + memory_context
-    augmented_prompt += _voice_rules(config) + tool_instructions
+    augmented_prompt += _voice_rules(config) + tool_instructions + api_instructions
     # Agregar ejemplos de conversación si existen
     if config.agent.examples:
         augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
@@ -418,12 +605,56 @@ def build_agent(
     updated_agent = replace(config.agent, system_prompt=augmented_prompt)
     config = ResolvedConfig(agent=updated_agent, client=config.client)
 
-    agent = VoiceAgent(config, mcp_servers=mcp_servers)
+    agent = VoiceAgent(config, mcp_servers=mcp_servers, api_integrations=api_integrations)
     logger.info(
-        "Agente creado para '%s' / '%s' — voz: %s, tools: %s",
+        "Agente creado para '%s' / '%s' — voz: %s, tools: %s, apis: %d",
         config.client.name,
         config.agent.name,
         config.agent.voice_id,
         config.client.enabled_tools,
+        len(api_integrations or []),
+    )
+    return agent
+
+
+def _build_flow_agent(
+    config: ResolvedConfig,
+    memory_context: str = "",
+    mcp_servers: list | None = None,
+    api_integrations: list[dict] | None = None,
+    caller_number: str | None = None,
+) -> FlowVoiceAgent:
+    """Construye un FlowVoiceAgent que sigue un flujo de conversación visual."""
+    # Base rules = voice rules + tool instructions + api instructions + memory
+    base_rules = config.agent.system_prompt
+    if memory_context:
+        base_rules += "\n" + memory_context
+    base_rules += _voice_rules(config)
+    base_rules += _build_tool_instructions(config.client.enabled_tools)
+    base_rules += _build_api_instructions(api_integrations or [])
+
+    flow_engine = FlowEngine(
+        config.agent.conversation_flow,
+        enabled_tools=config.client.enabled_tools,
+    )
+
+    # Variables iniciales del contexto de la llamada
+    initial_variables: dict = {}
+    if caller_number:
+        initial_variables["caller_number"] = caller_number
+
+    agent = FlowVoiceAgent(
+        config=config,
+        flow_engine=flow_engine,
+        base_rules=base_rules,
+        mcp_servers=mcp_servers,
+        api_integrations=api_integrations,
+        initial_variables=initial_variables or None,
+    )
+    logger.info(
+        "FlowVoiceAgent creado para '%s' / '%s' — modo flujo, apis: %d",
+        config.client.name,
+        config.agent.name,
+        len(api_integrations or []),
     )
     return agent

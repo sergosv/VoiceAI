@@ -14,6 +14,7 @@ from api.schemas import (
     AgentOut,
     AgentUpdateRequest,
     AssignPhoneRequest,
+    FlowValidationResult,
     MessageResponse,
     PurchaseNumberRequest,
     agent_out_from_row,
@@ -133,6 +134,8 @@ async def create_agent(
         "role_description": req.role_description,
         "orchestrator_enabled": req.orchestrator_enabled,
         "orchestrator_priority": req.orchestrator_priority,
+        "conversation_mode": req.conversation_mode,
+        "conversation_flow": req.conversation_flow,
     }
 
     result = sb.table("agents").insert(data).execute()
@@ -197,6 +200,7 @@ async def update_agent(
         "name", "system_prompt", "greeting", "examples", "agent_mode", "agent_type",
         "transfer_number", "after_hours_message", "max_call_duration_seconds", "is_active",
         "role_description", "orchestrator_enabled", "orchestrator_priority",
+        "conversation_mode", "conversation_flow",
     }
     for f in direct_fields:
         if f in req_data:
@@ -328,6 +332,49 @@ async def assign_agent_phone(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
     return agent_out_from_row(row)
+
+
+@router.post("/{client_id}/agents/{agent_id}/validate-flow", response_model=FlowValidationResult)
+async def validate_flow(
+    client_id: str,
+    agent_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> FlowValidationResult:
+    """Valida el flujo de conversación de un agente."""
+    _check_client_access(user, client_id)
+
+    sb = get_supabase()
+    result = (
+        sb.table("agents")
+        .select("conversation_flow")
+        .eq("id", agent_id)
+        .eq("client_id", client_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
+
+    flow_json = result.data[0].get("conversation_flow")
+    if not flow_json:
+        return FlowValidationResult(
+            valid=False,
+            errors=["No hay flujo configurado"],
+            node_count=0,
+            edge_count=0,
+        )
+
+    from agent.flow_engine import FlowEngine
+    valid, errors, warnings = FlowEngine.validate_flow(flow_json)
+    nodes = flow_json.get("nodes", [])
+    edges = flow_json.get("edges", [])
+    return FlowValidationResult(
+        valid=valid,
+        errors=errors,
+        warnings=warnings,
+        node_count=len(nodes),
+        edge_count=len(edges),
+    )
 
 
 @router.post("/{client_id}/agents/{agent_id}/purchase-phone", response_model=AgentOut)
