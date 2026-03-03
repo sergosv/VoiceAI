@@ -39,7 +39,10 @@ export function Integrations() {
   const clientId = user?.client_id
 
   useEffect(() => {
-    if (!clientId) return
+    if (!clientId) {
+      setLoading(false)
+      return
+    }
     api.get(`/clients/${clientId}`)
       .then(c => {
         setClient(c)
@@ -106,7 +109,27 @@ export function Integrations() {
   }
 
   if (loading) return <PageLoader />
-  if (!client) return <p className="text-text-muted text-center py-12">No tienes un cliente asignado</p>
+  if (!client) return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">Integraciones</h1>
+      <p className="text-text-muted">Las integraciones de Google Calendar, WhatsApp y herramientas se configuran desde el detalle de cada cliente.</p>
+      <Card>
+        <Link to="/integrations/mcp" className="flex items-center justify-between group">
+          <div className="flex items-center gap-3">
+            <Server size={20} className="text-accent" />
+            <div>
+              <h2 className="text-lg font-semibold group-hover:text-accent transition-colors">MCP Servers</h2>
+              <p className="text-xs text-text-muted">
+                Conecta herramientas externas (CRMs, hojas de calculo, APIs)
+                via Model Context Protocol para que tus agentes las usen en llamadas.
+              </p>
+            </div>
+          </div>
+          <ChevronRight size={20} className="text-text-muted group-hover:text-accent transition-colors" />
+        </Link>
+      </Card>
+    </div>
+  )
 
   return (
     <div className="space-y-6">
