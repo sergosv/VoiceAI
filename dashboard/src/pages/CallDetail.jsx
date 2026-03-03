@@ -91,16 +91,50 @@ export function CallDetail() {
           </div>
 
           <h2 className="text-sm font-semibold text-text-secondary pt-2">Costos</h2>
-          <div className="space-y-1 text-sm font-mono">
-            <div className="flex justify-between"><span className="text-text-muted">LiveKit</span><span>${Number(call.cost_livekit).toFixed(4)}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">STT</span><span>${Number(call.cost_stt).toFixed(4)}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">LLM</span><span>${Number(call.cost_llm).toFixed(4)}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">TTS</span><span>${Number(call.cost_tts).toFixed(4)}</span></div>
-            <div className="flex justify-between"><span className="text-text-muted">Telefonía</span><span>${Number(call.cost_telephony).toFixed(4)}</span></div>
-            <div className="flex justify-between border-t border-border pt-1 font-bold">
-              <span>Total</span><span className="text-accent">${Number(call.cost_total).toFixed(4)}</span>
+          {call.cost_breakdown?.lines?.length > 0 ? (
+            <div className="space-y-1.5 text-sm font-mono">
+              {call.cost_breakdown.lines.map((line, i) => (
+                <div key={i} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-text-muted truncate">{line.label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-sans ${
+                      line.classification === 'platform'
+                        ? 'bg-accent/15 text-accent'
+                        : 'bg-bg-hover text-text-muted'
+                    }`}>
+                      {line.classification === 'platform' ? 'Plataforma' : 'Externo'}
+                    </span>
+                  </div>
+                  <span className={line.is_estimate ? 'text-text-muted' : ''}>
+                    {line.is_estimate ? '~' : ''}${line.amount.toFixed(4)}
+                  </span>
+                </div>
+              ))}
+              <div className="border-t border-border pt-1.5 space-y-1">
+                <div className="flex justify-between font-bold">
+                  <span className="text-accent">Plataforma</span>
+                  <span className="text-accent">${call.cost_breakdown.platform_cost.toFixed(4)}</span>
+                </div>
+                {call.cost_breakdown.external_cost_estimate > 0 && (
+                  <div className="flex justify-between text-text-muted text-xs">
+                    <span>APIs externas (est.)</span>
+                    <span>~${call.cost_breakdown.external_cost_estimate.toFixed(4)}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-1 text-sm font-mono">
+              <div className="flex justify-between"><span className="text-text-muted">LiveKit</span><span>${Number(call.cost_livekit).toFixed(4)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">STT</span><span>${Number(call.cost_stt).toFixed(4)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">LLM</span><span>${Number(call.cost_llm).toFixed(4)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">TTS</span><span>${Number(call.cost_tts).toFixed(4)}</span></div>
+              <div className="flex justify-between"><span className="text-text-muted">Telefonía</span><span>${Number(call.cost_telephony).toFixed(4)}</span></div>
+              <div className="flex justify-between border-t border-border pt-1 font-bold">
+                <span>Total</span><span className="text-accent">${Number(call.cost_total).toFixed(4)}</span>
+              </div>
+            </div>
+          )}
 
           {call.summary && (
             <>

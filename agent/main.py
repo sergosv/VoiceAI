@@ -13,10 +13,12 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from livekit import agents, rtc
 from livekit.agents import AgentSession, AgentServer, room_io
+from livekit.agents.llm import ChatMessage
 from livekit.plugins import silero, noise_cancellation
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent, build_orchestrated_agent
+from agent.billing import CallBilling
 from agent.memory import AgentMemory
 from agent.config_loader import (
     AgentConfig,
@@ -155,6 +157,27 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             ),
         )
 
+    # ========= BILLING: Check ANTES de atender =========
+    billing = CallBilling(config.client.id)
+    credit_check = await billing.check_can_take_call()
+
+    if not credit_check["allowed"]:
+        logger.warning("Client %s no credits, rejecting call", config.client.id)
+        # Intentar reproducir mensaje antes de colgar
+        try:
+            from livekit.agents import tts as _tts_mod
+            session_reject = AgentSession(vad=silero.VAD.load())
+            await session_reject.start(room=ctx.room)
+            await session_reject.say(
+                "Lo sentimos, en este momento no podemos atender tu llamada. "
+                "Por favor comunícate directamente al número del negocio. Gracias.",
+                allow_interruptions=False,
+            )
+            await asyncio.sleep(3)
+        except Exception:
+            logger.exception("Error playing rejection message")
+        return
+
     # Override del system prompt para outbound con script de campaña
     if outbound_mode and campaign_script:
         from dataclasses import replace
@@ -284,6 +307,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         memory_contact_id=memory.contact_id if memory else None,
     )
 
+    # ========= BILLING: Start tracking =========
+    billing.start_tracking(
+        call_id=ctx.room.name,
+        agent_id=config.agent.id,
+    )
+
     # ── Filler phrases (solo Pipeline mode) ─────────────────
     # Cuando el usuario termina de hablar y el LLM tarda en responder,
     # reproducimos un filler corto para que no haya silencio.
@@ -299,6 +328,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 # Usuario dejó de hablar → programar filler
                 async def _maybe_filler() -> None:
                     await asyncio.sleep(FILLER_DELAY_SECONDS)
+                    # No disparar si el agente ya está procesando o hablando
+                    if session.agent_state in ("thinking", "speaking"):
+                        return
                     try:
                         session.say(
                             random_filler(lang),
@@ -317,8 +349,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         @session.on("agent_state_changed")
         def _on_agent_state_for_filler(ev) -> None:
             nonlocal _filler_task
-            if ev.new_state == "speaking":
-                # Agente ya respondió → cancelar filler pendiente
+            if ev.new_state in ("thinking", "speaking"):
+                # Agente procesando o respondiendo → cancelar filler pendiente
                 if _filler_task and not _filler_task.done():
                     _filler_task.cancel()
                     _filler_task = None
@@ -330,6 +362,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     if config.agent.agent_mode != "realtime":
 
+        def _cancel_backchannel() -> None:
+            nonlocal _backchannel_task
+            if _backchannel_task and not _backchannel_task.done():
+                _backchannel_task.cancel()
+                _backchannel_task = None
+
         @session.on("user_state_changed")
         def _on_user_state_for_backchannel(ev) -> None:
             nonlocal _backchannel_task
@@ -338,6 +376,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 async def _backchannel_loop() -> None:
                     await asyncio.sleep(BACKCHANNEL_FIRST_DELAY)
                     while True:
+                        # No emitir si el agente ya está procesando
+                        if session.agent_state in ("thinking", "speaking"):
+                            break
                         try:
                             session.say(
                                 random_backchannel(lang),
@@ -351,9 +392,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 _backchannel_task = asyncio.ensure_future(_backchannel_loop())
             else:
                 # Usuario dejó de hablar → cancelar backchannels
-                if _backchannel_task and not _backchannel_task.done():
-                    _backchannel_task.cancel()
-                    _backchannel_task = None
+                _cancel_backchannel()
+
+        @session.on("agent_state_changed")
+        def _on_agent_state_for_backchannel(ev) -> None:
+            if ev.new_state in ("thinking", "speaking"):
+                _cancel_backchannel()
 
     # ── Registrar transcripción ─────────────────────────────
     @session.on("user_input_transcribed")
@@ -365,6 +409,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     def on_conversation_item(ev) -> None:
         try:
             msg = ev.item
+            if not isinstance(msg, ChatMessage):
+                return
             if msg.role == "assistant" and msg.text_content:
                 handler.add_transcript_entry("assistant", msg.text_content)
         except Exception:
@@ -380,6 +426,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if is_orchestrated and hasattr(voice_agent, "agent_turns"):
             handler.set_agent_turns(voice_agent.agent_turns)
         await handler.finalize(status="completed")
+
+        # Billing: consumir créditos por la llamada
+        duration = int(
+            (datetime.now(timezone.utc) - handler._started_at).total_seconds()
+        )
+        await billing.finish_call(duration_seconds=duration)
 
         # Almacenar memoria de largo plazo
         if memory and memory.contact_id and handler._transcript and len(handler._transcript) >= 2:

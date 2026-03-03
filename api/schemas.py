@@ -274,6 +274,7 @@ class CallDetailOut(CallOut):
     lead_score: int | None = None
     siguiente_accion: str | None = None
     preguntas_sin_respuesta: list[str] | None = None
+    cost_breakdown: CostBreakdown | None = None
 
 
 class CallStatsOut(BaseModel):
@@ -298,6 +299,40 @@ class DocumentOut(BaseModel):
     uploaded_at: datetime | None = None
 
 
+# ── Costs ─────────────────────────────────────────────
+
+class CostLineItem(BaseModel):
+    service: str
+    label: str
+    amount: float
+    classification: str  # "platform" | "external"
+    provider: str
+    is_estimate: bool = False
+
+
+class CostBreakdown(BaseModel):
+    platform_cost: float = 0
+    external_cost_estimate: float = 0
+    total: float = 0
+    lines: list[CostLineItem] = Field(default_factory=list)
+
+
+class CostEstimateRequest(BaseModel):
+    stt_provider: str = "deepgram"
+    llm_provider: str = "google"
+    tts_provider: str = "cartesia"
+    minutes: float = 1.0
+
+
+class CostEstimateResponse(BaseModel):
+    minutes: float
+    platform_cost: float
+    external_cost_estimate: float
+    total_estimate: float
+    lines: list[CostLineItem] = Field(default_factory=list)
+    note: str = ""
+
+
 # ── Dashboard ─────────────────────────────────────────
 
 class DashboardOverview(BaseModel):
@@ -309,6 +344,10 @@ class DashboardOverview(BaseModel):
     cost_today: float = 0
     active_documents: int = 0
     client_name: str | None = None
+    platform_cost_today: float = 0
+    external_cost_today: float = 0
+    platform_cost_total: float = 0
+    external_cost_total: float = 0
 
 
 class UsageDataPoint(BaseModel):
@@ -522,6 +561,93 @@ class McpServerTemplateOut(BaseModel):
     default_command_args: list[str] = Field(default_factory=list)
     required_env_vars: list[str] = Field(default_factory=list)
     documentation_url: str | None = None
+
+
+# ── Billing ──────────────────────────────────────────
+
+class CreditBalanceOut(BaseModel):
+    balance: float = 0
+    total_purchased: float = 0
+    total_consumed: float = 0
+    total_gifted: float = 0
+
+
+class CreditPackageOut(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    credits: int
+    volume_discount: float = 0
+    price_usd: float | None = None
+    price_mxn: float | None = None
+    price_per_credit_usd: float | None = None
+    sort_order: int = 0
+    is_popular: bool = False
+    is_active: bool = True
+
+
+class PurchaseRequest(BaseModel):
+    client_id: str
+    package_id: str
+    payment_method: str  # 'stripe' o 'mercadopago'
+
+
+class CreditTransactionOut(BaseModel):
+    id: str
+    client_id: str
+    type: str
+    credits: float
+    balance_after: float
+    payment_provider: str | None = None
+    payment_id: str | None = None
+    payment_status: str | None = None
+    amount_paid: float | None = None
+    currency: str | None = None
+    package_id: str | None = None
+    call_id: str | None = None
+    agent_id: str | None = None
+    duration_seconds: int | None = None
+    reason: str | None = None
+    admin_email: str | None = None
+    created_at: datetime | None = None
+
+
+class PricingConfigOut(BaseModel):
+    id: str
+    cost_twilio_per_min: float = 0.013
+    cost_stt_per_min: float = 0.006
+    cost_llm_per_min: float = 0.003
+    cost_tts_per_min: float = 0.008
+    cost_livekit_per_min: float = 0.002
+    cost_mcp_per_min: float = 0.003
+    profit_margin: float = 0.75
+    free_credits_new_account: int = 10
+    alert_threshold_warning: float = 0.20
+    alert_threshold_critical: float = 0.05
+    base_currency: str = "USD"
+    usd_to_mxn_rate: float = 20.0
+    stripe_enabled: bool = True
+    mercadopago_enabled: bool = True
+    _calculated: dict | None = None
+
+
+class PricingUpdate(BaseModel):
+    cost_twilio_per_min: float | None = None
+    cost_stt_per_min: float | None = None
+    cost_llm_per_min: float | None = None
+    cost_tts_per_min: float | None = None
+    cost_livekit_per_min: float | None = None
+    cost_mcp_per_min: float | None = None
+    profit_margin: float | None = None
+    free_credits_new_account: int | None = None
+    usd_to_mxn_rate: float | None = None
+
+
+class GiftCreditsRequest(BaseModel):
+    client_id: str
+    credits: float
+    reason: str
+    admin_email: str
 
 
 # ── Generic ───────────────────────────────────────────

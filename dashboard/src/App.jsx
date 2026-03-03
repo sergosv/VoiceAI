@@ -27,6 +27,8 @@ const CampaignDetail = lazy(() => import('./pages/CampaignDetail').then(m => ({ 
 const Integrations = lazy(() => import('./pages/Integrations').then(m => ({ default: m.Integrations })))
 const McpServers = lazy(() => import('./pages/McpServers').then(m => ({ default: m.McpServers })))
 const AgentDetail = lazy(() => import('./pages/AgentDetail').then(m => ({ default: m.AgentDetail })))
+const Billing = lazy(() => import('./pages/Billing').then(m => ({ default: m.Billing })))
+const PricingConfig = lazy(() => import('./pages/admin/PricingConfig').then(m => ({ default: m.PricingConfig })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -57,12 +59,14 @@ export default function App() {
                 <Route path="/integrations" element={<Integrations />} />
                 <Route path="/integrations/mcp" element={<McpServers />} />
                 <Route path="/agents/:agentId" element={<AgentDetail />} />
+                <Route path="/billing" element={<Billing />} />
                 <Route path="/settings" element={<Settings />} />
 
                 {/* Admin — protegido */}
                 <Route path="/admin/clients" element={<AdminRoute><ClientsList /></AdminRoute>} />
                 <Route path="/admin/clients/new" element={<AdminRoute><ClientCreate /></AdminRoute>} />
                 <Route path="/admin/clients/:id" element={<AdminRoute><ClientDetail /></AdminRoute>} />
+                <Route path="/admin/pricing" element={<AdminRoute><PricingConfig /></AdminRoute>} />
               </Route>
 
               {/* 404 */}

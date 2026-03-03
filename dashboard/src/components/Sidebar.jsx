@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
-  LayoutDashboard, Phone, FileText, Settings, Users,
+  LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug,
 } from 'lucide-react'
 
@@ -14,11 +14,13 @@ const navItems = [
   { to: '/campaigns', icon: Megaphone, label: 'Campañas' },
   { to: '/documents', icon: FileText, label: 'Documentos' },
   { to: '/integrations', icon: Plug, label: 'Integraciones' },
+  { to: '/billing', icon: CreditCard, label: 'Créditos' },
   { to: '/settings', icon: Settings, label: 'Configuración' },
 ]
 
 const adminItems = [
   { to: '/admin/clients', icon: Users, label: 'Clientes' },
+  { to: '/admin/pricing', icon: DollarSign, label: 'Precios' },
 ]
 
 function NavItem({ to, icon: Icon, label, end, onClick }) {

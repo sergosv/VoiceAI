@@ -6,9 +6,10 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from api.cost_rates import build_cost_breakdown
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
-from api.schemas import CallDetailOut, CallOut, CallStatsOut
+from api.schemas import CallDetailOut, CallOut, CallStatsOut, CostBreakdown, CostLineItem
 
 router = APIRouter()
 
@@ -127,5 +128,14 @@ async def get_call_detail(
     # Extraer agent_name de metadata
     meta = call.get("metadata") or {}
     call["agent_name"] = meta.get("agent_name")
+
+    # Construir desglose de costos con clasificación plataforma/externo
+    bd = build_cost_breakdown(call)
+    call["cost_breakdown"] = CostBreakdown(
+        platform_cost=bd["platform_cost"],
+        external_cost_estimate=bd["external_cost_estimate"],
+        total=bd["total"],
+        lines=[CostLineItem(**line) for line in bd["lines"]],
+    )
 
     return CallDetailOut(**call)

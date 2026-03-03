@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Trash2, Volume2, Mic, Brain, Zap, Key,
@@ -110,6 +110,74 @@ function ApiKeyField({ label, hasKey, value, onChange, onClear }) {
         onChange={e => onChange(e.target.value)}
         placeholder="sk-..."
       />
+    </div>
+  )
+}
+
+function CostEstimator({ sttProvider, llmProvider, ttsProvider }) {
+  const [estimate, setEstimate] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const fetchEstimate = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await api.post('/costs/estimate', {
+        stt_provider: sttProvider,
+        llm_provider: llmProvider,
+        tts_provider: ttsProvider,
+        minutes: 1,
+      })
+      setEstimate(data)
+    } catch {
+      setEstimate(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [sttProvider, llmProvider, ttsProvider])
+
+  useEffect(() => {
+    fetchEstimate()
+  }, [fetchEstimate])
+
+  if (loading || !estimate) return null
+
+  return (
+    <div className="p-4 rounded-lg border border-border bg-bg-secondary/50">
+      <h3 className="text-xs font-semibold text-text-secondary mb-2">Estimación de costos (por minuto)</h3>
+      <div className="space-y-1.5 text-sm font-mono">
+        {estimate.lines.map((line, i) => (
+          <div key={i} className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-text-muted text-xs truncate">{line.label}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-sans ${
+                line.classification === 'platform'
+                  ? 'bg-accent/15 text-accent'
+                  : 'bg-bg-hover text-text-muted'
+              }`}>
+                {line.classification === 'platform' ? 'Plataforma' : 'Externo'}
+              </span>
+            </div>
+            <span className={`text-xs ${line.is_estimate ? 'text-text-muted' : ''}`}>
+              {line.is_estimate ? '~' : ''}${line.amount.toFixed(4)}
+            </span>
+          </div>
+        ))}
+        <div className="border-t border-border pt-1.5 flex justify-between text-xs">
+          <span className="text-accent font-semibold font-sans">Plataforma</span>
+          <span className="text-accent font-semibold">${estimate.platform_cost.toFixed(4)}/min</span>
+        </div>
+        {estimate.external_cost_estimate > 0 && (
+          <div className="flex justify-between text-xs text-text-muted">
+            <span className="font-sans">APIs externas (est.)</span>
+            <span>~${estimate.external_cost_estimate.toFixed(4)}/min</span>
+          </div>
+        )}
+      </div>
+      {estimate.external_cost_estimate > 0 && (
+        <p className="text-[10px] text-text-muted mt-2 font-sans">
+          Los costos de APIs externas son estimados y pueden variar.
+        </p>
+      )}
     </div>
   )
 }
@@ -680,6 +748,13 @@ export function AgentDetail() {
                     </div>
                   )}
                 </div>
+
+                {/* Cost estimator */}
+                <CostEstimator
+                  sttProvider={form.stt_provider}
+                  llmProvider={form.llm_provider}
+                  ttsProvider={form.tts_provider}
+                />
 
                 {/* Voice selector */}
                 <div className="p-4 rounded-lg border border-border bg-bg-primary/50">

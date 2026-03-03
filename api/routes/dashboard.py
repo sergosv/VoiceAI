@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 
+from api.cost_rates import build_cost_breakdown
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import DashboardOverview, DashboardUsage, UsageDataPoint
@@ -22,8 +23,11 @@ async def get_overview(
     sb = get_supabase()
     effective_client_id = user.client_id if user.role == "client" else client_id
 
-    # Datos de llamadas
-    query = sb.table("calls").select("duration_seconds, cost_total, started_at")
+    # Datos de llamadas (incluir campos de costo individual y metadata para clasificación)
+    query = sb.table("calls").select(
+        "duration_seconds, cost_total, cost_livekit, cost_stt, cost_llm, "
+        "cost_tts, cost_telephony, metadata, started_at"
+    )
     if effective_client_id:
         query = query.eq("client_id", effective_client_id)
     calls = query.execute().data
@@ -39,6 +43,19 @@ async def get_overview(
     ]
     today_seconds = sum(r.get("duration_seconds", 0) for r in today_calls)
     today_cost = sum(float(r.get("cost_total", 0)) for r in today_calls)
+
+    # Clasificar costos plataforma vs externo
+    platform_today = 0.0
+    external_today = 0.0
+    platform_total = 0.0
+    external_total = 0.0
+    for r in calls:
+        bd = build_cost_breakdown(r)
+        platform_total += bd["platform_cost"]
+        external_total += bd["external_cost_estimate"]
+        if r.get("started_at") and r["started_at"][:10] == today:
+            platform_today += bd["platform_cost"]
+            external_today += bd["external_cost_estimate"]
 
     # Documentos activos
     doc_query = sb.table("documents").select("id", count="exact")
@@ -69,6 +86,10 @@ async def get_overview(
         cost_today=round(today_cost, 4),
         active_documents=active_docs,
         client_name=client_name,
+        platform_cost_today=round(platform_today, 4),
+        external_cost_today=round(external_today, 4),
+        platform_cost_total=round(platform_total, 4),
+        external_cost_total=round(external_total, 4),
     )
 
 

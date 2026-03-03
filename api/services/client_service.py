@@ -106,4 +106,32 @@ def create_client_in_db(
         "owner_email": owner_email,
     }
     result = sb.table("clients").insert(data).execute()
-    return result.data[0]
+    client_row = result.data[0]
+
+    # Otorgar créditos de bienvenida
+    try:
+        grant_welcome_credits(sb, client_row["id"])
+    except Exception:
+        logger.warning("No se pudieron otorgar créditos de bienvenida a %s", client_row["id"])
+
+    return client_row
+
+
+def grant_welcome_credits(sb: Client, client_id: str) -> None:
+    """Otorga créditos de bienvenida a un cliente nuevo."""
+    config = (
+        sb.table("pricing_config")
+        .select("free_credits_new_account")
+        .limit(1)
+        .execute()
+    )
+    free_credits = config.data[0]["free_credits_new_account"] if config.data else 10
+
+    if free_credits > 0:
+        sb.rpc("add_credits", {
+            "p_client_id": client_id,
+            "p_credits": free_credits,
+            "p_type": "gift",
+            "p_reason": "Créditos de bienvenida",
+        }).execute()
+        logger.info("Client %s: %d free credits added", client_id, free_credits)

@@ -60,9 +60,13 @@ export function Dashboard() {
         />
         <StatsCard
           icon={DollarSign}
-          label="Costo hoy"
-          value={`$${overview?.cost_today?.toFixed(2) ?? '0.00'}`}
-          sub={`$${overview?.total_cost?.toFixed(2) ?? '0.00'} total`}
+          label="Costo plataforma hoy"
+          value={`$${overview?.platform_cost_today?.toFixed(2) ?? '0.00'}`}
+          sub={
+            overview?.external_cost_today > 0
+              ? `+~$${overview.external_cost_today.toFixed(2)} APIs ext.`
+              : `$${overview?.platform_cost_total?.toFixed(2) ?? '0.00'} total plataforma`
+          }
         />
         <StatsCard
           icon={FileText}

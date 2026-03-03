@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins } from 'lucide-react'
 import { api } from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { useConfirm } from '../../context/ConfirmContext'
 import { Card } from '../../components/ui/Card'
@@ -14,6 +15,7 @@ import { PageLoader } from '../../components/ui/Spinner'
 export function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
   const [client, setClient] = useState(null)
@@ -43,6 +45,12 @@ export function ClientDetail() {
   const [searchingNumbers, setSearchingNumbers] = useState(false)
   const [purchasingNumber, setPurchasingNumber] = useState(null)
 
+  // Modal: regalar créditos
+  const [showGiftModal, setShowGiftModal] = useState(false)
+  const [giftForm, setGiftForm] = useState({ credits: 100, reason: '' })
+  const [giftingCredits, setGiftingCredits] = useState(false)
+  const [creditBalance, setCreditBalance] = useState(null)
+
   // Orchestration state
   const [orchOpen, setOrchOpen] = useState(false)
 
@@ -57,6 +65,9 @@ export function ClientDetail() {
       setCalls(cl)
     }).catch(() => navigate('/admin/clients'))
       .finally(() => setLoading(false))
+
+    // Cargar balance de créditos (no bloquea el loading principal)
+    api.get(`/billing/balance?client_id=${id}`).then(setCreditBalance).catch(() => {})
   }, [id])
 
   async function handleSave() {
@@ -136,6 +147,28 @@ export function ClientDetail() {
       toast.error(err.message)
     } finally {
       setCreatingAgent(false)
+    }
+  }
+
+  async function handleGiftCredits(e) {
+    e.preventDefault()
+    setGiftingCredits(true)
+    try {
+      await api.post('/billing/admin/gift-credits', {
+        client_id: id,
+        credits: giftForm.credits,
+        reason: giftForm.reason || 'Créditos de regalo (admin)',
+        admin_email: user?.email || 'admin',
+      })
+      toast.success(`${giftForm.credits} créditos otorgados a ${client.name}`)
+      setShowGiftModal(false)
+      setGiftForm({ credits: 100, reason: '' })
+      // Refrescar balance
+      api.get(`/billing/balance?client_id=${id}`).then(setCreditBalance).catch(() => {})
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setGiftingCredits(false)
     }
   }
 
@@ -226,7 +259,27 @@ export function ClientDetail() {
         <Button variant="secondary" onClick={() => setShowAgentModal(true)}>
           <Plus size={16} className="mr-2 inline" /> Agregar agente
         </Button>
+        <Button variant="secondary" onClick={() => setShowGiftModal(true)}>
+          <Gift size={16} className="mr-2 inline" /> Regalar creditos
+        </Button>
       </div>
+
+      {/* Credit balance card */}
+      {creditBalance && (
+        <Card className="!p-4 flex items-center gap-4">
+          <div className="w-10 h-10 rounded-full bg-accent/15 flex items-center justify-center">
+            <Coins size={20} className="text-accent" />
+          </div>
+          <div>
+            <p className="text-xs text-text-muted">Balance de creditos</p>
+            <p className="text-2xl font-bold">{Math.floor(creditBalance.balance ?? 0)}</p>
+          </div>
+          <div className="ml-auto text-right text-xs text-text-muted space-y-0.5">
+            <p>Comprados: {Math.floor(creditBalance.total_purchased ?? 0)}</p>
+            <p>Usados: {Math.floor(creditBalance.total_consumed ?? 0)}</p>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="space-y-4">
@@ -587,6 +640,41 @@ export function ClientDetail() {
             </Button>
           </form>
         )}
+      </Modal>
+
+      {/* Modal: Regalar créditos */}
+      <Modal open={showGiftModal} onClose={() => setShowGiftModal(false)} title="Regalar creditos">
+        <form onSubmit={handleGiftCredits} className="space-y-4">
+          <div className="p-3 rounded-lg bg-accent/5 border border-accent/20 text-sm">
+            <p className="text-text-secondary">
+              Cliente: <span className="font-medium text-text-primary">{client.name}</span>
+            </p>
+            {creditBalance && (
+              <p className="text-text-muted mt-1">
+                Balance actual: <span className="font-mono font-medium text-accent">{Math.floor(creditBalance.balance ?? 0)}</span> creditos
+              </p>
+            )}
+          </div>
+          <Input
+            label="Cantidad de creditos"
+            type="number"
+            min={1}
+            max={100000}
+            value={giftForm.credits}
+            onChange={e => setGiftForm(f => ({ ...f, credits: parseInt(e.target.value) || 0 }))}
+            required
+          />
+          <Input
+            label="Motivo (opcional)"
+            value={giftForm.reason}
+            onChange={e => setGiftForm(f => ({ ...f, reason: e.target.value }))}
+            placeholder="Ej: Prueba, compensacion, bienvenida..."
+          />
+          <Button type="submit" className="w-full" disabled={giftingCredits || giftForm.credits < 1}>
+            <Gift size={16} className="mr-2 inline" />
+            {giftingCredits ? 'Otorgando...' : `Regalar ${giftForm.credits} creditos`}
+          </Button>
+        </form>
       </Modal>
     </div>
   )
