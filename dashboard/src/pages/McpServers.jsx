@@ -56,7 +56,10 @@ export function McpServers() {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    if (!clientId) return
+    if (!clientId) {
+      setLoading(false)
+      return
+    }
     Promise.all([
       api.get(`/clients/${clientId}/mcp-servers`),
       api.get('/mcp-templates'),
@@ -194,6 +197,20 @@ export function McpServers() {
   }
 
   if (loading) return <PageLoader />
+
+  if (!clientId) return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <Link to="/integrations" className="text-text-muted hover:text-text-primary">
+          <ChevronLeft size={20} />
+        </Link>
+        <div>
+          <h1 className="text-2xl font-bold">MCP Servers</h1>
+          <p className="text-sm text-text-muted">Los servidores MCP se configuran desde el detalle de cada cliente.</p>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="space-y-6">
