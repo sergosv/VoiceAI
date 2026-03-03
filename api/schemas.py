@@ -182,6 +182,8 @@ class ClientCreateRequest(BaseModel):
 
 class ClientUpdateRequest(BaseModel):
     name: str | None = None
+    business_type: str | None = None
+    owner_email: str | None = None
     agent_name: str | None = None
     language: str | None = None
     voice_id: str | None = None

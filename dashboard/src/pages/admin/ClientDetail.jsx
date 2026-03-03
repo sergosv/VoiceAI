@@ -75,6 +75,8 @@ export function ClientDetail() {
     try {
       const payload = {
         name: client.name,
+        business_type: client.business_type,
+        owner_email: client.owner_email || null,
         language: client.language,
         is_active: client.is_active,
         monthly_minutes_limit: client.monthly_minutes_limit,
@@ -286,6 +288,23 @@ export function ClientDetail() {
           <h2 className="text-sm font-semibold text-text-secondary">Informacion del negocio</h2>
           <Input label="Nombre" value={client.name} onChange={e => setClient({ ...client, name: e.target.value })} />
           <Select
+            label="Tipo de negocio"
+            value={client.business_type}
+            onChange={e => setClient({ ...client, business_type: e.target.value })}
+            options={[
+              { value: 'generic', label: 'Genérico' },
+              { value: 'dental', label: 'Dental' },
+              { value: 'medical', label: 'Médico' },
+              { value: 'legal', label: 'Legal' },
+              { value: 'restaurant', label: 'Restaurante' },
+              { value: 'real_estate', label: 'Bienes raíces' },
+              { value: 'ecommerce', label: 'E-commerce' },
+              { value: 'education', label: 'Educación' },
+              { value: 'fitness', label: 'Fitness' },
+              { value: 'salon', label: 'Salón de belleza' },
+            ]}
+          />
+          <Select
             label="Idioma"
             value={client.language}
             onChange={e => setClient({ ...client, language: e.target.value })}
@@ -294,6 +313,13 @@ export function ClientDetail() {
               { value: 'en', label: 'English' },
               { value: 'es-en', label: 'Bilingue' },
             ]}
+          />
+          <Input
+            label="Email del propietario"
+            type="email"
+            value={client.owner_email || ''}
+            onChange={e => setClient({ ...client, owner_email: e.target.value })}
+            placeholder="contacto@negocio.com"
           />
           <Input
             label="Limite minutos/mes"
