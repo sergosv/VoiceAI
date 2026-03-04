@@ -295,7 +295,11 @@ def init_flow_state(conversation: Conversation) -> None:
     conversation.system_prompt = flow_prompt
 
 
-def _advance_flow(conversation: Conversation, user_message: str) -> None:
+def _advance_flow(
+    conversation: Conversation,
+    user_message: str,
+    extracted_value: str | None = None,
+) -> None:
     """Avanza el flow state después de cada turno del usuario."""
     if not hasattr(conversation, "_flow_engine"):
         return
@@ -307,10 +311,27 @@ def _advance_flow(conversation: Conversation, user_message: str) -> None:
         return
 
     # Procesar input del usuario y avanzar
-    state, action = engine.process_user_input(state, user_message)
+    state, action = engine.process_user_input(
+        state, user_message, extracted_value=extracted_value
+    )
     conversation._flow_state = state  # type: ignore[attr-defined]
 
+    # Auto-avanzar wait nodes (sin pausa en modo texto)
+    while not state.completed:
+        node = engine._nodes.get(state.current_node_id)
+        if not node or node.get("type") != "wait":
+            break
+        state, _ = engine.process_user_input(state, "")
+        conversation._flow_state = state  # type: ignore[attr-defined]
+
     # Reconstruir system prompt para el nuevo nodo
+    _rebuild_flow_prompt(conversation)
+
+
+def _rebuild_flow_prompt(conversation: Conversation) -> None:
+    """Reconstruye el system prompt del flow para el nodo actual."""
+    engine: FlowEngine = conversation._flow_engine  # type: ignore[attr-defined]
+    state: FlowState = conversation._flow_state  # type: ignore[attr-defined]
     base_rules = _voice_rules(conversation.config)
     flow_prompt = engine.build_system_prompt(state, base_rules)
     flow_prompt += (
@@ -319,6 +340,16 @@ def _advance_flow(conversation: Conversation, user_message: str) -> None:
         "Responde como lo harías en una llamada telefónica real, pero en texto."
     )
     conversation.system_prompt = flow_prompt
+
+
+def _is_flow_action_node(conversation: Conversation) -> bool:
+    """Verifica si el nodo actual del flow es un nodo action."""
+    if not hasattr(conversation, "_flow_engine"):
+        return False
+    engine: FlowEngine = conversation._flow_engine  # type: ignore[attr-defined]
+    state: FlowState = conversation._flow_state  # type: ignore[attr-defined]
+    node = engine._nodes.get(state.current_node_id)
+    return node is not None and node.get("type") == "action"
 
 
 # ── Chat turn ─────────────────────────────────────────────
@@ -335,8 +366,11 @@ async def chat_turn(
     # Inicializar flow si es primera vez
     init_flow_state(conversation)
 
-    # Avanzar flow con el input del usuario (si aplica)
-    if conversation.turn_count > 0:
+    # Determinar si el nodo actual es action ANTES de avanzar
+    is_action_node = _is_flow_action_node(conversation)
+
+    # Avanzar flow con el input del usuario (si aplica y no es action node)
+    if conversation.turn_count > 0 and not is_action_node:
         _advance_flow(conversation, user_message)
 
     # Agregar mensaje del usuario al historial
@@ -346,6 +380,8 @@ async def chat_turn(
 
     tool_declarations = _build_tool_declarations(config, api_integrations=api_integrations)
     tool_calls_log: list[dict] = []
+    last_tool_result: str | None = None
+    last_tool_is_error: bool = False
     max_tool_rounds = 5
 
     for _ in range(max_tool_rounds):
@@ -368,10 +404,16 @@ async def chat_turn(
         function_calls = [p for p in parts if p.function_call]
 
         if not function_calls:
-            # Respuesta de texto normal
+            # Respuesta de texto normal — fin del turno
             conversation.history.append(candidate.content)
             text = "".join(p.text for p in parts if p.text)
             conversation.turn_count += 1
+
+            # Si era un action node, ahora avanzar el flow con el resultado de la tool
+            if is_action_node and last_tool_result is not None:
+                extracted = "_error_" if last_tool_is_error else last_tool_result
+                _advance_flow(conversation, "", extracted_value=extracted)
+
             return text, tool_calls_log
 
         # Hay function calls — ejecutar y continuar
@@ -387,6 +429,10 @@ async def chat_turn(
             result = await _execute_tool(
                 tool_name, tool_args, config, api_integrations=api_integrations
             )
+
+            # Trackear resultado de la última tool para action nodes
+            last_tool_result = result
+            last_tool_is_error = result.startswith("Error") or result.startswith("[ERROR")
 
             tool_calls_log.append({
                 "name": tool_name,

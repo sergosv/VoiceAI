@@ -13,7 +13,7 @@ import { ChatTesterButton } from '../components/ChatTester'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
 import {
-  ArrowLeft, Play, Pause, Save, Plus, Trash2, Phone,
+  ArrowLeft, Play, Pause, Save, Plus, Trash2, Phone, Pencil, Check, X,
   CheckCircle, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp,
   User, Mail, MessageSquare, TrendingUp,
 } from 'lucide-react'
@@ -190,6 +190,7 @@ export function CampaignDetail() {
   const [showAddContacts, setShowAddContacts] = useState(false)
   const [form, setForm] = useState({})
   const [expandedRow, setExpandedRow] = useState(null)
+  const [editingPhone, setEditingPhone] = useState(null) // { id, phone }
 
   useEffect(() => {
     loadData()
@@ -288,6 +289,20 @@ export function CampaignDetail() {
       await api.delete(`/campaigns/${id}`)
       toast.success('Campana eliminada')
       navigate('/campaigns')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  async function handleUpdatePhone(callId) {
+    if (!editingPhone || editingPhone.id !== callId) return
+    const newPhone = editingPhone.phone.trim()
+    if (!newPhone) return toast.error('El telefono no puede estar vacio')
+    try {
+      await api.patch(`/campaigns/${id}/calls/${callId}`, { phone: newPhone })
+      setEditingPhone(null)
+      await loadData()
+      toast.success('Telefono actualizado')
     } catch (err) {
       toast.error(err.message)
     }
@@ -507,7 +522,40 @@ export function CampaignDetail() {
                       <React.Fragment key={c.id}>
                         <tr className="group">
                           <Td>
-                            <span className="font-mono text-xs">{c.phone}</span>
+                            {editingPhone?.id === c.id ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="text"
+                                  value={editingPhone.phone}
+                                  onChange={e => setEditingPhone({ ...editingPhone, phone: e.target.value })}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') handleUpdatePhone(c.id)
+                                    if (e.key === 'Escape') setEditingPhone(null)
+                                  }}
+                                  autoFocus
+                                  className="bg-bg-primary border border-accent rounded px-1.5 py-0.5 text-xs font-mono w-36 focus:outline-none"
+                                />
+                                <button onClick={() => handleUpdatePhone(c.id)} className="text-success hover:opacity-80 p-0.5" title="Guardar">
+                                  <Check size={14} />
+                                </button>
+                                <button onClick={() => setEditingPhone(null)} className="text-text-muted hover:text-danger p-0.5" title="Cancelar">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="flex items-center gap-1 group/phone">
+                                <span className="font-mono text-xs">{c.phone}</span>
+                                {editable && (
+                                  <button
+                                    onClick={() => setEditingPhone({ id: c.id, phone: c.phone })}
+                                    className="text-text-muted hover:text-accent opacity-0 group-hover/phone:opacity-100 transition-opacity p-0.5"
+                                    title="Editar telefono"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                )}
+                              </span>
+                            )}
                           </Td>
                           <Td>
                             <span className="flex items-center gap-1 text-xs">

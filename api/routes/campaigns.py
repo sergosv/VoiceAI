@@ -349,6 +349,45 @@ async def add_campaign_contacts(
     return MessageResponse(message=f"{len(entries)} contactos agregados a la campaña")
 
 
+class UpdateCampaignCallRequest(BaseModel):
+    phone: str
+
+
+@router.patch("/{campaign_id}/calls/{call_id}", response_model=CampaignCallOut)
+async def update_campaign_call(
+    campaign_id: str,
+    call_id: str,
+    req: UpdateCampaignCallRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> CampaignCallOut:
+    """Actualiza el teléfono de un contacto en la campaña."""
+    sb = get_supabase()
+
+    existing = sb.table("campaigns").select("client_id, status").eq("id", campaign_id).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaña no encontrada")
+    if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+    if existing.data[0]["status"] == "running":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pausa la campaña antes de editar contactos")
+
+    phone = req.phone.strip()
+    if not phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El teléfono no puede estar vacío")
+
+    result = (
+        sb.table("campaign_calls")
+        .update({"phone": phone})
+        .eq("id", call_id)
+        .eq("campaign_id", campaign_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+
+    return CampaignCallOut(**result.data[0])
+
+
 @router.delete("/{campaign_id}/calls/{call_id}", response_model=MessageResponse)
 async def delete_campaign_call(
     campaign_id: str,

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 
 from livekit.agents import Agent, RunContext, llm
-from livekit.agents.llm import function_tool
+from livekit.agents.llm import FunctionCallOutput, function_tool
 
 from agent.config_loader import ResolvedConfig
 from agent.flow_engine import FlowEngine, FlowState
@@ -81,7 +82,11 @@ class VoiceAgent(Agent):
         Args:
             reason: Motivo de la transferencia.
         """
-        transfer_number = self._config.agent.transfer_number
+        # Flow mode puede setear un número de transferencia por nodo
+        transfer_number = (
+            getattr(self, "_flow_transfer_number", None)
+            or self._config.agent.transfer_number
+        )
         if not transfer_number:
             return (
                 "No hay número de transferencia configurado. "
@@ -300,6 +305,7 @@ class FlowVoiceAgent(VoiceAgent):
         self._flow_state: FlowState = flow_engine.start(initial_variables)
         self._base_rules = base_rules
         self._turn_count = 0
+        self._awaiting_tool_result: bool = False
 
     @property
     def flow_state(self) -> FlowState:
@@ -335,28 +341,89 @@ class FlowVoiceAgent(VoiceAgent):
                                 return part.text
         return None
 
+    def _is_current_node_type(self, node_type: str) -> bool:
+        """Verifica si el nodo actual es del tipo dado."""
+        node = self._flow_engine._nodes.get(self._flow_state.current_node_id)
+        return node is not None and node.get("type") == node_type
+
     async def llm_node(
         self,
         chat_ctx: llm.ChatContext,
         tools: list,
         model_settings: llm.ModelSettings,
     ) -> AsyncIterator:
-        """Intercepta el LLM para inyectar el prompt del nodo actual del flujo."""
+        """Intercepta el LLM para inyectar el prompt del nodo actual del flujo.
+
+        Maneja 3 ramas:
+        1. Post-tool pass: FunctionCallOutput en chat_ctx + _awaiting_tool_result → avanza con resultado
+        2. User message + nodo action: setea _awaiting_tool_result, NO avanza (deja que LLM llame tool)
+        3. User message + nodo no-action: avanza normalmente
+        """
         self._turn_count += 1
+        action = None
 
-        user_msg = self._extract_last_user_message(chat_ctx)
+        # ── Rama 1: Post-tool — el LLM ya ejecutó la herramienta ──
+        if self._awaiting_tool_result:
+            # Buscar el último FunctionCallOutput en el contexto
+            last_output: FunctionCallOutput | None = None
+            for item in reversed(chat_ctx.items):
+                if isinstance(item, FunctionCallOutput):
+                    last_output = item
+                    break
 
-        # Avanzar el flujo con el input del usuario (excepto turno 1 = saludo)
-        if self._turn_count > 1 and user_msg:
-            self._flow_state, action = self._flow_engine.process_user_input(
-                self._flow_state, user_msg
-            )
-            logger.info(
-                "Flow avanzó a nodo '%s' (action=%s, completed=%s)",
-                self._flow_state.current_node_id,
-                action.type,
-                self._flow_state.completed,
-            )
+            if last_output is not None:
+                self._awaiting_tool_result = False
+                extracted = "_error_" if last_output.is_error else last_output.output
+                self._flow_state, action = self._flow_engine.process_user_input(
+                    self._flow_state, "", extracted_value=extracted
+                )
+                logger.info(
+                    "Flow post-tool avanzó a '%s' (action=%s, error=%s)",
+                    self._flow_state.current_node_id,
+                    action.type,
+                    last_output.is_error,
+                )
+                # Auto-avanzar wait nodes
+                await self._auto_advance_wait()
+
+        # ── Rama 2 y 3: User message ──
+        elif self._turn_count > 1:
+            user_msg = self._extract_last_user_message(chat_ctx)
+            if user_msg:
+                if self._is_current_node_type("action"):
+                    # Rama 2: nodo action — no avanzar, dejar que LLM llame la tool
+                    self._awaiting_tool_result = True
+                    logger.info(
+                        "Flow nodo action '%s' — esperando resultado de tool",
+                        self._flow_state.current_node_id,
+                    )
+                else:
+                    # Rama 3: nodo normal — avanzar con input del usuario
+                    self._flow_state, action = self._flow_engine.process_user_input(
+                        self._flow_state, user_msg
+                    )
+                    logger.info(
+                        "Flow avanzó a nodo '%s' (action=%s, completed=%s)",
+                        self._flow_state.current_node_id,
+                        action.type,
+                        self._flow_state.completed,
+                    )
+                    # Auto-avanzar wait nodes
+                    await self._auto_advance_wait()
+
+        # ── Acciones especiales según resultado del avance ──
+        if action is not None:
+            # Transfer: inyectar número de transferencia para que transfer_to_human lo use
+            if action.type == "transfer" and action.transfer_number:
+                self._flow_transfer_number = action.transfer_number
+                logger.info(
+                    "Flow transfer — número inyectado: %s", action.transfer_number
+                )
+
+            # Hangup: programar desconexión después de que el LLM responda
+            if action.hangup:
+                self._should_hangup = True
+                logger.info("Flow hangup programado tras respuesta del LLM")
 
         # Generar prompt dinámico del nodo actual
         flow_prompt = self._flow_engine.build_system_prompt(
@@ -364,8 +431,37 @@ class FlowVoiceAgent(VoiceAgent):
         )
         self._swap_system_prompt(chat_ctx, flow_prompt)
 
+        # Programar hangup si es necesario (da tiempo al TTS de terminar)
+        if getattr(self, "_should_hangup", False):
+            self._should_hangup = False
+            asyncio.create_task(self._delayed_hangup())
+
         # Delegar al LLM base
         return Agent.llm_node(self, chat_ctx, tools, model_settings)
+
+    async def _delayed_hangup(self) -> None:
+        """Espera a que el TTS termine de hablar y desconecta la llamada."""
+        await asyncio.sleep(6.0)
+        try:
+            session = getattr(self, "session", None)
+            if session:
+                await session.aclose()
+                logger.info("Flow hangup — sesión cerrada")
+        except Exception as exc:
+            logger.warning("Error al desconectar por hangup: %s", exc)
+
+    async def _auto_advance_wait(self) -> None:
+        """Si el nodo actual es 'wait', pausa y auto-avanza."""
+        while self._is_current_node_type("wait"):
+            node = self._flow_engine._nodes.get(self._flow_state.current_node_id)
+            seconds = (node or {}).get("data", {}).get("seconds", 2)
+            logger.info("Flow wait node — pausando %ds", seconds)
+            await asyncio.sleep(seconds)
+            self._flow_state, _ = self._flow_engine.process_user_input(
+                self._flow_state, ""
+            )
+            if self._flow_state.completed:
+                break
 
 
 def _voice_rules(config: ResolvedConfig) -> str:
@@ -632,6 +728,8 @@ def _build_flow_agent(
     base_rules += _voice_rules(config)
     base_rules += _build_tool_instructions(config.client.enabled_tools)
     base_rules += _build_api_instructions(api_integrations or [])
+    if config.agent.examples:
+        base_rules += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
 
     flow_engine = FlowEngine(
         config.agent.conversation_flow,

@@ -23,7 +23,7 @@ export const MessageNode = memo(({ data, selected }) => {
       />
       <div className="flex items-center gap-2 mb-2">
         <div className="w-3 h-3 rounded-full bg-blue-400" />
-        <span className="text-xs font-bold uppercase tracking-wider text-blue-400">Mensaje</span>
+        <span className="text-xs font-bold uppercase tracking-wider text-blue-400">{data.label || 'Mensaje'}</span>
         {data.waitForResponse && (
           <span className="text-[10px] bg-blue-400/20 text-blue-300 px-1.5 py-0.5 rounded">
             espera

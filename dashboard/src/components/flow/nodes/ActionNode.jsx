@@ -32,7 +32,7 @@ export const ActionNode = memo(({ data, selected }) => {
     <div className="flex items-center gap-2 mb-2">
       <div className="w-3 h-3 rounded-full bg-[#00f0ff]" />
       <span className="text-xs font-bold uppercase tracking-wider text-[#00f0ff]">
-        Accion
+        {data.label || 'Accion'}
       </span>
     </div>
     <p className="text-sm text-[#e8e8f0] font-medium truncate max-w-[160px]">

@@ -90,6 +90,17 @@ class FlowEngine:
 
     def build_system_prompt(self, state: FlowState, base_rules: str = "") -> str:
         """Genera un system prompt dinámico según el nodo actual del flujo."""
+        # Si se alcanzó MAX_STEPS, generar prompt de despedida
+        if state.completed and state.variables.get("_max_steps_reached"):
+            parts = [base_rules] if base_rules else []
+            parts.append(
+                "\n\n## Flujo de conversación — Límite alcanzado\n"
+                "El flujo ha llegado al máximo de pasos permitidos. "
+                "Despide al usuario amablemente e informa que un agente humano "
+                "lo contactará para continuar con su solicitud."
+            )
+            return "\n".join(parts)
+
         node = self._nodes.get(state.current_node_id)
         if not node:
             return base_rules
@@ -191,7 +202,8 @@ class FlowEngine:
             prompt_parts.append(
                 f"\n**Paso actual**: TRANSFERIR\n"
                 f"Informa al usuario: {message}\n"
-                f"La llamada será transferida a: {number}"
+                f"La llamada será transferida a: {number}\n"
+                f"Usa la herramienta transfer_to_human con el motivo de la transferencia."
             )
 
         elif node_type == "wait":
@@ -270,7 +282,15 @@ class FlowEngine:
                 # Si es yes_no, avanzar por handle específico
                 if var_type == "yes_no":
                     normalized = value.lower().strip()
-                    if normalized in ("sí", "si", "yes", "claro", "ok", "sale", "va"):
+                    yes_defaults = {"sí", "si", "yes", "claro", "ok", "sale", "va"}
+                    # Merge con keywords personalizadas del nodo
+                    custom_yes = data.get("yesKeywords", "")
+                    if custom_yes:
+                        for kw in custom_yes.split(","):
+                            kw = kw.strip().lower()
+                            if kw:
+                                yes_defaults.add(kw)
+                    if normalized in yes_defaults:
                         state = self._advance(state, "yes")
                     else:
                         state = self._advance(state, "no")
@@ -364,6 +384,7 @@ class FlowEngine:
                 MAX_STEPS,
             )
             state.completed = True
+            state.variables["_max_steps_reached"] = "true"
             return state
 
         edges = self._adjacency.get(state.current_node_id, [])
@@ -599,6 +620,18 @@ class FlowEngine:
             if not start_has_output:
                 errors.append("El nodo de Inicio no tiene conexión de salida.")
 
+        # Recopilar variables definidas en el flujo
+        defined_vars: set[str] = set()
+        for node in nodes:
+            ntype = node.get("type", "")
+            ndata = node.get("data", {})
+            if ntype == "collectInput" and ndata.get("variableName"):
+                defined_vars.add(ndata["variableName"])
+            if ntype == "start" and ndata.get("injectCallerInfo"):
+                defined_vars.add("caller_number")
+            if ntype == "action" and ndata.get("resultVariable"):
+                defined_vars.add(ndata["resultVariable"])
+
         # Verificar nodos collectInput tienen variableName
         for node in nodes:
             if node.get("type") == "collectInput":
@@ -608,6 +641,20 @@ class FlowEngine:
                         f"Nodo '{data.get('label', node['id'])}' (Recopilar Dato) "
                         "necesita un nombre de variable."
                     )
+                if not (data.get("prompt") or "").strip():
+                    warnings.append(
+                        f"Nodo '{data.get('label', node['id'])}' (Recopilar Dato) "
+                        "no tiene pregunta al usuario."
+                    )
+
+        # Verificar message/end con contenido vacío
+        for node in nodes:
+            data = node.get("data", {})
+            nid = node["id"]
+            if node.get("type") == "message" and not (data.get("message") or "").strip():
+                warnings.append(f"Nodo mensaje '{nid}' tiene mensaje vacío.")
+            if node.get("type") == "end" and not (data.get("message") or "").strip():
+                warnings.append(f"Nodo fin '{nid}' tiene mensaje de despedida vacío.")
 
         # Verificar que nodos transfer tienen número
         for node in nodes:
@@ -626,6 +673,62 @@ class FlowEngine:
                     warnings.append(
                         f"Nodo condición '{data.get('label', node['id'])}' no tiene condiciones definidas."
                     )
+                # Verificar variables usadas en condiciones existen
+                for cond in data.get("conditions", []):
+                    var_name = cond.get("variable", "")
+                    if var_name and var_name not in defined_vars:
+                        warnings.append(
+                            f"Nodo condición '{node['id']}': variable '{var_name}' "
+                            "no está definida en ningún nodo del flujo."
+                        )
+
+        # Verificar action nodes sin failure edge
+        edge_handles: dict[str, set[str]] = {}
+        for edge in edges:
+            src = edge.get("source", "")
+            handle = edge.get("sourceHandle", "default")
+            edge_handles.setdefault(src, set()).add(handle)
+
+        for node in nodes:
+            if node.get("type") == "action":
+                data = node.get("data", {})
+                if data.get("actionType"):
+                    handles = edge_handles.get(node["id"], set())
+                    if "failure" not in handles:
+                        warnings.append(
+                            f"Nodo acción '{node['id']}' no tiene ruta de error (failure)."
+                        )
+
+        # Verificar variables huérfanas en mensajes/prompts
+        var_pattern = re.compile(r"\{\{(\w+)\}\}")
+        for node in nodes:
+            data = node.get("data", {})
+            ntype = node.get("type", "")
+            texts: list[str] = []
+            if ntype == "message":
+                texts.append(data.get("message", ""))
+            elif ntype == "end":
+                texts.append(data.get("message", ""))
+            elif ntype == "collectInput":
+                texts.append(data.get("prompt", ""))
+                texts.append(data.get("retryMessage", ""))
+            elif ntype == "start":
+                texts.append(data.get("greeting", ""))
+            elif ntype == "action":
+                texts.append(data.get("onFailureMessage", ""))
+            elif ntype == "transfer":
+                texts.append(data.get("message", ""))
+            elif ntype == "wait":
+                texts.append(data.get("message", ""))
+
+            for txt in texts:
+                for match in var_pattern.finditer(txt):
+                    vname = match.group(1)
+                    if vname not in defined_vars:
+                        warnings.append(
+                            f"Nodo '{node['id']}': variable '{{{{{vname}}}}}' "
+                            "no está definida en el flujo."
+                        )
 
         # Detectar ciclos mediante DFS
         adjacency: dict[str, list[str]] = {}
@@ -652,11 +755,11 @@ class FlowEngine:
                         cycle_path = path[cycle_start:] + [neighbor]
                         cycle_nodes.update(cycle_path)
                         cycle_str = " → ".join(cycle_path)
-                        errors.append(f"Ciclo detectado: {cycle_str}")
+                        warnings.append(f"Ciclo detectado: {cycle_str}")
                     else:
                         cycle_nodes.add(neighbor)
                         cycle_nodes.add(nid)
-                        errors.append(f"Ciclo detectado entre nodos {nid} y {neighbor}")
+                        warnings.append(f"Ciclo detectado entre nodos {nid} y {neighbor}")
             rec_stack.discard(nid)
 
         for nid in node_ids:

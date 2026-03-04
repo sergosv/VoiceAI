@@ -65,6 +65,51 @@ body {
   stroke-width: 2;
 }
 
+.react-flow .react-flow__controls {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.react-flow .react-flow__controls button {
+  border-bottom-color: var(--color-border);
+}
+
 .react-flow .react-flow__controls button:hover {
   background-color: var(--color-bg-hover);
+}
+
+.react-flow .react-flow__controls button:active {
+  background-color: var(--color-accent-dim);
+  color: var(--color-bg-primary);
+}
+
+.react-flow .react-flow__controls button:active svg {
+  fill: var(--color-bg-primary);
+}
+
+.react-flow .react-flow__controls button svg {
+  fill: var(--color-text-secondary);
+  transition: fill 0.15s ease;
+}
+
+.react-flow .react-flow__controls button:hover svg {
+  fill: var(--color-text-primary);
+}
+
+/* Search dimmed state — nodos que no matchean la busqueda */
+.react-flow .react-flow__node.dimmed {
+  opacity: 0.2;
+  transition: opacity 0.2s ease;
+}
+
+.react-flow .react-flow__node.search-match {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.react-flow .react-flow__node.search-current {
+  opacity: 1;
+  filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.6));
+  transition: opacity 0.2s ease, filter 0.2s ease;
 }

@@ -613,7 +613,7 @@ class TestWaitNode:
 
 class TestCycleDetection:
     def test_simple_cycle_detected(self) -> None:
-        """Ciclo directo: A → B → A."""
+        """Ciclo directo: A → B → A — debe ser warning, no error (loops intencionales)."""
         flow = _make_flow(
             [
                 _start_node(),
@@ -628,12 +628,12 @@ class TestCycleDetection:
                 _edge("m1", "end-1"),
             ],
         )
-        valid, errors, _ = FlowEngine.validate_flow(flow)
-        assert not valid
-        assert any("Ciclo" in e or "ciclo" in e.lower() for e in errors)
+        valid, errors, warnings = FlowEngine.validate_flow(flow)
+        assert valid  # Ciclos son warnings, no invalidan
+        assert any("Ciclo" in w or "ciclo" in w.lower() for w in warnings)
 
     def test_multi_hop_cycle_detected(self) -> None:
-        """Ciclo multi-hop: A → B → C → A."""
+        """Ciclo multi-hop: A → B → C → A — debe ser warning."""
         flow = _make_flow(
             [
                 _start_node(),
@@ -649,9 +649,9 @@ class TestCycleDetection:
                 _edge("m3", "m1"),  # Ciclo de 3 nodos
             ],
         )
-        valid, errors, _ = FlowEngine.validate_flow(flow)
-        assert not valid
-        assert any("Ciclo" in e or "ciclo" in e.lower() for e in errors)
+        valid, errors, warnings = FlowEngine.validate_flow(flow)
+        # Es valid (ciclos no son errores), pero tiene warning
+        assert any("Ciclo" in w or "ciclo" in w.lower() for w in warnings)
 
     def test_no_cycle_valid(self) -> None:
         """Flujo lineal sin ciclos debe ser válido."""
@@ -659,9 +659,9 @@ class TestCycleDetection:
             [_start_node(), _message_node("m1", "Hola"), _end_node()],
             [_edge("start-1", "m1"), _edge("m1", "end-1")],
         )
-        valid, errors, _ = FlowEngine.validate_flow(flow)
+        valid, errors, warnings = FlowEngine.validate_flow(flow)
         assert valid
-        assert not any("Ciclo" in e for e in errors)
+        assert not any("Ciclo" in w for w in warnings)
 
 
 class TestRuntimeLoopProtection:

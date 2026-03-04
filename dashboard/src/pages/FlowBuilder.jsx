@@ -7,12 +7,14 @@ import {
   useEdgesState,
   Controls,
   Background,
+  BackgroundVariant,
   MiniMap,
   MarkerType,
   useReactFlow,
   ReactFlowProvider,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import Dagre from '@dagrejs/dagre'
 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -22,6 +24,7 @@ import { NodePalette } from '../components/flow/NodePalette'
 import { PropertiesPanel } from '../components/flow/PropertiesPanel'
 import { FlowToolbar } from '../components/flow/FlowToolbar'
 import { FlowTemplates } from '../components/flow/FlowTemplates'
+import { ValidationPanel } from '../components/flow/ValidationPanel'
 
 const DEFAULT_START_NODE = {
   id: 'start-1',
@@ -39,7 +42,7 @@ function FlowBuilderInner() {
   const { user, loading: authLoading } = useAuth()
   const toast = useToast()
   const reactFlowWrapper = useRef(null)
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, setCenter } = useReactFlow()
 
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
@@ -49,11 +52,22 @@ function FlowBuilderInner() {
   const [clientId, setClientId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [validating, setValidating] = useState(false)
   const [mcpTools, setMcpTools] = useState([])
   const [apiTools, setApiTools] = useState([])
   const [validationErrors, setValidationErrors] = useState({}) // nodeId -> [errors]
   const [showTemplates, setShowTemplates] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+  const [historyVersion, setHistoryVersion] = useState(0) // Trigger re-render on history change
+  const [showMinimap, setShowMinimap] = useState(true)
+  const [showValidationPanel, setShowValidationPanel] = useState(false)
+  const [selectedNodeIds, setSelectedNodeIds] = useState([])
+  const [showGrid, setShowGrid] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchActive, setSearchActive] = useState(false)
+  const [searchCurrentIndex, setSearchCurrentIndex] = useState(0)
+
+  // ── Clipboard para copy/paste ────────────────────────
+  const clipboardRef = useRef({ nodes: [], edges: [] })
 
   // ── Undo/Redo ──────────────────────────────────────
   const historyRef = useRef({ past: [], future: [] })
@@ -65,6 +79,8 @@ function FlowBuilderInner() {
     h.past.push({ nodes: prevNodes, edges: prevEdges })
     if (h.past.length > MAX_HISTORY) h.past.shift()
     h.future = [] // Limpiar redo al hacer un cambio nuevo
+    setHistoryVersion(v => v + 1)
+    setIsDirty(true)
   }, [])
 
   const undo = useCallback(() => {
@@ -77,6 +93,7 @@ function FlowBuilderInner() {
     setEdges(prev.edges)
     skipHistoryRef.current = false
     setSelectedNode(null)
+    setHistoryVersion(v => v + 1)
   }, [nodes, edges, setNodes, setEdges])
 
   const redo = useCallback(() => {
@@ -89,7 +106,134 @@ function FlowBuilderInner() {
     setEdges(next.edges)
     skipHistoryRef.current = false
     setSelectedNode(null)
+    setHistoryVersion(v => v + 1)
   }, [nodes, edges, setNodes, setEdges])
+
+  // ── Auto-layout con dagre ─────────────────────────
+  const autoLayout = useCallback(() => {
+    if (nodes.length === 0) return
+    pushHistory(nodes, edges)
+
+    const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}))
+    g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 })
+
+    for (const node of nodes) {
+      g.setNode(node.id, { width: 200, height: 100 })
+    }
+    for (const edge of edges) {
+      g.setEdge(edge.source, edge.target)
+    }
+
+    Dagre.layout(g)
+
+    setNodes(nodes.map((node) => {
+      const pos = g.node(node.id)
+      return { ...node, position: { x: pos.x - 100, y: pos.y - 50 } }
+    }))
+    toast.info('Layout automático aplicado')
+  }, [nodes, edges, setNodes, pushHistory, toast])
+
+  // ── Copy / Paste ─────────────────────────────────────
+  const copyNodes = useCallback(() => {
+    const ids = selectedNodeIds.length > 0 ? selectedNodeIds : (selectedNode ? [selectedNode.id] : [])
+    if (ids.length === 0) return
+
+    // Filtrar nodos Start
+    const copyable = nodes.filter(n => ids.includes(n.id) && n.type !== 'start')
+    if (copyable.length === 0) {
+      toast.info('No se puede copiar el nodo de inicio')
+      return
+    }
+
+    const idSet = new Set(copyable.map(n => n.id))
+    // Copiar edges internas entre los nodos seleccionados
+    const internalEdges = edges.filter(e => idSet.has(e.source) && idSet.has(e.target))
+
+    clipboardRef.current = { nodes: copyable, edges: internalEdges }
+    // Guardar en localStorage para cross-flow paste
+    try {
+      localStorage.setItem('flow-clipboard', JSON.stringify({ nodes: copyable, edges: internalEdges }))
+    } catch { /* ignorar */ }
+
+    toast.info(`${copyable.length} nodo${copyable.length > 1 ? 's' : ''} copiado${copyable.length > 1 ? 's' : ''}`)
+  }, [selectedNodeIds, selectedNode, nodes, edges, toast])
+
+  const pasteNodes = useCallback(() => {
+    let clipboard = clipboardRef.current
+    // Intentar desde localStorage si el clipboard interno esta vacio
+    if (clipboard.nodes.length === 0) {
+      try {
+        const stored = localStorage.getItem('flow-clipboard')
+        if (stored) clipboard = JSON.parse(stored)
+      } catch { /* ignorar */ }
+    }
+    if (!clipboard.nodes || clipboard.nodes.length === 0) return
+
+    pushHistory(nodes, edges)
+
+    const ts = Date.now()
+    const idMap = {} // old id -> new id
+    const newNodes = clipboard.nodes.map((n, i) => {
+      const newId = `${n.type}-${ts}-${i}`
+      idMap[n.id] = newId
+      return {
+        ...n,
+        id: newId,
+        position: { x: n.position.x + 50, y: n.position.y + 50 },
+        data: { ...n.data },
+        selected: false,
+      }
+    })
+
+    const newEdges = clipboard.edges
+      .filter(e => idMap[e.source] && idMap[e.target])
+      .map((e, i) => ({
+        ...e,
+        id: `edge-paste-${ts}-${i}`,
+        source: idMap[e.source],
+        target: idMap[e.target],
+      }))
+
+    setNodes(nds => [...nds, ...newNodes])
+    setEdges(eds => [...eds, ...newEdges])
+    toast.info(`${newNodes.length} nodo${newNodes.length > 1 ? 's' : ''} pegado${newNodes.length > 1 ? 's' : ''}`)
+  }, [nodes, edges, setNodes, setEdges, pushHistory, toast])
+
+  // ── Search/Filter ───────────────────────────────────
+  const searchResults = useMemo(() => {
+    if (!searchActive || !searchQuery.trim()) return []
+    const q = searchQuery.toLowerCase()
+    return nodes.filter(n => {
+      const d = n.data
+      const texts = [
+        d.label || '', d.message || '', d.greeting || '',
+        d.prompt || '', d.variableName || '', d.actionType || '',
+        d.onFailureMessage || '', d.retryMessage || '',
+        d.transferNumber || '', n.type || '',
+      ]
+      return texts.some(t => t.toLowerCase().includes(q))
+    })
+  }, [searchActive, searchQuery, nodes])
+
+  const searchResultIds = useMemo(() => new Set(searchResults.map(n => n.id)), [searchResults])
+
+  const navigateSearch = useCallback((direction) => {
+    if (searchResults.length === 0) return
+    let nextIdx = searchCurrentIndex + direction
+    if (nextIdx < 0) nextIdx = searchResults.length - 1
+    if (nextIdx >= searchResults.length) nextIdx = 0
+    setSearchCurrentIndex(nextIdx)
+    const node = searchResults[nextIdx]
+    if (node) {
+      setCenter(node.position.x + 100, node.position.y + 50, { zoom: 1.2, duration: 400 })
+    }
+  }, [searchResults, searchCurrentIndex, setCenter])
+
+  const closeSearch = useCallback(() => {
+    setSearchActive(false)
+    setSearchQuery('')
+    setSearchCurrentIndex(0)
+  }, [])
 
   // Wrapper para onNodesChange que guarda historial
   const handleNodesChange = useCallback((changes) => {
@@ -107,6 +251,17 @@ function FlowBuilderInner() {
     if (significant) pushHistory(nodes, edges)
     onEdgesChange(changes)
   }, [onEdgesChange, pushHistory, nodes, edges])
+
+  // ── Beforeunload guard ───────────────────────────────
+  useEffect(() => {
+    if (!isDirty) return
+    const handler = (e) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   // ── Auth ───────────────────────────────────────────
   useEffect(() => {
@@ -268,6 +423,7 @@ function FlowBuilderInner() {
   // ── Seleccion ──────────────────────────────────────
   const onSelectionChange = useCallback(({ nodes: selectedNodes }) => {
     setSelectedNode(selectedNodes.length === 1 ? selectedNodes[0] : null)
+    setSelectedNodeIds(selectedNodes.map(n => n.id))
   }, [])
 
   const onEdgeClick = useCallback((_, edge) => {
@@ -282,6 +438,22 @@ function FlowBuilderInner() {
   // ── Actualizar data de nodo ────────────────────────
   const onNodeDataChange = useCallback((nodeId, key, value) => {
     pushHistory(nodes, edges)
+
+    // Limpiar edges huerfanos al cambiar condiciones
+    if (key === 'conditions') {
+      const node = nodes.find(n => n.id === nodeId)
+      if (node && node.type === 'condition') {
+        const oldHandleIds = new Set((node.data.conditions || []).map(c => c.handleId))
+        const newHandleIds = new Set((value || []).map(c => c.handleId))
+        const removedHandles = [...oldHandleIds].filter(h => !newHandleIds.has(h))
+        if (removedHandles.length > 0) {
+          setEdges((eds) => eds.filter(
+            e => !(e.source === nodeId && removedHandles.includes(e.sourceHandle))
+          ))
+        }
+      }
+    }
+
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === nodeId) {
@@ -292,7 +464,7 @@ function FlowBuilderInner() {
         return node
       }),
     )
-  }, [setNodes, pushHistory, nodes, edges])
+  }, [setNodes, setEdges, pushHistory, nodes, edges])
 
   // ── Drop desde paleta ──────────────────────────────
   const onDragOver = useCallback((e) => {
@@ -399,6 +571,7 @@ function FlowBuilderInner() {
         conversation_mode: 'flow',
       })
       setValidationErrors({})
+      setIsDirty(false)
       toast.success('Flujo guardado correctamente')
     } catch (err) {
       toast.error('Error guardando: ' + err.message)
@@ -407,37 +580,39 @@ function FlowBuilderInner() {
     }
   }
 
-  // ── Validar (local + API) ──────────────────────────
-  const handleValidate = async () => {
-    if (!clientId) return
-    setValidating(true)
-    try {
-      // Guardar primero
-      await api.patch(`/clients/${clientId}/agents/${agentId}`, {
-        conversation_flow: { nodes, edges },
-      })
-      const result = await api.post(`/clients/${clientId}/agents/${agentId}/validate-flow`)
+  // ── Validar (local, sin guardar) ────────────────────
+  const handleValidate = () => {
+    const nodeErrors = buildNodeErrors(nodes, edges)
+    const errorCount = Object.values(nodeErrors).reduce((sum, arr) => sum + arr.length, 0)
 
-      // Mapear errores a nodos especificos
-      const nodeErrors = buildNodeErrors(nodes, edges)
-
-      if (result.valid && Object.keys(nodeErrors).length === 0) {
-        setValidationErrors({})
-        toast.success(`Flujo valido (${result.node_count} nodos, ${result.edge_count} conexiones)`)
-      } else {
-        setValidationErrors(nodeErrors)
-        const allMsgs = [...result.errors, ...result.warnings]
-        toast.error(allMsgs.join(' | ') || 'Hay problemas en el flujo')
-      }
-    } catch (err) {
-      toast.error('Error validando: ' + err.message)
-    } finally {
-      setValidating(false)
+    if (errorCount === 0) {
+      setValidationErrors({})
+      setShowValidationPanel(false)
+      toast.success(`Flujo valido (${nodes.length} nodos, ${edges.length} conexiones)`)
+    } else {
+      setValidationErrors(nodeErrors)
+      setShowValidationPanel(true)
+      const msgs = Object.entries(nodeErrors).flatMap(([, errs]) => errs)
+      toast.error(`${errorCount} problema${errorCount > 1 ? 's' : ''}: ${msgs.slice(0, 3).join(', ')}`)
     }
   }
 
   // ── Keyboard shortcuts ─────────────────────────────
   const onKeyDown = useCallback((e) => {
+    // Escape cierra la busqueda
+    if (e.key === 'Escape' && searchActive) {
+      e.preventDefault()
+      closeSearch()
+      return
+    }
+
+    // Ctrl+F = Buscar
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault()
+      setSearchActive(true)
+      return
+    }
+
     // Ignorar si esta escribiendo en un input/textarea
     const tag = e.target.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -452,6 +627,18 @@ function FlowBuilderInner() {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
       e.preventDefault()
       redo()
+      return
+    }
+    // Ctrl+C = Copiar
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      e.preventDefault()
+      copyNodes()
+      return
+    }
+    // Ctrl+V = Pegar
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      e.preventDefault()
+      pasteNodes()
       return
     }
     // Ctrl+D = Duplicar
@@ -476,6 +663,25 @@ function FlowBuilderInner() {
         setSelectedEdgeId(null)
         return
       }
+      // Multi-select bulk delete
+      if (selectedNodeIds.length > 1) {
+        const deletableIds = selectedNodeIds.filter(id => {
+          const n = nodes.find(nd => nd.id === id)
+          return n && n.type !== 'start'
+        })
+        if (deletableIds.length === 0) {
+          toast.info('No se puede eliminar el nodo de inicio')
+          return
+        }
+        pushHistory(nodes, edges)
+        const idsSet = new Set(deletableIds)
+        setNodes((nds) => nds.filter((n) => !idsSet.has(n.id)))
+        setEdges((eds) => eds.filter((edge) => !idsSet.has(edge.source) && !idsSet.has(edge.target)))
+        setSelectedNode(null)
+        setSelectedNodeIds([])
+        toast.info(`${deletableIds.length} nodo${deletableIds.length > 1 ? 's' : ''} eliminado${deletableIds.length > 1 ? 's' : ''}`)
+        return
+      }
       // Borrar nodo seleccionado
       if (selectedNode) {
         if (selectedNode.type === 'start') {
@@ -488,7 +694,7 @@ function FlowBuilderInner() {
         setSelectedNode(null)
       }
     }
-  }, [selectedNode, selectedEdgeId, setNodes, setEdges, toast, undo, redo, duplicateNode, handleSave, pushHistory, nodes, edges])
+  }, [selectedNode, selectedNodeIds, selectedEdgeId, setNodes, setEdges, toast, undo, redo, duplicateNode, copyNodes, pasteNodes, handleSave, pushHistory, nodes, edges, searchActive, closeSearch])
 
   // ── Edges con highlight de seleccion ───────────────
   const styledEdges = useMemo(() =>
@@ -502,16 +708,30 @@ function FlowBuilderInner() {
     }))
   , [edges, selectedEdgeId])
 
-  // ── Nodos con errores de validacion ────────────────
-  const styledNodes = useMemo(() =>
-    nodes.map(n => ({
-      ...n,
-      data: {
-        ...n.data,
-        _validationErrors: validationErrors[n.id] || [],
-      },
-    }))
-  , [nodes, validationErrors])
+  // ── Nodos con errores de validacion + search dimming ─
+  const styledNodes = useMemo(() => {
+    const isSearching = searchActive && searchQuery.trim()
+    return nodes.map((n, idx) => {
+      let className = ''
+      if (isSearching) {
+        if (searchResultIds.has(n.id)) {
+          // Encontrar indice en searchResults para resaltar current
+          const matchIdx = searchResults.findIndex(r => r.id === n.id)
+          className = matchIdx === searchCurrentIndex ? 'search-current' : 'search-match'
+        } else {
+          className = 'dimmed'
+        }
+      }
+      return {
+        ...n,
+        className,
+        data: {
+          ...n.data,
+          _validationErrors: validationErrors[n.id] || [],
+        },
+      }
+    })
+  }, [nodes, validationErrors, searchActive, searchQuery, searchResultIds, searchResults, searchCurrentIndex])
 
   if (loading || authLoading) {
     return (
@@ -525,19 +745,40 @@ function FlowBuilderInner() {
     <div className="h-screen flex flex-col bg-[#0a0a0f]" onKeyDown={onKeyDown} tabIndex={0}>
       <FlowToolbar
         agentName={agent?.name}
+        agentId={agentId}
+        agentType={agent?.agent_type || 'inbound'}
         onSave={handleSave}
         onValidate={handleValidate}
         onUndo={undo}
         onRedo={redo}
         onDuplicate={duplicateNode}
+        onCopy={copyNodes}
+        onPaste={pasteNodes}
         onExport={handleExport}
         onImport={handleImport}
         onOpenTemplates={() => setShowTemplates(true)}
+        onAutoLayout={autoLayout}
+        onToggleMinimap={() => setShowMinimap(m => !m)}
+        showMinimap={showMinimap}
+        onToggleGrid={() => setShowGrid(g => !g)}
+        showGrid={showGrid}
+        onToggleValidation={() => setShowValidationPanel(v => !v)}
+        showValidation={showValidationPanel}
+        validationCount={Object.values(validationErrors).reduce((s, a) => s + a.length, 0)}
         canUndo={historyRef.current.past.length > 0}
         canRedo={historyRef.current.future.length > 0}
         hasSelection={!!selectedNode}
+        selectionCount={selectedNodeIds.length}
         saving={saving}
-        validating={validating}
+        searchActive={searchActive}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSearchOpen={() => setSearchActive(true)}
+        onSearchClose={closeSearch}
+        searchResultCount={searchResults.length}
+        searchCurrentIndex={searchCurrentIndex}
+        onSearchNext={() => navigateSearch(1)}
+        onSearchPrev={() => navigateSearch(-1)}
       />
       <FlowTemplates
         open={showTemplates}
@@ -560,6 +801,8 @@ function FlowBuilderInner() {
             onDrop={onDrop}
             nodeTypes={nodeTypes}
             isValidConnection={isValidConnection}
+            selectionOnDrag
+            selectionMode="partial"
             fitView
             snapToGrid
             snapGrid={[16, 16]}
@@ -571,31 +814,55 @@ function FlowBuilderInner() {
             }}
           >
             <Controls position="bottom-left" />
-            <Background color="#2a2a3e" gap={16} />
-            <MiniMap
-              nodeColor={(n) => {
-                const colors = {
-                  start: '#22c55e',
-                  message: '#60a5fa',
-                  collectInput: '#fbbf24',
-                  condition: '#a78bfa',
-                  action: '#00f0ff',
-                  end: '#f87171',
-                  transfer: '#fb923c',
-                  wait: '#9ca3af',
-                }
-                return colors[n.type] || '#555570'
-              }}
-              maskColor="rgba(10, 10, 15, 0.7)"
-              position="bottom-right"
-            />
+            {showGrid && (
+              <Background
+                variant={BackgroundVariant.Dots}
+                color="#2a2a3e"
+                gap={16}
+                size={1.5}
+              />
+            )}
+            {showMinimap && (
+              <MiniMap
+                nodeColor={(n) => {
+                  const colors = {
+                    start: '#22c55e',
+                    message: '#60a5fa',
+                    collectInput: '#fbbf24',
+                    condition: '#a78bfa',
+                    action: '#00f0ff',
+                    end: '#f87171',
+                    transfer: '#fb923c',
+                    wait: '#9ca3af',
+                  }
+                  return colors[n.type] || '#555570'
+                }}
+                maskColor="rgba(10, 10, 15, 0.7)"
+                position="bottom-right"
+              />
+            )}
           </ReactFlow>
+          {showValidationPanel && (
+            <ValidationPanel
+              errors={validationErrors}
+              nodes={nodes}
+              onClose={() => setShowValidationPanel(false)}
+              onNavigateToNode={(nodeId) => {
+                const node = nodes.find(n => n.id === nodeId)
+                if (node) {
+                  setCenter(node.position.x + 100, node.position.y + 50, { zoom: 1.2, duration: 500 })
+                  setSelectedNode(node)
+                }
+              }}
+            />
+          )}
         </div>
         <PropertiesPanel
           selectedNode={selectedNode}
           onNodeDataChange={onNodeDataChange}
           mcpTools={mcpTools}
           apiTools={apiTools}
+          nodes={nodes}
         />
       </div>
     </div>
@@ -655,6 +922,21 @@ function buildNodeErrors(nodes, edges) {
   const sourceIds = new Set(edges.map(e => e.source))
   const targetIds = new Set(edges.map(e => e.target))
 
+  // Recopilar variables definidas en el flujo
+  const definedVars = new Set()
+  for (const node of nodes) {
+    if (node.type === 'collectInput' && node.data.variableName) {
+      definedVars.add(node.data.variableName)
+    }
+    if (node.type === 'start' && node.data.injectCallerInfo) {
+      definedVars.add('caller_number')
+    }
+    // action resultVariable tambien define una variable
+    if (node.type === 'action' && node.data.resultVariable) {
+      definedVars.add(node.data.resultVariable)
+    }
+  }
+
   for (const node of nodes) {
     const { id, type, data } = node
 
@@ -678,9 +960,34 @@ function buildNodeErrors(nodes, edges) {
       addError(id, 'Falta nombre de variable')
     }
 
+    // CollectInput sin prompt
+    if (type === 'collectInput' && !data.prompt?.trim()) {
+      addError(id, 'Falta pregunta al usuario')
+    }
+
+    // Message vacio
+    if (type === 'message' && !data.message?.trim()) {
+      addError(id, 'Mensaje vacio')
+    }
+
+    // End vacio
+    if (type === 'end' && !data.message?.trim()) {
+      addError(id, 'Mensaje de despedida vacio')
+    }
+
     // Action sin tipo
     if (type === 'action' && !data.actionType) {
       addError(id, 'Falta tipo de accion')
+    }
+
+    // Action sin ruta de failure
+    if (type === 'action' && data.actionType) {
+      const hasFailureEdge = edges.some(
+        e => e.source === id && e.sourceHandle === 'failure'
+      )
+      if (!hasFailureEdge) {
+        addError(id, 'Sin ruta de error (failure)')
+      }
     }
 
     // Condition sin condiciones
@@ -688,9 +995,42 @@ function buildNodeErrors(nodes, edges) {
       addError(id, 'Sin condiciones definidas')
     }
 
+    // Condition con variable no definida
+    if (type === 'condition' && data.conditions) {
+      for (const cond of data.conditions) {
+        if (cond.variable && !definedVars.has(cond.variable)) {
+          addError(id, `Variable "${cond.variable}" no esta definida en ningun nodo`)
+        }
+      }
+    }
+
     // Transfer sin numero
     if (type === 'transfer' && !data.transferNumber) {
       addError(id, 'Falta numero de transferencia')
+    }
+
+    // Variables huerfanas: escanear {{var}} en mensajes/prompts
+    const textsToScan = []
+    if (type === 'message') textsToScan.push(data.message || '')
+    if (type === 'end') textsToScan.push(data.message || '')
+    if (type === 'collectInput') textsToScan.push(data.prompt || '', data.retryMessage || '')
+    if (type === 'start') textsToScan.push(data.greeting || '')
+    if (type === 'action') textsToScan.push(data.onFailureMessage || '')
+    if (type === 'transfer') textsToScan.push(data.message || '')
+    if (type === 'wait') textsToScan.push(data.message || '')
+
+    const varPattern = /\{\{(\w+)\}\}/g
+    const usedVarsInNode = new Set()
+    for (const txt of textsToScan) {
+      let match
+      while ((match = varPattern.exec(txt)) !== null) {
+        usedVarsInNode.add(match[1])
+      }
+    }
+    for (const v of usedVarsInNode) {
+      if (!definedVars.has(v)) {
+        addError(id, `Variable "{{${v}}}" no esta definida en el flujo`)
+      }
     }
   }
 
@@ -733,7 +1073,7 @@ function buildNodeErrors(nodes, edges) {
   }
 
   for (const nid of cycleNodes) {
-    addError(nid, 'Parte de un ciclo')
+    addError(nid, '(aviso) Parte de un ciclo — verificar que sea intencional')
   }
 
   return errors

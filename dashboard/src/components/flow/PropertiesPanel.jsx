@@ -90,7 +90,7 @@ function Checkbox({ checked, onChange, label }) {
   )
 }
 
-export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [], apiTools = [] }) {
+export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [], apiTools = [], nodes = [] }) {
   if (!selectedNode) {
     return (
       <div className="w-[320px] bg-[#12121a] border-l border-[#2a2a3e] p-4 flex items-center justify-center">
@@ -107,6 +107,15 @@ export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [],
       <h3 className="text-xs font-bold uppercase tracking-wider text-[#8888a0] mb-4">
         Propiedades
       </h3>
+
+      <div className="mb-4">
+        <Label>Etiqueta del nodo</Label>
+        <Input
+          value={data.label}
+          onChange={(v) => update('label', v)}
+          placeholder={type === 'start' ? 'Inicio' : type === 'end' ? 'Fin' : type}
+        />
+      </div>
 
       {type === 'start' && (
         <div className="space-y-3">
@@ -198,6 +207,19 @@ export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [],
               placeholder="3"
             />
           </div>
+          {data.variableType === 'yes_no' && (
+            <div>
+              <Label>Palabras de Si adicionales</Label>
+              <Input
+                value={data.yesKeywords}
+                onChange={(v) => update('yesKeywords', v)}
+                placeholder="dale, perfecto, afirmativo"
+              />
+              <p className="text-[10px] text-[#555570] mt-1">
+                Separadas por coma. Ya incluye: si, yes, claro, ok, sale, va
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -206,6 +228,7 @@ export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [],
           conditions={data.conditions || []}
           defaultHandleId={data.defaultHandleId || 'default'}
           onUpdate={update}
+          nodes={nodes}
         />
       )}
 
@@ -344,38 +367,54 @@ export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [],
           </div>
         </div>
       )}
+
+      <VariableInspector nodes={nodes} />
     </div>
   )
 }
 
 function ParametersEditor({ parameters, onChange }) {
-  const entries = Object.entries(parameters || {})
+  // Usar array interno con IDs estables para evitar bug de keys duplicadas
+  const idRef = React.useRef(0)
+  const [items, setItems] = React.useState(() =>
+    Object.entries(parameters || {}).map(([k, v]) => ({ id: idRef.current++, key: k, value: v }))
+  )
+
+  // Sync: cuando el objeto externo cambia (undo/redo), reconstruir items
+  const prevParamsRef = React.useRef(parameters)
+  if (parameters !== prevParamsRef.current) {
+    const extEntries = Object.entries(parameters || {})
+    if (
+      extEntries.length !== items.length ||
+      extEntries.some(([k, v], i) => items[i]?.key !== k || items[i]?.value !== v)
+    ) {
+      // Reset items desde el objeto externo
+      idRef.current = 0
+      const newItems = extEntries.map(([k, v]) => ({ id: idRef.current++, key: k, value: v }))
+      setItems(newItems)
+    }
+    prevParamsRef.current = parameters
+  }
+
+  const emitChange = (newItems) => {
+    setItems(newItems)
+    const obj = {}
+    for (const item of newItems) {
+      if (item.key || item.value) obj[item.key] = item.value
+    }
+    onChange(obj)
+  }
 
   const addParam = () => {
-    onChange({ ...parameters, '': '' })
+    emitChange([...items, { id: idRef.current++, key: '', value: '' }])
   }
 
-  const removeParam = (key) => {
-    const updated = { ...parameters }
-    delete updated[key]
-    onChange(updated)
+  const removeParam = (id) => {
+    emitChange(items.filter(item => item.id !== id))
   }
 
-  const updateParamKey = (oldKey, newKey) => {
-    // Reconstruir objeto preservando orden y reemplazando la key
-    const updated = {}
-    for (const [k, v] of Object.entries(parameters)) {
-      if (k === oldKey) {
-        updated[newKey] = v
-      } else {
-        updated[k] = v
-      }
-    }
-    onChange(updated)
-  }
-
-  const updateParamValue = (key, value) => {
-    onChange({ ...parameters, [key]: value })
+  const updateItem = (id, field, val) => {
+    emitChange(items.map(item => item.id === id ? { ...item, [field]: val } : item))
   }
 
   return (
@@ -389,26 +428,26 @@ function ParametersEditor({ parameters, onChange }) {
           + Agregar
         </button>
       </div>
-      {entries.map(([key, value], i) => (
-        <div key={i} className="flex items-center gap-1">
+      {items.map((item) => (
+        <div key={item.id} className="flex items-center gap-1">
           <input
             className="flex-1 bg-[#0a0a0f] border border-[#2a2a3e] rounded px-2 py-1
                        text-xs text-[#e8e8f0] placeholder-[#555570]
                        focus:outline-none focus:border-[#00f0ff]/50"
-            value={key}
-            onChange={(e) => updateParamKey(key, e.target.value)}
+            value={item.key}
+            onChange={(e) => updateItem(item.id, 'key', e.target.value)}
             placeholder="key"
           />
           <input
             className="flex-1 bg-[#0a0a0f] border border-[#2a2a3e] rounded px-2 py-1
                        text-xs text-[#e8e8f0] placeholder-[#555570]
                        focus:outline-none focus:border-[#00f0ff]/50"
-            value={value}
-            onChange={(e) => updateParamValue(key, e.target.value)}
+            value={item.value}
+            onChange={(e) => updateItem(item.id, 'value', e.target.value)}
             placeholder="{{variable}}"
           />
           <button
-            onClick={() => removeParam(key)}
+            onClick={() => removeParam(item.id)}
             className="text-red-400 hover:text-red-300 p-0.5"
             title="Eliminar"
           >
@@ -418,7 +457,7 @@ function ParametersEditor({ parameters, onChange }) {
           </button>
         </div>
       ))}
-      {entries.length === 0 && (
+      {items.length === 0 && (
         <p className="text-[10px] text-[#555570] italic">
           {'Usa {{variable}} para insertar datos recopilados'}
         </p>
@@ -427,7 +466,72 @@ function ParametersEditor({ parameters, onChange }) {
   )
 }
 
-function ConditionProperties({ conditions, defaultHandleId, onUpdate }) {
+function VariableInspector({ nodes }) {
+  const variables = React.useMemo(() => {
+    const vars = []
+    for (const node of nodes) {
+      if (node.type === 'collectInput' && node.data.variableName) {
+        const typeLabel = VARIABLE_TYPES.find(t => t.value === node.data.variableType)?.label || node.data.variableType
+        vars.push({ name: node.data.variableName, type: typeLabel })
+      }
+      if (node.type === 'start' && node.data.injectCallerInfo) {
+        vars.push({ name: 'caller_number', type: 'Telefono' })
+      }
+      if (node.type === 'action' && node.data.resultVariable) {
+        vars.push({ name: node.data.resultVariable, type: 'Resultado' })
+      }
+    }
+    return vars
+  }, [nodes])
+
+  if (variables.length === 0) return null
+
+  const copyVar = (name) => {
+    navigator.clipboard.writeText(`{{${name}}}`)
+  }
+
+  return (
+    <div className="mt-6 pt-4 border-t border-[#2a2a3e]">
+      <h4 className="text-xs font-bold uppercase tracking-wider text-[#8888a0] mb-3">
+        Variables del flujo
+      </h4>
+      <div className="space-y-1.5">
+        {variables.map((v) => (
+          <div key={v.name} className="flex items-center justify-between group">
+            <span className="text-xs text-[#e8e8f0]">
+              {v.name} <span className="text-[#555570]">({v.type})</span>
+            </span>
+            <button
+              onClick={() => copyVar(v.name)}
+              className="text-[10px] text-[#555570] hover:text-[#00f0ff] opacity-0 group-hover:opacity-100 transition-opacity"
+              title={`Copiar {{${v.name}}}`}
+            >
+              copiar
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ConditionProperties({ conditions, defaultHandleId, onUpdate, nodes = [] }) {
+  const availableVars = React.useMemo(() => {
+    const vars = []
+    for (const node of nodes) {
+      if (node.type === 'collectInput' && node.data.variableName) {
+        vars.push(node.data.variableName)
+      }
+      if (node.type === 'start' && node.data.injectCallerInfo) {
+        vars.push('caller_number')
+      }
+      if (node.type === 'action' && node.data.resultVariable) {
+        vars.push(node.data.resultVariable)
+      }
+    }
+    return vars
+  }, [nodes])
+
   const addCondition = () => {
     const newCond = {
       variable: '',
@@ -469,11 +573,25 @@ function ConditionProperties({ conditions, defaultHandleId, onUpdate }) {
               Eliminar
             </button>
           </div>
-          <Input
-            value={cond.variable}
-            onChange={(v) => updateCondition(i, 'variable', v)}
-            placeholder="nombre de variable"
-          />
+          {availableVars.length > 0 ? (
+            <select
+              className="w-full bg-[#0a0a0f] border border-[#2a2a3e] rounded-lg px-3 py-2
+                         text-sm text-[#e8e8f0] focus:outline-none focus:border-[#00f0ff]/50"
+              value={cond.variable || ''}
+              onChange={(e) => updateCondition(i, 'variable', e.target.value)}
+            >
+              <option value="">Seleccionar variable...</option>
+              {availableVars.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              value={cond.variable}
+              onChange={(v) => updateCondition(i, 'variable', v)}
+              placeholder="nombre de variable"
+            />
+          )}
           <Select
             value={cond.operator}
             onChange={(v) => updateCondition(i, 'operator', v)}

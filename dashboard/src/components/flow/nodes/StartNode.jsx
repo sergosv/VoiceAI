@@ -18,7 +18,7 @@ export const StartNode = memo(({ data, selected }) => {
       )}
       <div className="flex items-center gap-2 mb-2">
         <div className="w-3 h-3 rounded-full bg-green-500" />
-        <span className="text-xs font-bold uppercase tracking-wider text-green-400">Inicio</span>
+        <span className="text-xs font-bold uppercase tracking-wider text-green-400">{data.label || 'Inicio'}</span>
       </div>
       <p className="text-sm text-[#e8e8f0] line-clamp-2">
         {data.greeting || 'Saludo inicial...'}

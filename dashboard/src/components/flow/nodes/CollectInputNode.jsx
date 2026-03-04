@@ -35,7 +35,7 @@ export const CollectInputNode = memo(({ data, selected }) => {
       <div className="flex items-center gap-2 mb-2">
         <div className="w-3 h-3 rounded-full bg-amber-400" />
         <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
-          Recopilar
+          {data.label || 'Recopilar'}
         </span>
         <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded">
           {TYPE_LABELS[data.variableType] || data.variableType || 'Texto'}

@@ -182,6 +182,81 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
         await asyncio.sleep(5)
 
 
+async def _validate_trunk_exists(lk: LiveKitAPI, trunk_id: str) -> bool:
+    """Verifica que un SIP trunk exista en LiveKit Cloud."""
+    try:
+        from livekit.api.sip_service import ListSIPOutboundTrunkRequest
+        result = await lk.sip.list_outbound_trunk(
+            ListSIPOutboundTrunkRequest()
+        )
+        return any(t.sip_trunk_id == trunk_id for t in result.items)
+    except Exception:
+        # Si no podemos verificar, asumimos que existe para no bloquear
+        return True
+
+
+async def _resolve_sip_trunk(
+    sb, lk: LiveKitAPI, agent_id: str | None, client_id: str
+) -> tuple[str, str]:
+    """Resuelve el trunk_id y from_number con validación y fallback.
+
+    1. Intenta con el trunk del agente
+    2. Si no existe o es inválido, usa el trunk del cliente
+    3. Si ninguno funciona, lanza error claro
+    """
+    agent_trunk_id = None
+    agent_phone = ""
+    client_trunk_id = None
+    client_phone = ""
+
+    # Leer trunk del agente
+    if agent_id:
+        agent_row = (
+            sb.table("agents")
+            .select("phone_number, livekit_sip_trunk_id")
+            .eq("id", agent_id)
+            .limit(1)
+            .execute()
+        )
+        if agent_row.data and agent_row.data[0].get("livekit_sip_trunk_id"):
+            agent_trunk_id = agent_row.data[0]["livekit_sip_trunk_id"]
+            agent_phone = agent_row.data[0].get("phone_number", "")
+
+    # Leer trunk del cliente (siempre, como fallback)
+    client_row = (
+        sb.table("clients")
+        .select("phone_number, livekit_sip_trunk_id")
+        .eq("id", client_id)
+        .limit(1)
+        .execute()
+    )
+    if client_row.data and client_row.data[0].get("livekit_sip_trunk_id"):
+        client_trunk_id = client_row.data[0]["livekit_sip_trunk_id"]
+        client_phone = client_row.data[0].get("phone_number", "")
+
+    # Validar trunk del agente
+    if agent_trunk_id:
+        if await _validate_trunk_exists(lk, agent_trunk_id):
+            return agent_trunk_id, agent_phone
+        logger.warning(
+            "Trunk del agente '%s' no existe en LiveKit, usando fallback del cliente",
+            agent_trunk_id,
+        )
+
+    # Fallback: trunk del cliente
+    if client_trunk_id:
+        if await _validate_trunk_exists(lk, client_trunk_id):
+            return client_trunk_id, client_phone
+        logger.error(
+            "Trunk del cliente '%s' tampoco existe en LiveKit", client_trunk_id
+        )
+
+    raise ValueError(
+        "No hay SIP trunk válido configurado. "
+        "Verifica la configuración del agente y cliente en el dashboard."
+    )
+
+
 async def _place_outbound_call(
     sb,
     campaign_id: str,
@@ -215,22 +290,10 @@ async def _place_outbound_call(
             agent_id = camp.data[0].get("agent_id")
             script = camp.data[0]["script"]
 
-            # Intentar leer phone/trunk desde agents si hay agent_id
-            trunk_id = None
-            from_number = ""
-            if agent_id:
-                agent_row = sb.table("agents").select("phone_number, livekit_sip_trunk_id").eq("id", agent_id).limit(1).execute()
-                if agent_row.data and agent_row.data[0].get("livekit_sip_trunk_id"):
-                    trunk_id = agent_row.data[0]["livekit_sip_trunk_id"]
-                    from_number = agent_row.data[0].get("phone_number", "")
-
-            # Fallback: leer de clients si no hay trunk en agent
-            if not trunk_id:
-                client = sb.table("clients").select("phone_number, livekit_sip_trunk_id").eq("id", client_id).limit(1).execute()
-                if not client.data or not client.data[0].get("livekit_sip_trunk_id"):
-                    raise ValueError("Cliente sin SIP trunk configurado")
-                trunk_id = client.data[0]["livekit_sip_trunk_id"]
-                from_number = client.data[0].get("phone_number", "")
+            # Resolver trunk_id y from_number con fallback
+            trunk_id, from_number = await _resolve_sip_trunk(
+                sb, lk_api, agent_id, client_id
+            )
 
             room_name = f"campaign-{campaign_id[:8]}-{call_entry_id[:8]}"
 
