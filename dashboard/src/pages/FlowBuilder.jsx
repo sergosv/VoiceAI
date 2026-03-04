@@ -25,6 +25,7 @@ import { PropertiesPanel } from '../components/flow/PropertiesPanel'
 import { FlowToolbar } from '../components/flow/FlowToolbar'
 import { FlowTemplates } from '../components/flow/FlowTemplates'
 import { ValidationPanel } from '../components/flow/ValidationPanel'
+import { FlowGuide } from '../components/flow/FlowGuide'
 
 const DEFAULT_START_NODE = {
   id: 'start-1',
@@ -62,6 +63,7 @@ function FlowBuilderInner() {
   const [showValidationPanel, setShowValidationPanel] = useState(false)
   const [selectedNodeIds, setSelectedNodeIds] = useState([])
   const [showGrid, setShowGrid] = useState(true)
+  const [showGuide, setShowGuide] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchActive, setSearchActive] = useState(false)
   const [searchCurrentIndex, setSearchCurrentIndex] = useState(0)
@@ -780,12 +782,14 @@ function FlowBuilderInner() {
         onSearchNext={() => navigateSearch(1)}
         onSearchPrev={() => navigateSearch(-1)}
         flowData={{ nodes, edges }}
+        onOpenGuide={() => setShowGuide(true)}
       />
       <FlowTemplates
         open={showTemplates}
         onClose={() => setShowTemplates(false)}
         onSelect={handleSelectTemplate}
       />
+      <FlowGuide open={showGuide} onClose={() => setShowGuide(false)} />
       <div className="flex flex-1 overflow-hidden">
         <NodePalette />
         <div className="flex-1" ref={reactFlowWrapper}>
