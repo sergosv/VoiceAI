@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -72,10 +73,10 @@ async def chat_with_agent(
     # Cargar API integrations
     api_integrations = await load_api_integrations(config.client.id, config.agent.id)
 
-    # Si viene flow_override, inyectar el flujo del editor en la config
+    # Si viene flow_override, inyectar el flujo del editor en la config (frozen dataclass)
     if req.flow_override and req.flow_override.get("nodes"):
-        config.agent.conversation_flow = req.flow_override
-        config.agent.conversation_mode = "flow"
+        new_agent = replace(config.agent, conversation_flow=req.flow_override, conversation_mode="flow")
+        config = replace(config, agent=new_agent)
 
     system_prompt = build_chat_system_prompt(
         config, req.contact_name, req.campaign_script,
