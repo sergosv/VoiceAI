@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
-  LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug,
+  LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
 } from 'lucide-react'
 
 const navItems = [
@@ -12,6 +12,7 @@ const navItems = [
   { to: '/contacts', icon: UserRound, label: 'Contactos' },
   { to: '/appointments', icon: Calendar, label: 'Citas' },
   { to: '/campaigns', icon: Megaphone, label: 'Campañas' },
+  { to: '/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
   { to: '/documents', icon: FileText, label: 'Documentos' },
   { to: '/integrations', icon: Plug, label: 'Integraciones' },
   { to: '/billing', icon: CreditCard, label: 'Créditos' },

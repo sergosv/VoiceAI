@@ -14,6 +14,7 @@ import { Input, Textarea, Select } from '../components/ui/Input'
 import { PageLoader, Spinner } from '../components/ui/Spinner'
 import { PromptAssistant } from '../components/PromptAssistant'
 import { ChatTesterButton } from '../components/ChatTester'
+import { WhatsAppConfig } from '../components/WhatsAppConfig'
 
 const STT_OPTIONS = [
   { value: 'deepgram', label: 'Deepgram Nova-3', included: true },
@@ -937,6 +938,11 @@ export function AgentDetail() {
           Habilitado para orquestacion
         </label>
       </Card>
+
+      {/* WhatsApp Channel */}
+      {clientId && (
+        <WhatsAppConfig clientId={clientId} agentId={agentId} />
+      )}
 
       {/* Action buttons */}
       <div className="flex items-center gap-3">

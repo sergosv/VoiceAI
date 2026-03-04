@@ -728,6 +728,102 @@ class ApiIntegrationTestResult(BaseModel):
     error: str | None = None
 
 
+# ── WhatsApp ────────────────────────────────────────
+
+class WhatsAppConfigCreateRequest(BaseModel):
+    provider: str  # "gohighlevel" | "evolution"
+    ghl_location_id: str | None = None
+    ghl_api_key: str | None = None
+    evo_instance_id: str | None = None
+    evo_api_url: str | None = None
+    evo_api_key: str | None = None
+    phone_number: str | None = None
+    auto_reply: bool = True
+    greeting: str | None = None
+    session_timeout_minutes: int = 30
+    media_response: str = "Solo puedo procesar mensajes de texto por ahora."
+
+
+class WhatsAppConfigUpdateRequest(BaseModel):
+    provider: str | None = None
+    ghl_location_id: str | None = None
+    ghl_api_key: str | None = None
+    evo_instance_id: str | None = None
+    evo_api_url: str | None = None
+    evo_api_key: str | None = None
+    phone_number: str | None = None
+    auto_reply: bool | None = None
+    greeting: str | None = None
+    session_timeout_minutes: int | None = None
+    media_response: str | None = None
+    is_active: bool | None = None
+
+
+class WhatsAppConfigOut(BaseModel):
+    id: str
+    client_id: str
+    agent_id: str
+    provider: str
+    ghl_location_id: str | None = None
+    has_ghl_api_key: bool = False
+    evo_instance_id: str | None = None
+    evo_api_url: str | None = None
+    has_evo_api_key: bool = False
+    phone_number: str | None = None
+    auto_reply: bool = True
+    greeting: str | None = None
+    session_timeout_minutes: int = 30
+    media_response: str = "Solo puedo procesar mensajes de texto por ahora."
+    is_active: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class WhatsAppConversationOut(BaseModel):
+    id: str
+    config_id: str
+    contact_id: str | None = None
+    remote_phone: str
+    status: str = "active"
+    message_count: int = 0
+    last_message_at: datetime | None = None
+    created_at: datetime | None = None
+    # Datos extra del join
+    agent_name: str | None = None
+    contact_name: str | None = None
+
+
+class WhatsAppMessageOut(BaseModel):
+    id: str
+    conversation_id: str
+    direction: str
+    content: str
+    message_type: str = "text"
+    tool_calls: list[dict] | None = None
+    status: str = "sent"
+    created_at: datetime | None = None
+
+
+class WhatsAppSendRequest(BaseModel):
+    message: str
+
+
+class WhatsAppStatsOut(BaseModel):
+    total_conversations: int = 0
+    active_conversations: int = 0
+    total_messages: int = 0
+    messages_today: int = 0
+    avg_messages_per_conversation: float = 0
+
+
+def whatsapp_config_out_from_row(row: dict) -> WhatsAppConfigOut:
+    """Convierte row a WhatsAppConfigOut, ocultando API keys."""
+    data = dict(row)
+    data["has_ghl_api_key"] = bool(data.pop("ghl_api_key", None))
+    data["has_evo_api_key"] = bool(data.pop("evo_api_key", None))
+    return WhatsAppConfigOut(**data)
+
+
 class FlowValidationResult(BaseModel):
     valid: bool
     errors: list[str] = Field(default_factory=list)

@@ -326,6 +326,48 @@ async def load_api_integrations(
     return integrations
 
 
+async def load_whatsapp_config_by_agent_id(agent_id: str) -> dict | None:
+    """Carga whatsapp_config por agent_id."""
+    sb = _get_supabase()
+    result = (
+        sb.table("whatsapp_configs")
+        .select("*")
+        .eq("agent_id", agent_id)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+async def load_whatsapp_config_by_ghl_location(location_id: str) -> dict | None:
+    """Carga whatsapp_config por ghl_location_id."""
+    sb = _get_supabase()
+    result = (
+        sb.table("whatsapp_configs")
+        .select("*")
+        .eq("ghl_location_id", location_id)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+async def load_whatsapp_config_by_evo_instance(instance_id: str) -> dict | None:
+    """Carga whatsapp_config por evo_instance_id."""
+    sb = _get_supabase()
+    result = (
+        sb.table("whatsapp_configs")
+        .select("*")
+        .eq("evo_instance_id", instance_id)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
 async def load_orchestrated_configs(client_id: str) -> list[ResolvedConfig]:
     """Carga todos los agentes habilitados para orquestación de un cliente.
 

@@ -249,7 +249,7 @@ def build_chat_system_prompt(
     if config.agent.examples:
         prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
 
-    # Nota de modo texto
+    # Nota de modo texto (chat tester)
     prompt += (
         "\n\n## Modo de prueba (texto)\n"
         "Esta es una conversación de texto para probar tu comportamiento. "
