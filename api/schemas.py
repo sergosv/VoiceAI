@@ -741,6 +741,7 @@ class ChatMessageRequest(BaseModel):
     message: str = ""
     contact_name: str | None = None  # outbound: nombre del contacto
     campaign_script: str | None = None  # script de campaña que reemplaza el prompt
+    flow_override: dict | None = None  # flujo temporal desde el editor (no guardado aún)
 
 
 class ChatMessageResponse(BaseModel):

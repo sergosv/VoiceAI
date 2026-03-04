@@ -72,6 +72,11 @@ async def chat_with_agent(
     # Cargar API integrations
     api_integrations = await load_api_integrations(config.client.id, config.agent.id)
 
+    # Si viene flow_override, inyectar el flujo del editor en la config
+    if req.flow_override and req.flow_override.get("nodes"):
+        config.agent.conversation_flow = req.flow_override
+        config.agent.conversation_mode = "flow"
+
     system_prompt = build_chat_system_prompt(
         config, req.contact_name, req.campaign_script,
         api_integrations=api_integrations,

@@ -38,6 +38,7 @@ export function FlowToolbar({
   searchCurrentIndex = 0,
   onSearchNext,
   onSearchPrev,
+  flowData,
 }) {
   const navigate = useNavigate()
   const fileInputRef = useRef(null)
@@ -330,6 +331,7 @@ export function FlowToolbar({
             agentId={agentId}
             agentName={agentName}
             agentType={agentType || 'inbound'}
+            flowOverride={flowData}
             label="Probar flujo"
           />
         )}

@@ -57,7 +57,7 @@ function ChatBubble({ role, text }) {
   )
 }
 
-function ChatTesterContent({ agentId, agentName, agentType, campaignScript, onClose }) {
+function ChatTesterContent({ agentId, agentName, agentType, campaignScript, flowOverride, onClose }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -89,11 +89,13 @@ function ChatTesterContent({ agentId, agentName, agentType, campaignScript, onCl
       if (campaignScript && name) {
         // Outbound con script: el contacto contesta "Bueno?"
         // Primero crear la conversación sin mensaje
-        const init = await api.post(`/agents/${agentId}/chat`, {
+        const initBody = {
           message: '',
           contact_name: name,
           campaign_script: campaignScript,
-        })
+        }
+        if (flowOverride) initBody.flow_override = flowOverride
+        const init = await api.post(`/agents/${agentId}/chat`, initBody)
         setConversationId(init.conversation_id)
         // Luego enviar "Bueno?" como el contacto contestando
         const res = await api.post(`/agents/${agentId}/chat`, {
@@ -109,6 +111,7 @@ function ChatTesterContent({ agentId, agentName, agentType, campaignScript, onCl
         // Inbound: el agente saluda primero
         const body = { message: '__greeting__' }
         if (name) body.contact_name = name
+        if (flowOverride) body.flow_override = flowOverride
         const res = await api.post(`/agents/${agentId}/chat`, body)
         setConversationId(res.conversation_id)
         setMessages([{ role: 'agent', text: res.text, tools: res.tool_calls }])
@@ -278,7 +281,7 @@ function ChatTesterContent({ agentId, agentName, agentType, campaignScript, onCl
   )
 }
 
-export function ChatTester({ open, onClose, agentId, agentName, agentType, campaignScript }) {
+export function ChatTester({ open, onClose, agentId, agentName, agentType, campaignScript, flowOverride }) {
   if (!open) return null
 
   return createPortal(
@@ -292,6 +295,7 @@ export function ChatTester({ open, onClose, agentId, agentName, agentType, campa
           agentName={agentName}
           agentType={agentType}
           campaignScript={campaignScript}
+          flowOverride={flowOverride}
           onClose={onClose}
         />
       </div>
@@ -300,7 +304,7 @@ export function ChatTester({ open, onClose, agentId, agentName, agentType, campa
   )
 }
 
-export function ChatTesterButton({ agentId, agentName, agentType = 'inbound', campaignScript, label }) {
+export function ChatTesterButton({ agentId, agentName, agentType = 'inbound', campaignScript, flowOverride, label }) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -316,6 +320,7 @@ export function ChatTesterButton({ agentId, agentName, agentType = 'inbound', ca
         agentName={agentName}
         agentType={agentType}
         campaignScript={campaignScript}
+        flowOverride={flowOverride}
       />
     </>
   )

@@ -779,6 +779,7 @@ function FlowBuilderInner() {
         searchCurrentIndex={searchCurrentIndex}
         onSearchNext={() => navigateSearch(1)}
         onSearchPrev={() => navigateSearch(-1)}
+        flowData={{ nodes, edges }}
       />
       <FlowTemplates
         open={showTemplates}
