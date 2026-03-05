@@ -35,9 +35,24 @@ _origins = [
 _extra = os.environ.get("ALLOWED_ORIGINS", "")
 if _extra:
     _origins.extend(o.strip() for o in _extra.split(",") if o.strip())
+
+# Cloudflare Pages: aceptar deployment-specific URLs (hash.project.pages.dev)
+_cf_pages_domain = os.environ.get("CF_PAGES_DOMAIN", "")
+
+
+def _cors_allow_origin(origin: str) -> bool:
+    """Permite origins exactos + subdominios de Cloudflare Pages."""
+    if origin in _origins:
+        return True
+    if _cf_pages_domain and origin.endswith(f".{_cf_pages_domain}"):
+        return True
+    return False
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
+    allow_origin_regex=rf"https://.*\.voiceai-69f\.pages\.dev" if not _cf_pages_domain else rf"https://.*\.{_cf_pages_domain.replace('.', r'\.')}",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
