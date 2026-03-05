@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!dashboard/.env.production
 __pycache__/
 *.pyc
 *.pyo
