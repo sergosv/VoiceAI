@@ -15,8 +15,8 @@ load_dotenv()
 
 from api.routes import (
     agents, ai, api_integrations, auth, billing, calls, campaigns, chat,
-    clients, contacts, appointments, costs, dashboard, documents, mcp,
-    voices, webhooks, whatsapp, whatsapp_webhooks,
+    clients, contacts, appointments, costs, dashboard, documents, evolution,
+    mcp, voices, webhooks, whatsapp, whatsapp_webhooks,
 )
 from api.services.chat_store import start_cleanup_loop
 
@@ -85,6 +85,7 @@ app.include_router(mcp.router, prefix="/api/clients", tags=["mcp"])
 app.include_router(mcp.templates_router, prefix="/api", tags=["mcp-templates"])
 app.include_router(api_integrations.router, prefix="/api/clients", tags=["api-integrations"])
 app.include_router(whatsapp.router, prefix="/api/clients", tags=["whatsapp"])
+app.include_router(evolution.router, prefix="/api/clients", tags=["evolution"])
 app.include_router(whatsapp.inbox_router, prefix="/api/whatsapp", tags=["whatsapp-inbox"])
 app.include_router(whatsapp_webhooks.router, prefix="/api/webhooks/whatsapp", tags=["whatsapp-webhooks"])
 

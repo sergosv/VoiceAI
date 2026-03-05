@@ -7,7 +7,7 @@ import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { PageLoader } from '../components/ui/Spinner'
 import {
-  Calendar, MessageCircle, Wrench, Save, TestTube, Check,
+  Calendar, Wrench, Save, TestTube, Check,
   Server, Globe, ChevronRight,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -25,14 +25,10 @@ export function Integrations() {
   const [client, setClient] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [testingWa, setTestingWa] = useState(false)
   const [testingCal, setTestingCal] = useState(false)
 
   const [form, setForm] = useState({
     google_calendar_id: '',
-    whatsapp_instance_id: '',
-    whatsapp_api_url: '',
-    whatsapp_api_key: '',
     enabled_tools: ['search_knowledge'],
   })
 
@@ -48,9 +44,6 @@ export function Integrations() {
         setClient(c)
         setForm({
           google_calendar_id: c.google_calendar_id || '',
-          whatsapp_instance_id: c.whatsapp_instance_id || '',
-          whatsapp_api_url: c.whatsapp_api_url || '',
-          whatsapp_api_key: '',
           enabled_tools: c.enabled_tools || ['search_knowledge'],
         })
       })
@@ -61,29 +54,13 @@ export function Integrations() {
   async function handleSave() {
     setSaving(true)
     try {
-      const payload = { ...form }
-      if (!payload.whatsapp_api_key) delete payload.whatsapp_api_key
-
-      const updated = await api.patch(`/clients/${clientId}`, payload)
+      const updated = await api.patch(`/clients/${clientId}`, form)
       setClient(updated)
-      setForm(f => ({ ...f, whatsapp_api_key: '' }))
       toast.success('Configuracion guardada')
     } catch (err) {
       toast.error(err.message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  async function handleTestWhatsApp() {
-    setTestingWa(true)
-    try {
-      const res = await api.post(`/clients/${clientId}/test-whatsapp`)
-      toast.success(res.message)
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setTestingWa(false)
     }
   }
 
@@ -173,47 +150,6 @@ export function Integrations() {
           </div>
         </Card>
 
-        {/* WhatsApp */}
-        <Card>
-          <div className="flex items-center gap-2 mb-4">
-            <MessageCircle size={20} className="text-success" />
-            <h2 className="text-lg font-semibold">WhatsApp</h2>
-          </div>
-          <p className="text-xs text-text-muted mb-4">
-            Conecta Evolution API para enviar mensajes de WhatsApp
-            (confirmaciones de citas, informacion, etc).
-          </p>
-          <div className="space-y-3">
-            <Input
-              label="URL de API"
-              value={form.whatsapp_api_url}
-              onChange={e => setForm(f => ({ ...f, whatsapp_api_url: e.target.value }))}
-              placeholder="https://evo.example.com"
-            />
-            <Input
-              label="Instance ID"
-              value={form.whatsapp_instance_id}
-              onChange={e => setForm(f => ({ ...f, whatsapp_instance_id: e.target.value }))}
-              placeholder="mi-instancia"
-            />
-            <Input
-              label="API Key"
-              type="password"
-              value={form.whatsapp_api_key}
-              onChange={e => setForm(f => ({ ...f, whatsapp_api_key: e.target.value }))}
-              placeholder="evo-api-key..."
-            />
-            <Button
-              variant="secondary"
-              onClick={handleTestWhatsApp}
-              disabled={testingWa || !form.whatsapp_instance_id}
-              className="text-xs"
-            >
-              <TestTube size={14} className="mr-1" />
-              {testingWa ? 'Enviando...' : 'Enviar mensaje de prueba'}
-            </Button>
-          </div>
-        </Card>
       </div>
 
       {/* MCP Servers */}

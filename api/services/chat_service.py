@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from typing import Any
 
+import httpx
 from google import genai
 from google.genai import types
 
@@ -137,6 +140,7 @@ TOOL_SCHEMAS: dict[str, types.FunctionDeclaration] = {
 def _build_tool_declarations(
     config: ResolvedConfig,
     api_integrations: list[dict] | None = None,
+    mcp_servers: list[dict[str, Any]] | None = None,
 ) -> list[types.Tool]:
     """Construye las declaraciones de tools para Gemini según las habilitadas."""
     enabled = config.client.enabled_tools or []
@@ -157,9 +161,237 @@ def _build_tool_declarations(
     if api_integrations:
         declarations.append(CALL_API_SCHEMA)
 
+    # MCP tools
+    if mcp_servers:
+        declarations.extend(_build_mcp_tool_declarations(mcp_servers))
+
     if not declarations:
         return []
     return [types.Tool(function_declarations=declarations)]
+
+
+# ── MCP tool support ─────────────────────────────────────
+
+
+def _build_mcp_tool_declarations(
+    mcp_servers: list[dict[str, Any]],
+) -> list[types.FunctionDeclaration]:
+    """Construye FunctionDeclarations de Gemini a partir del tools_cache de MCP servers."""
+    declarations: list[types.FunctionDeclaration] = []
+    for srv in mcp_servers:
+        tools_cache = srv.get("tools_cache") or []
+        for tool in tools_cache:
+            name = tool.get("name", "")
+            if not name:
+                continue
+            fn_name = f"mcp_{name}"
+            desc = tool.get("description", f"MCP tool: {name}")
+
+            # Usar schema real si disponible en tools_cache
+            params_schema = tool.get("parameters")
+            if params_schema and isinstance(params_schema, dict):
+                gemini_params = _json_schema_to_gemini(params_schema)
+            else:
+                # Fallback genérico
+                gemini_params = types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "input": types.Schema(
+                            type="STRING",
+                            description="JSON string con los parametros para la tool.",
+                        ),
+                    },
+                )
+
+            declarations.append(types.FunctionDeclaration(
+                name=fn_name,
+                description=desc,
+                parameters=gemini_params,
+            ))
+    return declarations
+
+
+def _json_schema_to_gemini(schema: dict[str, Any]) -> types.Schema:
+    """Convierte un JSON Schema basico a types.Schema de Gemini."""
+    type_map = {
+        "string": "STRING",
+        "integer": "INTEGER",
+        "number": "NUMBER",
+        "boolean": "BOOLEAN",
+        "array": "ARRAY",
+        "object": "OBJECT",
+    }
+
+    schema_type = type_map.get(schema.get("type", "object"), "OBJECT")
+    kwargs: dict[str, Any] = {"type": schema_type}
+
+    if "description" in schema:
+        kwargs["description"] = schema["description"]
+
+    if "properties" in schema and isinstance(schema["properties"], dict):
+        props = {}
+        for prop_name, prop_schema in schema["properties"].items():
+            if isinstance(prop_schema, dict):
+                props[prop_name] = _json_schema_to_gemini(prop_schema)
+        if props:
+            kwargs["properties"] = props
+
+    if "required" in schema:
+        kwargs["required"] = schema["required"]
+
+    if "items" in schema and isinstance(schema["items"], dict):
+        kwargs["items"] = _json_schema_to_gemini(schema["items"])
+
+    return types.Schema(**kwargs)
+
+
+def _build_mcp_prompt_section(mcp_servers: list[dict[str, Any]]) -> str:
+    """Genera seccion de prompt describiendo las MCP tools disponibles."""
+    tools_info: list[str] = []
+    for srv in mcp_servers:
+        srv_name = srv.get("name", "MCP")
+        tools_cache = srv.get("tools_cache") or []
+        if not tools_cache:
+            continue
+        tool_names = [t.get("name", "") for t in tools_cache if t.get("name")]
+        if tool_names:
+            tools_info.append(
+                f"- **{srv_name}**: {', '.join(tool_names)}"
+            )
+    if not tools_info:
+        return ""
+    return (
+        "\n\n## Herramientas MCP disponibles\n"
+        "Tienes acceso a las siguientes herramientas externas. "
+        "Usalas cuando el usuario pida informacion que requiera busqueda "
+        "en internet, datos en tiempo real, o cualquier capacidad que estas tools provean.\n"
+        + "\n".join(tools_info) + "\n"
+    )
+
+
+async def _execute_mcp_tool(
+    tool_name: str,
+    args: dict,
+    mcp_servers: list[dict[str, Any]],
+) -> str:
+    """Ejecuta un MCP tool conectandose al servidor MCP (HTTP o stdio).
+
+    Usa el MCP SDK nativo (ClientSession + call_tool) para ambos tipos.
+    """
+    import re
+    import io
+
+    # Quitar prefijo mcp_
+    real_name = tool_name[4:] if tool_name.startswith("mcp_") else tool_name
+
+    # Si viene con schema real, args ya tienen los params correctos.
+    # Si viene con fallback genérico "input", parsear el JSON string.
+    if "input" in args and len(args) == 1:
+        input_str = args["input"]
+        try:
+            tool_args = json.loads(input_str) if isinstance(input_str, str) else input_str
+        except json.JSONDecodeError:
+            tool_args = {}
+    else:
+        tool_args = args
+
+    # Encontrar el server que tiene esta tool
+    target_srv = None
+    for srv in mcp_servers:
+        tools_cache = srv.get("tools_cache") or []
+        for t in tools_cache:
+            if t.get("name") == real_name:
+                target_srv = srv
+                break
+        if target_srv:
+            break
+
+    if not target_srv:
+        return f"Tool MCP '{real_name}' no encontrada en ningun servidor."
+
+    conn_type = target_srv.get("connection_type", "http")
+    env_vars: dict[str, str] = target_srv.get("env_vars") or {}
+    _env_re = re.compile(r"\$\{([^}]+)\}")
+
+    def _resolve(val: str) -> str:
+        return _env_re.sub(
+            lambda m: env_vars.get(m.group(1), os.environ.get(m.group(1), m.group(0))),
+            val,
+        )
+
+    try:
+        from mcp import ClientSession, StdioServerParameters, stdio_client
+        from mcp.client.sse import sse_client
+        from mcp.client.streamable_http import streamablehttp_client
+
+        if conn_type == "stdio":
+            command = target_srv.get("command", "")
+            command_args: list[str] = target_srv.get("command_args") or []
+            if not command:
+                return "Servidor MCP stdio sin command configurado."
+
+            # Construir env completo (os.environ + env_vars del config)
+            full_env = {**os.environ, **{k: _resolve(v) for k, v in env_vars.items()}}
+
+            server_params = StdioServerParameters(
+                command=command,
+                args=command_args,
+                env=full_env,
+            )
+
+            errlog = open(os.devnull, "w")
+            async with stdio_client(server_params, errlog=errlog) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool(real_name, tool_args)
+                    return _extract_mcp_result(result)
+
+        else:
+            # HTTP (SSE o streamable_http)
+            url = target_srv.get("url", "")
+            if not url:
+                return "Servidor MCP sin URL configurada."
+            url = _resolve(url)
+            headers = {k: _resolve(v) for k, v in (target_srv.get("headers") or {}).items()}
+            transport = target_srv.get("transport_type", "sse")
+
+            if transport == "streamable_http":
+                async with streamablehttp_client(url, headers=headers) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.call_tool(real_name, tool_args)
+                        return _extract_mcp_result(result)
+            else:
+                async with sse_client(url, headers=headers) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.call_tool(real_name, tool_args)
+                        return _extract_mcp_result(result)
+
+    except ImportError as e:
+        logger.error("MCP SDK no disponible: %s", e)
+        return f"MCP SDK no instalado: {e}"
+    except Exception as e:
+        logger.error("Error ejecutando MCP tool '%s': %s", real_name, e, exc_info=True)
+        return f"Error ejecutando tool MCP '{real_name}': {e}"
+
+
+def _extract_mcp_result(result: Any) -> str:
+    """Extrae texto legible de un CallToolResult del MCP SDK."""
+    # CallToolResult tiene .content (list de TextContent, ImageContent, etc.)
+    if hasattr(result, "content"):
+        texts = []
+        for block in result.content:
+            if hasattr(block, "text"):
+                texts.append(block.text)
+        if texts:
+            return "\n".join(texts)
+
+    if isinstance(result, str):
+        return result
+    if isinstance(result, dict):
+        return json.dumps(result, ensure_ascii=False)
+    return str(result)
 
 
 # ── Tool execution ────────────────────────────────────────
@@ -169,8 +401,13 @@ async def _execute_tool(
     args: dict,
     config: ResolvedConfig,
     api_integrations: list[dict] | None = None,
+    mcp_servers: list[dict[str, Any]] | None = None,
 ) -> str:
-    """Ejecuta un tool: search_knowledge y call_api son reales, el resto simulado."""
+    """Ejecuta un tool: search_knowledge, call_api y MCP son reales, el resto simulado."""
+    # MCP tools (prefijo mcp_)
+    if tool_name.startswith("mcp_") and mcp_servers:
+        return await _execute_mcp_tool(tool_name, args, mcp_servers)
+
     if tool_name == "search_knowledge":
         store_id = config.client.file_search_store_id
         if not store_id:
@@ -235,6 +472,7 @@ def build_chat_system_prompt(
     contact_name: str | None = None,
     campaign_script: str | None = None,
     api_integrations: list[dict] | None = None,
+    mcp_servers: list[dict[str, Any]] | None = None,
 ) -> str:
     """Construye el system prompt completo para el chat tester."""
     # Si hay script de campaña, reemplaza el prompt base (igual que outbound real)
@@ -242,8 +480,9 @@ def build_chat_system_prompt(
     voice_rules = _voice_rules(config)
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
     api_instructions = _build_api_instructions(api_integrations or [])
+    mcp_instructions = _build_mcp_prompt_section(mcp_servers or [])
 
-    prompt = base + voice_rules + tool_instructions + api_instructions
+    prompt = base + voice_rules + tool_instructions + api_instructions + mcp_instructions
 
     # Ejemplos de conversación
     if config.agent.examples:
@@ -358,6 +597,7 @@ async def chat_turn(
     conversation: Conversation,
     user_message: str,
     api_integrations: list[dict] | None = None,
+    mcp_servers: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[dict]]:
     """Ejecuta un turno de chat. Retorna (agent_text, tool_calls)."""
     client = _get_gemini()
@@ -378,7 +618,9 @@ async def chat_turn(
         types.Content(role="user", parts=[types.Part.from_text(text=user_message)])
     )
 
-    tool_declarations = _build_tool_declarations(config, api_integrations=api_integrations)
+    tool_declarations = _build_tool_declarations(
+        config, api_integrations=api_integrations, mcp_servers=mcp_servers,
+    )
     tool_calls_log: list[dict] = []
     last_tool_result: str | None = None
     last_tool_is_error: bool = False
@@ -427,7 +669,9 @@ async def chat_turn(
 
             logger.info("Chat tool call: %s(%s)", tool_name, tool_args)
             result = await _execute_tool(
-                tool_name, tool_args, config, api_integrations=api_integrations
+                tool_name, tool_args, config,
+                api_integrations=api_integrations,
+                mcp_servers=mcp_servers,
             )
 
             # Trackear resultado de la última tool para action nodes

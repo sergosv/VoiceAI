@@ -202,10 +202,15 @@ async def test_mcp_server(
         tools_list = []
         for t in tools:
             info = get_raw_function_info(t)
-            tools_list.append({
+            tool_entry = {
                 "name": info.name,
                 "description": info.raw_schema.get("description", ""),
-            })
+            }
+            # Guardar inputSchema para que chat/WhatsApp pueda crear declarations correctas
+            raw_params = info.raw_schema.get("parameters") or info.raw_schema.get("inputSchema")
+            if raw_params:
+                tool_entry["parameters"] = raw_params
+            tools_list.append(tool_entry)
 
         # Actualizar cache y timestamp en DB
         sb.table("mcp_servers").update({

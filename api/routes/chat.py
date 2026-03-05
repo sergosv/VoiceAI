@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from agent.config_loader import load_api_integrations, load_config_by_agent_id
+from agent.config_loader import load_api_integrations, load_config_by_agent_id, load_mcp_servers
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import ChatMessageRequest, ChatMessageResponse, ChatResetResponse
 from api.services.chat_service import build_chat_system_prompt, chat_turn, init_flow_state
@@ -47,12 +47,19 @@ async def chat_with_agent(
                 detail=f"Límite de {MAX_TURNS} turnos alcanzado. Reinicia la conversación.",
             )
 
-        # Cargar API integrations para este agente
+        # Cargar API integrations y MCP servers para este agente
         api_integrations = await load_api_integrations(
             conv.config.client.id, conv.config.agent.id
         )
+        mcp_servers = await load_mcp_servers(
+            conv.config.client.id, conv.config.agent.id
+        )
 
-        text, tool_calls = await chat_turn(conv, req.message, api_integrations=api_integrations)
+        text, tool_calls = await chat_turn(
+            conv, req.message,
+            api_integrations=api_integrations,
+            mcp_servers=mcp_servers or None,
+        )
         return ChatMessageResponse(
             conversation_id=conv.id,
             text=text,
@@ -70,8 +77,9 @@ async def chat_with_agent(
     if user.role == "client" and config.client.id != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
-    # Cargar API integrations
+    # Cargar API integrations y MCP servers
     api_integrations = await load_api_integrations(config.client.id, config.agent.id)
+    mcp_servers = await load_mcp_servers(config.client.id, config.agent.id)
 
     # Si viene flow_override, inyectar el flujo del editor en la config (frozen dataclass)
     if req.flow_override and req.flow_override.get("nodes"):
@@ -81,6 +89,7 @@ async def chat_with_agent(
     system_prompt = build_chat_system_prompt(
         config, req.contact_name, req.campaign_script,
         api_integrations=api_integrations,
+        mcp_servers=mcp_servers or None,
     )
     conv = create_conversation(config, system_prompt, req.contact_name)
 
@@ -107,7 +116,11 @@ async def chat_with_agent(
         )
 
     # Mensaje inicial con contenido
-    text, tool_calls = await chat_turn(conv, req.message, api_integrations=api_integrations)
+    text, tool_calls = await chat_turn(
+        conv, req.message,
+        api_integrations=api_integrations,
+        mcp_servers=mcp_servers or None,
+    )
     return ChatMessageResponse(
         conversation_id=conv.id,
         text=text,

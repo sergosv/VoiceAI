@@ -14,6 +14,7 @@ from agent.config_loader import (
     ResolvedConfig,
     load_config_by_agent_id,
     load_api_integrations,
+    load_mcp_servers,
     load_whatsapp_config_by_ghl_location,
     load_whatsapp_config_by_evo_instance,
 )
@@ -41,6 +42,49 @@ def _get_supabase() -> Client:
     url = os.environ["SUPABASE_URL"]
     key = os.environ["SUPABASE_SERVICE_KEY"]
     return create_client(url, key)
+
+
+# ── Schedule check ──────────────────────────────────────
+
+
+def _is_within_schedule(wa_config: dict) -> bool:
+    """Verifica si el momento actual está dentro del horario configurado.
+
+    Si no hay schedule configurado, retorna True (siempre activo).
+    """
+    schedule = wa_config.get("schedule")
+    if not schedule:
+        return True
+
+    from zoneinfo import ZoneInfo
+
+    tz_name = schedule.get("timezone", "America/Mexico_City")
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Mexico_City")
+
+    now = datetime.now(tz)
+    day_key = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][now.weekday()]
+
+    day_config = schedule.get(day_key)
+    if not day_config or not day_config.get("active", False):
+        return False
+
+    start_str = day_config.get("start", "00:00")
+    end_str = day_config.get("end", "23:59")
+
+    try:
+        start_h, start_m = map(int, start_str.split(":"))
+        end_h, end_m = map(int, end_str.split(":"))
+    except (ValueError, AttributeError):
+        return True
+
+    current_minutes = now.hour * 60 + now.minute
+    start_minutes = start_h * 60 + start_m
+    end_minutes = end_h * 60 + end_m
+
+    return start_minutes <= current_minutes <= end_minutes
 
 
 # ── Orchestrator ────────────────────────────────────────
@@ -75,7 +119,28 @@ async def process_inbound_message(msg: InboundMessage) -> None:
 
     if not wa_config.get("auto_reply", True):
         logger.info("WA: auto_reply desactivado para config %s", config_id)
-        # Aún así guardar el mensaje
+        await _save_message(sb, None, msg, "inbound")
+        return
+
+    # Verificar pausa manual
+    if wa_config.get("is_paused", False):
+        paused_msg = wa_config.get(
+            "paused_message",
+            "En este momento un agente humano esta atendiendo. Te responderemos pronto.",
+        )
+        provider = get_provider(wa_config["provider"])
+        await provider.send_text(wa_config, msg.remote_phone, paused_msg)
+        await _save_message(sb, None, msg, "inbound")
+        return
+
+    # Verificar horario
+    if not _is_within_schedule(wa_config):
+        away_msg = wa_config.get(
+            "away_message",
+            "En este momento no estamos disponibles. Te responderemos en horario de atencion.",
+        )
+        provider = get_provider(wa_config["provider"])
+        await provider.send_text(wa_config, msg.remote_phone, away_msg)
         await _save_message(sb, None, msg, "inbound")
         return
 
@@ -90,6 +155,28 @@ async def process_inbound_message(msg: InboundMessage) -> None:
         return
 
     if not msg.text.strip():
+        return
+
+    # Verificar human takeover por conversación
+    active_conv = (
+        sb.table("whatsapp_conversations")
+        .select("id, is_human_controlled")
+        .eq("config_id", config_id)
+        .eq("remote_phone", msg.remote_phone)
+        .eq("status", "active")
+        .order("last_message_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if active_conv.data and active_conv.data[0].get("is_human_controlled"):
+        logger.info("WA: human takeover activo para %s, solo guardando mensaje", msg.remote_phone)
+        conv_id = active_conv.data[0]["id"]
+        await _save_message(sb, conv_id, msg, "inbound")
+        # Actualizar last_message_at
+        sb.table("whatsapp_conversations").update({
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+            "message_count": (active_conv.data[0].get("message_count", 0) or 0) + 1,
+        }).eq("id", conv_id).execute()
         return
 
     # Lock por (config_id, phone)
@@ -126,10 +213,22 @@ async def _process_locked(
     # 5. Deserializar historial
     history = deserialize_history(conv_row.get("history") or [])
 
-    # Construir system prompt para WhatsApp
+    # Cargar integraciones y MCP servers
     api_integrations = await load_api_integrations(client_id, agent_id)
+    mcp_servers = await load_mcp_servers(client_id, agent_id)
+    if mcp_servers:
+        logger.info(
+            "WA: %d MCP servers cargados para agente %s: %s",
+            len(mcp_servers),
+            agent_id,
+            [(s.get("name"), len(s.get("tools_cache") or [])) for s in mcp_servers],
+        )
+    else:
+        logger.info("WA: sin MCP servers para agente %s", agent_id)
+
+    # Construir system prompt para WhatsApp
     system_prompt = build_whatsapp_system_prompt(
-        resolved, api_integrations=api_integrations
+        resolved, api_integrations=api_integrations, mcp_servers=mcp_servers or None,
     )
 
     # Crear Conversation efímera para chat_turn
@@ -149,7 +248,9 @@ async def _process_locked(
     # 7. Ejecutar chat_turn
     try:
         agent_text, tool_calls = await chat_turn(
-            conversation, msg.text, api_integrations=api_integrations
+            conversation, msg.text,
+            api_integrations=api_integrations,
+            mcp_servers=mcp_servers or None,
         )
     except Exception as e:
         logger.error("WA: error en chat_turn — %s", e, exc_info=True)
@@ -342,15 +443,18 @@ async def _save_message(
 def build_whatsapp_system_prompt(
     config: ResolvedConfig,
     api_integrations: list[dict] | None = None,
+    mcp_servers: list[dict] | None = None,
 ) -> str:
     """Construye system prompt adaptado para WhatsApp (sin reglas de voz)."""
     from agent.agent_factory import _build_tool_instructions, _build_api_instructions
+    from api.services.chat_service import _build_mcp_prompt_section
 
     base = config.agent.system_prompt
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
     api_instructions = _build_api_instructions(api_integrations or [])
+    mcp_instructions = _build_mcp_prompt_section(mcp_servers or [])
 
-    prompt = base + tool_instructions + api_instructions
+    prompt = base + tool_instructions + api_instructions + mcp_instructions
 
     # Ejemplos
     if config.agent.examples:

@@ -36,8 +36,10 @@ def _sb():
     return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
 
 
-def _check_client(user: dict, client_id: str) -> None:
-    if user["role"] != "admin" and user.get("client_id") != client_id:
+def _check_client(user, client_id: str) -> None:
+    role = user.role if hasattr(user, 'role') else user.get("role")
+    cid = user.client_id if hasattr(user, 'client_id') else user.get("client_id")
+    if role != "admin" and cid != client_id:
         raise HTTPException(403, "No autorizado para este cliente")
 
 
@@ -148,8 +150,8 @@ async def list_conversations(
 ) -> list[WhatsAppConversationOut]:
     """Lista conversaciones WhatsApp del cliente."""
     sb = _sb()
-    client_id = user.get("client_id")
-    is_admin = user["role"] == "admin"
+    client_id = user.client_id if hasattr(user, 'client_id') else user.get("client_id")
+    is_admin = (user.role if hasattr(user, 'role') else user.get("role")) == "admin"
 
     # Buscar configs del cliente (o todas si admin)
     configs_q = sb.table("whatsapp_configs").select("id, agent_id")
@@ -199,6 +201,7 @@ async def list_conversations(
             contact_id=conv.get("contact_id"),
             remote_phone=conv["remote_phone"],
             status=conv["status"],
+            is_human_controlled=conv.get("is_human_controlled", False),
             message_count=conv.get("message_count", 0),
             last_message_at=conv.get("last_message_at"),
             created_at=conv.get("created_at"),
@@ -244,9 +247,41 @@ async def close_conversation(
     """Cierra una conversación manualmente."""
     sb = _sb()
     sb.table("whatsapp_conversations").update(
-        {"status": "closed"}
+        {"status": "closed", "is_human_controlled": False}
     ).eq("id", conversation_id).execute()
     return MessageResponse(message="Conversación cerrada")
+
+
+@inbox_router.post(
+    "/conversations/{conversation_id}/takeover",
+    response_model=MessageResponse,
+)
+async def takeover_conversation(
+    conversation_id: str,
+    user=Depends(get_current_user),
+) -> MessageResponse:
+    """Tomar control humano — el bot deja de responder en esta conversación."""
+    sb = _sb()
+    sb.table("whatsapp_conversations").update(
+        {"is_human_controlled": True}
+    ).eq("id", conversation_id).execute()
+    return MessageResponse(message="Control tomado — el bot no respondera en esta conversacion")
+
+
+@inbox_router.post(
+    "/conversations/{conversation_id}/release",
+    response_model=MessageResponse,
+)
+async def release_conversation(
+    conversation_id: str,
+    user=Depends(get_current_user),
+) -> MessageResponse:
+    """Devolver control al bot."""
+    sb = _sb()
+    sb.table("whatsapp_conversations").update(
+        {"is_human_controlled": False}
+    ).eq("id", conversation_id).execute()
+    return MessageResponse(message="Control devuelto al bot")
 
 
 @inbox_router.post(
@@ -319,8 +354,8 @@ async def get_whatsapp_stats(
 ) -> WhatsAppStatsOut:
     """Estadísticas básicas de WhatsApp."""
     sb = _sb()
-    client_id = user.get("client_id")
-    is_admin = user["role"] == "admin"
+    client_id = user.client_id if hasattr(user, 'client_id') else user.get("client_id")
+    is_admin = (user.role if hasattr(user, 'role') else user.get("role")) == "admin"
 
     # Config IDs del cliente
     configs_q = sb.table("whatsapp_configs").select("id")

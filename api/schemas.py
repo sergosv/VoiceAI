@@ -742,6 +742,10 @@ class WhatsAppConfigCreateRequest(BaseModel):
     greeting: str | None = None
     session_timeout_minutes: int = 30
     media_response: str = "Solo puedo procesar mensajes de texto por ahora."
+    is_paused: bool = False
+    schedule: dict | None = None
+    away_message: str = "En este momento no estamos disponibles. Te responderemos en horario de atencion."
+    paused_message: str = "En este momento un agente humano esta atendiendo. Te responderemos pronto."
 
 
 class WhatsAppConfigUpdateRequest(BaseModel):
@@ -757,6 +761,10 @@ class WhatsAppConfigUpdateRequest(BaseModel):
     session_timeout_minutes: int | None = None
     media_response: str | None = None
     is_active: bool | None = None
+    is_paused: bool | None = None
+    schedule: dict | None = None
+    away_message: str | None = None
+    paused_message: str | None = None
 
 
 class WhatsAppConfigOut(BaseModel):
@@ -774,6 +782,10 @@ class WhatsAppConfigOut(BaseModel):
     greeting: str | None = None
     session_timeout_minutes: int = 30
     media_response: str = "Solo puedo procesar mensajes de texto por ahora."
+    is_paused: bool = False
+    schedule: dict | None = None
+    away_message: str = "En este momento no estamos disponibles. Te responderemos en horario de atencion."
+    paused_message: str = "En este momento un agente humano esta atendiendo. Te responderemos pronto."
     is_active: bool = True
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -785,6 +797,7 @@ class WhatsAppConversationOut(BaseModel):
     contact_id: str | None = None
     remote_phone: str
     status: str = "active"
+    is_human_controlled: bool = False
     message_count: int = 0
     last_message_at: datetime | None = None
     created_at: datetime | None = None

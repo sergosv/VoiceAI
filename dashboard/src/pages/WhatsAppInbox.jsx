@@ -1,15 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
-  MessageCircle, Search, X, Send, Phone, Clock, User,
-  ChevronDown, XCircle,
+  MessageCircle, Search, Send, User, Bot,
+  XCircle, HandMetal, RotateCcw,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-import { PageLoader, Spinner } from '../components/ui/Spinner'
+import { Spinner } from '../components/ui/Spinner'
 
 function timeAgo(dateStr) {
   if (!dateStr) return ''
@@ -27,13 +26,7 @@ function formatTime(dateStr) {
   return new Date(dateStr).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('es-MX', { month: 'short', day: 'numeric' })
-}
-
 export function WhatsAppInbox() {
-  const { user } = useAuth()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedId = searchParams.get('id')
@@ -83,7 +76,7 @@ export function WhatsAppInbox() {
     try {
       const data = await api.get(`/whatsapp/conversations/${convId}/messages`)
       setMessages(data || [])
-    } catch (err) {
+    } catch {
       toast.error('Error cargando mensajes')
     } finally {
       setLoadingMessages(false)
@@ -122,6 +115,31 @@ export function WhatsAppInbox() {
     }
   }
 
+  async function handleTakeover(convId) {
+    try {
+      await api.post(`/whatsapp/conversations/${convId}/takeover`)
+      toast.success('Control tomado — el bot no respondera')
+      // Actualizar estado local
+      setConversations(prev =>
+        prev.map(c => c.id === convId ? { ...c, is_human_controlled: true } : c)
+      )
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  async function handleRelease(convId) {
+    try {
+      await api.post(`/whatsapp/conversations/${convId}/release`)
+      toast.success('Control devuelto al bot')
+      setConversations(prev =>
+        prev.map(c => c.id === convId ? { ...c, is_human_controlled: false } : c)
+      )
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   function selectConversation(id) {
     setSearchParams({ id })
   }
@@ -137,6 +155,7 @@ export function WhatsAppInbox() {
   })
 
   const selectedConv = conversations.find(c => c.id === selectedId)
+  const isHuman = selectedConv?.is_human_controlled
 
   return (
     <div className="space-y-4">
@@ -214,7 +233,10 @@ export function WhatsAppInbox() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium truncate">
+                    <span className="text-sm font-medium truncate flex items-center gap-1.5">
+                      {conv.is_human_controlled && (
+                        <HandMetal size={12} className="text-yellow-400 shrink-0" title="Control humano" />
+                      )}
                       {conv.contact_name || conv.remote_phone}
                     </span>
                     <span className="text-[10px] text-text-muted">{timeAgo(conv.last_message_at)}</span>
@@ -225,13 +247,20 @@ export function WhatsAppInbox() {
                       {conv.agent_name && ' · '}
                       +{conv.remote_phone}
                     </span>
-                    <span className={`text-[10px] px-1 py-0.5 rounded ${
-                      conv.status === 'active' ? 'bg-green-500/20 text-green-400' :
-                      conv.status === 'closed' ? 'bg-red-500/20 text-red-400' :
-                      'bg-yellow-500/20 text-yellow-400'
-                    }`}>
-                      {conv.status}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      {conv.is_human_controlled && (
+                        <span className="text-[10px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+                          humano
+                        </span>
+                      )}
+                      <span className={`text-[10px] px-1 py-0.5 rounded ${
+                        conv.status === 'active' ? 'bg-green-500/20 text-green-400' :
+                        conv.status === 'closed' ? 'bg-red-500/20 text-red-400' :
+                        'bg-yellow-500/20 text-yellow-400'
+                      }`}>
+                        {conv.status}
+                      </span>
+                    </div>
                   </div>
                   <p className="text-[10px] text-text-muted mt-0.5">
                     {conv.message_count} msgs
@@ -256,12 +285,27 @@ export function WhatsAppInbox() {
               {/* Header */}
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
-                    <User size={16} className="text-green-400" />
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                    isHuman ? 'bg-yellow-500/20' : 'bg-green-500/20'
+                  }`}>
+                    {isHuman
+                      ? <HandMetal size={16} className="text-yellow-400" />
+                      : <User size={16} className="text-green-400" />
+                    }
                   </div>
                   <div>
-                    <p className="text-sm font-medium">
+                    <p className="text-sm font-medium flex items-center gap-2">
                       {selectedConv?.contact_name || `+${selectedConv?.remote_phone}`}
+                      {isHuman && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-normal">
+                          Tu controlas
+                        </span>
+                      )}
+                      {!isHuman && selectedConv?.status === 'active' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 font-normal flex items-center gap-1">
+                          <Bot size={10} /> Bot activo
+                        </span>
+                      )}
                     </p>
                     <p className="text-[10px] text-text-muted">
                       {selectedConv?.agent_name && `${selectedConv.agent_name} · `}
@@ -271,16 +315,46 @@ export function WhatsAppInbox() {
                 </div>
                 <div className="flex items-center gap-2">
                   {selectedConv?.status === 'active' && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => handleClose(selectedId)}
-                      className="text-xs"
-                    >
-                      <XCircle size={14} className="mr-1" /> Cerrar
-                    </Button>
+                    <>
+                      {isHuman ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleRelease(selectedId)}
+                          className="text-xs"
+                          title="Devolver control al bot"
+                        >
+                          <RotateCcw size={14} className="mr-1" /> Devolver al bot
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleTakeover(selectedId)}
+                          className="text-xs"
+                          title="Tomar control — el bot deja de responder"
+                        >
+                          <HandMetal size={14} className="mr-1" /> Tomar control
+                        </Button>
+                      )}
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleClose(selectedId)}
+                        className="text-xs"
+                      >
+                        <XCircle size={14} className="mr-1" /> Cerrar
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>
+
+              {/* Human takeover banner */}
+              {isHuman && (
+                <div className="px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20 flex items-center justify-between">
+                  <p className="text-xs text-yellow-400">
+                    Control humano activo — el bot no respondera a este contacto. Escribe directamente abajo.
+                  </p>
+                </div>
+              )}
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -323,13 +397,13 @@ export function WhatsAppInbox() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Send input (human takeover) */}
+              {/* Send input */}
               {selectedConv?.status === 'active' && (
                 <form onSubmit={handleSend} className="px-4 py-3 border-t border-border flex gap-2">
                   <input
                     value={sendText}
                     onChange={e => setSendText(e.target.value)}
-                    placeholder="Escribe un mensaje (takeover humano)..."
+                    placeholder={isHuman ? 'Escribe tu mensaje...' : 'Escribe un mensaje (se envia como humano)...'}
                     className="flex-1 bg-bg-primary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent"
                     disabled={sending}
                   />
