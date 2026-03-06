@@ -15,6 +15,7 @@ from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
 from agent.tools.whatsapp_tool import send_whatsapp_message
 from agent.tools.crm_tool import save_contact, update_contact_notes
+from agent.config_loader import load_whatsapp_config_by_agent_id
 
 logger = logging.getLogger(__name__)
 
@@ -162,17 +163,29 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("send_whatsapp"):
             return "El envío de WhatsApp no está habilitado."
 
-        cfg = self._config.client
-        if not cfg.whatsapp_instance_id or not cfg.whatsapp_api_url or not cfg.whatsapp_api_key:
-            return "WhatsApp no está configurado para este negocio."
+        # Cargar config de WhatsApp desde whatsapp_configs (por agente)
+        wa_config = await load_whatsapp_config_by_agent_id(self._config.agent.id)
+        if not wa_config:
+            return "WhatsApp no está configurado para este agente."
 
-        return await send_whatsapp_message(
-            api_url=cfg.whatsapp_api_url,
-            api_key=cfg.whatsapp_api_key,
-            instance_id=cfg.whatsapp_instance_id,
-            phone_number=phone_number,
-            message=message,
-        )
+        provider = wa_config.get("provider")
+        if provider == "evolution":
+            evo_url = wa_config.get("evo_api_url")
+            evo_key = wa_config.get("evo_api_key")
+            evo_instance = wa_config.get("evo_instance_id")
+            if not evo_url or not evo_key or not evo_instance:
+                return "La configuración de Evolution API está incompleta."
+            return await send_whatsapp_message(
+                api_url=evo_url,
+                api_key=evo_key,
+                instance_id=evo_instance,
+                phone_number=phone_number,
+                message=message,
+            )
+        elif provider == "gohighlevel":
+            return "El envío de WhatsApp vía GoHighLevel aún no está disponible como herramienta."
+        else:
+            return "Proveedor de WhatsApp no soportado."
 
     @function_tool()
     async def save_contact_info(
