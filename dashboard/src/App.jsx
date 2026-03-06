@@ -27,7 +27,7 @@ const CampaignDetail = lazy(() => import('./pages/CampaignDetail').then(m => ({ 
 const Integrations = lazy(() => import('./pages/Integrations').then(m => ({ default: m.Integrations })))
 const McpServers = lazy(() => import('./pages/McpServers').then(m => ({ default: m.McpServers })))
 const ApiIntegrations = lazy(() => import('./pages/ApiIntegrations').then(m => ({ default: m.ApiIntegrations })))
-const AgentDetail = lazy(() => import('./pages/AgentDetail').then(m => ({ default: m.AgentDetail })))
+
 const Billing = lazy(() => import('./pages/Billing').then(m => ({ default: m.Billing })))
 const PricingConfig = lazy(() => import('./pages/admin/PricingConfig').then(m => ({ default: m.PricingConfig })))
 const FlowBuilder = lazy(() => import('./pages/FlowBuilder').then(m => ({ default: m.FlowBuilder })))
@@ -63,7 +63,7 @@ export default function App() {
                 <Route path="/integrations/mcp" element={<McpServers />} />
                 <Route path="/integrations/api" element={<ApiIntegrations />} />
                 <Route path="/whatsapp" element={<WhatsAppInbox />} />
-                <Route path="/agents/:agentId" element={<AgentDetail />} />
+                <Route path="/agents/:agentId" element={<Settings />} />
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/settings" element={<Settings />} />
 
