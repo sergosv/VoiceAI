@@ -8,14 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.config_loader import ClientConfig
+from agent.config_loader import ResolvedConfig
 from agent.session_handler import RATES, SessionHandler
 
 
 class TestSessionHandlerInit:
     """Tests para inicialización del SessionHandler."""
 
-    def test_initializes_correctly(self, sample_config: ClientConfig) -> None:
+    def test_initializes_correctly(self, sample_config: ResolvedConfig) -> None:
         handler = SessionHandler(
             config=sample_config,
             direction="inbound",
@@ -35,7 +35,7 @@ class TestSessionHandlerInit:
 class TestTranscript:
     """Tests para manejo de transcripción."""
 
-    def test_add_entry(self, sample_config: ClientConfig) -> None:
+    def test_add_entry(self, sample_config: ResolvedConfig) -> None:
         handler = SessionHandler(
             config=sample_config,
             direction="inbound",
@@ -66,7 +66,7 @@ class TestCostCalculation:
 
     @pytest.mark.asyncio
     async def test_finalize_calculates_costs(
-        self, sample_config: ClientConfig, mock_supabase_response
+        self, sample_config: ResolvedConfig, mock_supabase_response
     ) -> None:
         handler = SessionHandler(
             config=sample_config,
@@ -103,7 +103,7 @@ class TestCostCalculation:
         # Verificar que se insertó en calls
         assert mock_calls_table.insert.called
         call_data = mock_calls_table.insert.call_args[0][0]
-        assert call_data["client_id"] == sample_config.id
+        assert call_data["client_id"] == sample_config.client.id
         assert call_data["direction"] == "inbound"
         assert call_data["status"] == "completed"
         assert call_data["cost_total"] >= 0
@@ -111,7 +111,7 @@ class TestCostCalculation:
 
     @pytest.mark.asyncio
     async def test_finalize_creates_usage_daily(
-        self, sample_config: ClientConfig, mock_supabase_response
+        self, sample_config: ResolvedConfig, mock_supabase_response
     ) -> None:
         handler = SessionHandler(
             config=sample_config,
@@ -152,7 +152,7 @@ class TestCostCalculation:
 
     @pytest.mark.asyncio
     async def test_finalize_updates_existing_usage_daily(
-        self, sample_config: ClientConfig, mock_supabase_response
+        self, sample_config: ResolvedConfig, mock_supabase_response
     ) -> None:
         handler = SessionHandler(
             config=sample_config,

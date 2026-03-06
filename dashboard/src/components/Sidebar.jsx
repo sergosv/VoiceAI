@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
-  ChevronDown, Bot,
+  ChevronDown, Bot, Sparkles,
 } from 'lucide-react'
 
 const navGroups = [
@@ -32,6 +32,7 @@ const navGroups = [
   {
     label: 'Configuracion',
     items: [
+      { to: '/create-agent', icon: Sparkles, label: 'Crear Agente' },
       { to: '/settings', icon: Bot, label: 'Agentes' },
       { to: '/documents', icon: FileText, label: 'Documentos' },
       { to: '/integrations', icon: Plug, label: 'Integraciones' },

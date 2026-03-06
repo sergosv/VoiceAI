@@ -26,6 +26,7 @@ const Campaigns = lazy(() => import('./pages/Campaigns').then(m => ({ default: m
 const CampaignDetail = lazy(() => import('./pages/CampaignDetail').then(m => ({ default: m.CampaignDetail })))
 const Integrations = lazy(() => import('./pages/Integrations').then(m => ({ default: m.Integrations })))
 const McpServers = lazy(() => import('./pages/McpServers').then(m => ({ default: m.McpServers })))
+const AgentWizard = lazy(() => import('./pages/AgentWizard').then(m => ({ default: m.AgentWizard })))
 const ApiIntegrations = lazy(() => import('./pages/ApiIntegrations').then(m => ({ default: m.ApiIntegrations })))
 
 const Billing = lazy(() => import('./pages/Billing').then(m => ({ default: m.Billing })))
@@ -65,6 +66,7 @@ export default function App() {
                 <Route path="/whatsapp" element={<WhatsAppInbox />} />
                 <Route path="/agents/:agentId" element={<Settings />} />
                 <Route path="/billing" element={<Billing />} />
+                <Route path="/create-agent" element={<AgentWizard />} />
                 <Route path="/settings" element={<Settings />} />
 
                 {/* Admin — protegido */}

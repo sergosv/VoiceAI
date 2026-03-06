@@ -7,24 +7,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent.agent_factory import VoiceAgent, build_agent
-from agent.config_loader import ClientConfig
+from agent.config_loader import ResolvedConfig
 
 
 class TestBuildAgent:
     """Tests para build_agent()."""
 
-    def test_returns_voice_agent(self, sample_config: ClientConfig) -> None:
+    def test_returns_voice_agent(self, sample_config: ResolvedConfig) -> None:
         agent = build_agent(sample_config)
         assert isinstance(agent, VoiceAgent)
 
-    def test_agent_has_correct_instructions(self, sample_config: ClientConfig) -> None:
+    def test_agent_has_correct_instructions(self, sample_config: ResolvedConfig) -> None:
         agent = build_agent(sample_config)
-        assert agent._instructions == sample_config.system_prompt
+        assert sample_config.agent.system_prompt in agent._instructions
 
-    def test_agent_stores_config(self, sample_config: ClientConfig) -> None:
+    def test_agent_stores_config(self, sample_config: ResolvedConfig) -> None:
         agent = build_agent(sample_config)
-        assert agent.config is sample_config
-        assert agent.config.slug == "dr-garcia"
+        assert agent.config.client.slug == "dr-garcia"
+        assert agent.config.agent.name == "María"
 
 
 class TestVoiceAgentSearchKnowledge:
@@ -32,7 +32,7 @@ class TestVoiceAgentSearchKnowledge:
 
     @pytest.mark.asyncio
     async def test_calls_file_search_with_store_id(
-        self, sample_config: ClientConfig
+        self, sample_config: ResolvedConfig
     ) -> None:
         agent = VoiceAgent(sample_config)
         mock_context = MagicMock()
@@ -49,7 +49,7 @@ class TestVoiceAgentSearchKnowledge:
 
     @pytest.mark.asyncio
     async def test_returns_message_when_no_store(
-        self, sample_config_no_store: ClientConfig
+        self, sample_config_no_store: ResolvedConfig
     ) -> None:
         agent = VoiceAgent(sample_config_no_store)
         mock_context = MagicMock()
@@ -63,7 +63,7 @@ class TestVoiceAgentTransfer:
     """Tests para VoiceAgent.transfer_to_human()."""
 
     @pytest.mark.asyncio
-    async def test_transfer_with_number(self, sample_config: ClientConfig) -> None:
+    async def test_transfer_with_number(self, sample_config: ResolvedConfig) -> None:
         agent = VoiceAgent(sample_config)
         mock_context = MagicMock()
 
@@ -74,7 +74,7 @@ class TestVoiceAgentTransfer:
 
     @pytest.mark.asyncio
     async def test_transfer_without_number(
-        self, sample_config_no_store: ClientConfig
+        self, sample_config_no_store: ResolvedConfig
     ) -> None:
         agent = VoiceAgent(sample_config_no_store)
         mock_context = MagicMock()

@@ -7,13 +7,12 @@ import os
 
 from livekit import api as lk_api
 from supabase import Client
-from twilio.rest import Client as TwilioClient
-
 logger = logging.getLogger(__name__)
 
 
-def _get_twilio_client() -> TwilioClient:
+def _get_twilio_client():
     """Crea instancia de TwilioClient con credenciales del entorno."""
+    from twilio.rest import Client as TwilioClient
     return TwilioClient(
         os.environ["TWILIO_ACCOUNT_SID"],
         os.environ["TWILIO_AUTH_TOKEN"],

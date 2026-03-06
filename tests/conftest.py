@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.config_loader import ClientConfig
+from agent.config_loader import AgentConfig, ResolvedConfig, SlimClientConfig
 
 
 @pytest.fixture(autouse=True)
@@ -28,47 +28,69 @@ def mock_env_vars(monkeypatch):
 
 
 @pytest.fixture
-def sample_config() -> ClientConfig:
-    """Config de cliente de ejemplo para tests."""
-    return ClientConfig(
+def sample_config() -> ResolvedConfig:
+    """Config de ejemplo para tests (agente + cliente)."""
+    agent = AgentConfig(
+        id="aaaa1111-1111-1111-1111-111111111111",
+        client_id="11111111-1111-1111-1111-111111111111",
+        name="María",
+        slug="maria",
+        phone_number="+5219991112233",
+        phone_sid=None,
+        livekit_sip_trunk_id=None,
+        system_prompt="Eres María, asistente virtual del Consultorio Dr. García.",
+        greeting="Hola, bienvenido al Consultorio Dr. García. Soy María, ¿en qué puedo ayudarle?",
+        examples=None,
+        voice_config={"provider": "cartesia", "voice_id": "test-voice-id-123"},
+        llm_config={"provider": "google"},
+        stt_config={"provider": "deepgram"},
+        transfer_number="+5219991234567",
+        max_call_duration_seconds=300,
+        after_hours_message="Estamos fuera de horario. Llame mañana.",
+    )
+    client = SlimClientConfig(
         id="11111111-1111-1111-1111-111111111111",
         name="Consultorio Dr. García",
         slug="dr-garcia",
         business_type="dental",
-        agent_name="María",
         language="es",
-        voice_id="test-voice-id-123",
-        greeting="Hola, bienvenido al Consultorio Dr. García. Soy María, ¿en qué puedo ayudarle?",
-        system_prompt="Eres María, asistente virtual del Consultorio Dr. García.",
         file_search_store_id="stores/test-store-123",
-        tools_enabled=["search_knowledge", "transfer_to_human"],
-        max_call_duration_seconds=300,
-        transfer_number="+5219991234567",
+        enabled_tools=["search_knowledge", "transfer_to_human"],
         business_hours={"lun-vie": "9:00-18:00"},
-        after_hours_message="Estamos fuera de horario. Llame mañana.",
     )
+    return ResolvedConfig(agent=agent, client=client)
 
 
 @pytest.fixture
-def sample_config_no_store() -> ClientConfig:
+def sample_config_no_store() -> ResolvedConfig:
     """Config sin FileSearchStore ni transfer number."""
-    return ClientConfig(
+    agent = AgentConfig(
+        id="aaaa2222-2222-2222-2222-222222222222",
+        client_id="22222222-2222-2222-2222-222222222222",
+        name="Asistente",
+        slug="asistente",
+        phone_number=None,
+        phone_sid=None,
+        livekit_sip_trunk_id=None,
+        system_prompt="Eres un asistente virtual de prueba.",
+        greeting="Hola, ¿en qué puedo ayudarle?",
+        examples=None,
+        voice_config={"provider": "cartesia", "voice_id": "test-voice-456"},
+        llm_config={"provider": "google"},
+        stt_config={"provider": "deepgram"},
+        transfer_number=None,
+        max_call_duration_seconds=180,
+    )
+    client = SlimClientConfig(
         id="22222222-2222-2222-2222-222222222222",
         name="Test Business",
         slug="test-biz",
         business_type="generic",
-        agent_name="Asistente",
         language="es",
-        voice_id="test-voice-456",
-        greeting="Hola, ¿en qué puedo ayudarle?",
-        system_prompt="Eres un asistente virtual de prueba.",
         file_search_store_id=None,
-        tools_enabled=["search_knowledge"],
-        max_call_duration_seconds=180,
-        transfer_number=None,
-        business_hours=None,
-        after_hours_message=None,
+        enabled_tools=["search_knowledge"],
     )
+    return ResolvedConfig(agent=agent, client=client)
 
 
 @pytest.fixture
