@@ -7,6 +7,7 @@ import { CallsTable } from '../components/CallsTable'
 import { Card } from '../components/ui/Card'
 import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
+import { OnboardingChecklist } from '../components/OnboardingChecklist'
 
 export function Dashboard() {
   const [overview, setOverview] = useState(null)
@@ -43,6 +44,9 @@ export function Dashboard() {
         </div>
         <ClientSelector value={clientId} onChange={setClientId} />
       </div>
+
+      {/* Onboarding */}
+      <OnboardingChecklist />
 
       {/* Stats cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

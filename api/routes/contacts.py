@@ -28,6 +28,8 @@ async def list_contacts(
     search: str | None = None,
     source: str | None = None,
     client_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> list[ContactOut]:
     """Lista contactos con búsqueda y paginación."""
     sb = get_supabase()
@@ -43,6 +45,11 @@ async def list_contacts(
 
     if source:
         query = query.eq("source", source)
+
+    if date_from:
+        query = query.gte("created_at", f"{date_from}T00:00:00")
+    if date_to:
+        query = query.lte("created_at", f"{date_to}T23:59:59")
 
     if search:
         query = query.or_(f"name.ilike.%{search}%,phone.ilike.%{search}%,email.ilike.%{search}%")

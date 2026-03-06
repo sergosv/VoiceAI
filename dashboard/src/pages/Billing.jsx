@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
-import { CreditCard, TrendingUp, TrendingDown, Gift, AlertTriangle } from 'lucide-react'
+import { useEffect, useState, useMemo } from 'react'
+import { CreditCard, TrendingUp, TrendingDown, Gift, AlertTriangle, Receipt } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { Card } from '../components/ui/Card'
 import { PageLoader } from '../components/ui/Spinner'
+import { FilterBar, SortableHeader } from '../components/FilterBar'
+import { EmptyState } from '../components/EmptyState'
 
 function formatDate(iso) {
   if (!iso) return ''
@@ -44,6 +46,13 @@ function txDetail(tx) {
   return tx.reason || ''
 }
 
+const TYPE_OPTIONS = [
+  { value: 'purchase', label: 'Compra' },
+  { value: 'consumption', label: 'Consumo' },
+  { value: 'gift', label: 'Regalo' },
+  { value: 'refund', label: 'Reembolso' },
+]
+
 export function Billing() {
   const { user } = useAuth()
   const [balance, setBalance] = useState(null)
@@ -51,6 +60,13 @@ export function Billing() {
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
   const [purchasing, setPurchasing] = useState(null)
+
+  // Filters
+  const [typeFilter, setTypeFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortCol, setSortCol] = useState('created_at')
+  const [sortDir, setSortDir] = useState('desc')
 
   const clientId = user?.client_id
 
@@ -67,6 +83,43 @@ export function Billing() {
     }).catch(console.error)
       .finally(() => setLoading(false))
   }, [clientId])
+
+  // Client-side filtering and sorting
+  const filteredTx = useMemo(() => {
+    let result = [...transactions]
+
+    if (typeFilter) {
+      result = result.filter(tx => tx.type === typeFilter)
+    }
+    if (dateFrom) {
+      result = result.filter(tx => tx.created_at >= dateFrom)
+    }
+    if (dateTo) {
+      const toEnd = dateTo + 'T23:59:59'
+      result = result.filter(tx => tx.created_at <= toEnd)
+    }
+
+    result.sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol]
+      if (sortCol === 'created_at') {
+        av = av || ''; bv = bv || ''
+      }
+      if (av < bv) return sortDir === 'asc' ? -1 : 1
+      if (av > bv) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+
+    return result
+  }, [transactions, typeFilter, dateFrom, dateTo, sortCol, sortDir])
+
+  function handleSort(col) {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortCol(col)
+      setSortDir('desc')
+    }
+  }
 
   async function handlePurchase(packageId, paymentMethod) {
     setPurchasing(packageId + paymentMethod)
@@ -91,13 +144,15 @@ export function Billing() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Créditos y facturación</h1>
+      <h1 className="text-2xl font-bold flex items-center gap-2">
+        <CreditCard size={24} /> Creditos y facturacion
+      </h1>
 
       {/* Balance actual */}
       <div className="bg-gradient-to-r from-accent/20 to-accent/5 border border-accent/30 rounded-xl p-6">
         <div className="text-sm text-text-secondary">Tu balance actual</div>
         <div className="text-4xl font-bold mt-1 text-accent">
-          {balance?.balance?.toFixed(0) || 0} créditos
+          {balance?.balance?.toFixed(0) || 0} creditos
         </div>
         <div className="text-sm text-text-muted mt-1">
           = {balance?.balance?.toFixed(0) || 0} minutos de agente IA
@@ -111,7 +166,7 @@ export function Billing() {
         {balance?.balance <= 0 && (
           <div className="mt-3 flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded px-3 py-2 text-sm text-red-400">
             <AlertTriangle size={16} />
-            Sin créditos. Tu agente no podrá atender llamadas hasta que recargues.
+            Sin creditos. Tu agente no podra atender llamadas hasta que recargues.
           </div>
         )}
       </div>
@@ -145,7 +200,7 @@ export function Billing() {
             <Gift size={20} className="text-purple-400" />
           </div>
           <div>
-            <div className="text-xs text-text-muted">Créditos de regalo</div>
+            <div className="text-xs text-text-muted">Creditos de regalo</div>
             <div className="text-lg font-bold text-purple-400">
               {balance?.total_gifted?.toFixed(0) || 0} min
             </div>
@@ -153,9 +208,9 @@ export function Billing() {
         </Card>
       </div>
 
-      {/* Paquetes de créditos */}
+      {/* Paquetes de creditos */}
       <div>
-        <h2 className="text-lg font-semibold mb-4">Comprar créditos</h2>
+        <h2 className="text-lg font-semibold mb-4">Comprar creditos</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {packages.map(pkg => (
             <Card
@@ -166,7 +221,7 @@ export function Billing() {
             >
               {pkg.is_popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-accent text-bg-primary text-xs px-3 py-0.5 rounded-full font-medium">
-                  Más popular
+                  Mas popular
                 </div>
               )}
               <h3 className="font-semibold text-lg">{pkg.name}</h3>
@@ -211,24 +266,48 @@ export function Billing() {
       {/* Historial de transacciones */}
       <Card>
         <h2 className="text-lg font-semibold mb-4">Historial de transacciones</h2>
-        {transactions.length === 0 ? (
-          <div className="text-center text-text-muted py-8">
-            No hay transacciones aún
-          </div>
+
+        <FilterBar
+          filters={[
+            { key: 'type', label: 'Tipo', options: TYPE_OPTIONS },
+          ]}
+          values={{ type: typeFilter }}
+          onChange={(key, value) => setTypeFilter(value)}
+          dateRange
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateChange={(from, to) => { setDateFrom(from); setDateTo(to) }}
+          onClear={() => { setTypeFilter(''); setDateFrom(''); setDateTo('') }}
+          className="mb-4"
+        />
+
+        {filteredTx.length === 0 ? (
+          <EmptyState
+            icon={Receipt}
+            title={typeFilter || dateFrom ? 'Sin resultados' : 'Sin transacciones'}
+            description={typeFilter || dateFrom
+              ? 'No hay transacciones que coincidan con los filtros.'
+              : 'Las transacciones apareceran aqui cuando compres creditos o tu agente atienda llamadas.'
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left">
-                  <th className="py-2 px-3 font-medium text-text-muted">Fecha</th>
-                  <th className="py-2 px-3 font-medium text-text-muted">Tipo</th>
-                  <th className="py-2 px-3 font-medium text-text-muted text-right">Créditos</th>
-                  <th className="py-2 px-3 font-medium text-text-muted text-right">Balance</th>
-                  <th className="py-2 px-3 font-medium text-text-muted">Detalle</th>
+                  <SortableHeader active={sortCol === 'created_at'} direction={sortDir} onClick={() => handleSort('created_at')}>
+                    Fecha
+                  </SortableHeader>
+                  <th className="py-2 px-3 font-medium text-text-muted text-xs">Tipo</th>
+                  <SortableHeader active={sortCol === 'credits'} direction={sortDir} onClick={() => handleSort('credits')} className="text-right">
+                    Creditos
+                  </SortableHeader>
+                  <th className="py-2 px-3 font-medium text-text-muted text-right text-xs">Balance</th>
+                  <th className="py-2 px-3 font-medium text-text-muted text-xs">Detalle</th>
                 </tr>
               </thead>
               <tbody>
-                {transactions.map(tx => (
+                {filteredTx.map(tx => (
                   <tr key={tx.id} className="border-b border-border/50 hover:bg-bg-hover transition-colors">
                     <td className="py-2 px-3 text-text-muted text-xs">
                       {formatDate(tx.created_at)}

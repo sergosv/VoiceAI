@@ -9,10 +9,18 @@ import { Table, Th, Td } from '../components/ui/Table'
 import { Modal } from '../components/ui/Modal'
 import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
+import { FilterBar } from '../components/FilterBar'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
 import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil, Users } from 'lucide-react'
 import { EmptyState } from '../components/EmptyState'
+
+const SOURCE_OPTIONS = [
+  { value: 'inbound_call', label: 'Llamada entrante' },
+  { value: 'outbound_call', label: 'Llamada saliente' },
+  { value: 'manual', label: 'Manual' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+]
 
 const sourceLabels = {
   inbound_call: 'Llamada entrante',
@@ -26,6 +34,9 @@ export function Contacts() {
   const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [sourceFilter, setSourceFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
   const [clientId, setClientId] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -39,13 +50,16 @@ export function Contacts() {
     const params = new URLSearchParams({ page, per_page: 20 })
     if (search) params.set('search', search)
     if (clientId) params.set('client_id', clientId)
+    if (sourceFilter) params.set('source', sourceFilter)
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
     api.get(`/contacts?${params}`)
       .then(setContacts)
       .catch(e => toast.error(e.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadContacts() }, [page, search, clientId])
+  useEffect(() => { loadContacts() }, [page, search, clientId, sourceFilter, dateFrom, dateTo])
 
   function handleSearch(e) {
     e.preventDefault()
@@ -99,6 +113,19 @@ export function Contacts() {
           />
         </div>
       </form>
+
+      <FilterBar
+        filters={[
+          { key: 'source', label: 'Fuente', options: SOURCE_OPTIONS },
+        ]}
+        values={{ source: sourceFilter }}
+        onChange={(key, value) => { setSourceFilter(value); setPage(1) }}
+        dateRange
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateChange={(from, to) => { setDateFrom(from); setDateTo(to); setPage(1) }}
+        onClear={() => { setSourceFilter(''); setDateFrom(''); setDateTo(''); setPage(1) }}
+      />
 
       <Card>
         {loading ? (
