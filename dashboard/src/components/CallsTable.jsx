@@ -20,7 +20,15 @@ export function CallsTable({ calls = [] }) {
   const navigate = useNavigate()
 
   if (!calls.length) {
-    return <p className="text-text-muted text-sm py-8 text-center">Sin llamadas registradas</p>
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="w-12 h-12 rounded-xl bg-bg-secondary border border-border flex items-center justify-center mb-4">
+          <Phone size={20} className="text-text-muted" />
+        </div>
+        <p className="text-sm font-medium text-text-secondary mb-1">Sin llamadas registradas</p>
+        <p className="text-xs text-text-muted">Las llamadas apareceran aqui cuando tu agente reciba o haga llamadas</p>
+      </div>
+    )
   }
 
   return (

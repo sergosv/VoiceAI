@@ -11,7 +11,8 @@ import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
-import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil } from 'lucide-react'
+import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil, Users } from 'lucide-react'
+import { EmptyState } from '../components/EmptyState'
 
 const sourceLabels = {
   inbound_call: 'Llamada entrante',
@@ -103,7 +104,17 @@ export function Contacts() {
         {loading ? (
           <PageLoader />
         ) : contacts.length === 0 ? (
-          <p className="text-text-muted text-center py-8">No hay contactos</p>
+          <EmptyState
+            icon={Users}
+            title={search ? 'Sin resultados' : 'Sin contactos'}
+            description={search
+              ? `No se encontraron contactos para "${search}". Intenta con otro termino.`
+              : 'Los contactos se crean automaticamente cuando recibes llamadas o mensajes. Tambien puedes agregarlos manualmente.'
+            }
+            action={!search ? () => setShowCreate(true) : undefined}
+            actionLabel={!search ? 'Agregar contacto' : undefined}
+            actionIcon={!search ? UserPlus : undefined}
+          />
         ) : (
           <Table>
             <thead>

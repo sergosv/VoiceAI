@@ -158,7 +158,7 @@ export function Settings() {
   if (user?.role === 'admin') {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Configuracion</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2"><Bot size={24} /> Agentes</h1>
         <Card className="space-y-4">
           <p className="text-text-secondary">
             Como administrador, puedes configurar cada cliente desde la seccion de clientes.
@@ -174,7 +174,7 @@ export function Settings() {
   if (!client) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Configuracion</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2"><Bot size={24} /> Agentes</h1>
         <Card><p className="text-text-muted">No se encontro configuracion de cliente.</p></Card>
       </div>
     )

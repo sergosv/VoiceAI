@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
-import { Upload, Trash2, FileText, DollarSign, HelpCircle, Building, Shield, Users, MapPin, BookOpen, ChevronDown } from 'lucide-react'
+import { Upload, Trash2, FileText, DollarSign, HelpCircle, Building, Shield, Users, MapPin, BookOpen, ChevronDown, FileUp } from 'lucide-react'
+import { EmptyState } from '../components/EmptyState'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -173,10 +174,14 @@ export function Documents() {
 
       <Card>
         {loading ? <PageLoader /> : docs.length === 0 ? (
-          <div className="text-center py-12">
-            <FileText size={40} className="mx-auto text-text-muted mb-3" />
-            <p className="text-text-muted">Sin documentos. Sube archivos a tu knowledge base.</p>
-          </div>
+          <EmptyState
+            icon={FileText}
+            title="Sin documentos"
+            description="Sube archivos con informacion de tu negocio (servicios, precios, FAQs) para que tu agente pueda responder preguntas de tus clientes."
+            action={() => fileRef.current?.click()}
+            actionLabel="Subir documento"
+            actionIcon={FileUp}
+          />
         ) : (
           <Table>
             <thead>

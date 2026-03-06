@@ -222,7 +222,15 @@ export function WhatsAppInbox() {
                 <Spinner size={20} />
               </div>
             ) : filteredConvs.length === 0 ? (
-              <p className="text-sm text-text-muted text-center py-8">Sin conversaciones</p>
+              <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                <MessageCircle size={32} className="text-text-muted mb-3 opacity-30" />
+                <p className="text-sm text-text-muted">
+                  {search ? `Sin resultados para "${search}"` : 'Sin conversaciones'}
+                </p>
+                {!search && (
+                  <p className="text-xs text-text-muted mt-1">Las conversaciones apareceran cuando recibas mensajes de WhatsApp</p>
+                )}
+              </div>
             ) : (
               filteredConvs.map(conv => (
                 <button

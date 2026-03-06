@@ -1,28 +1,57 @@
 import { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
+  ChevronDown, Bot,
 } from 'lucide-react'
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/calls', icon: Phone, label: 'Llamadas' },
-  { to: '/contacts', icon: UserRound, label: 'Contactos' },
-  { to: '/appointments', icon: Calendar, label: 'Citas' },
-  { to: '/campaigns', icon: Megaphone, label: 'Campañas' },
-  { to: '/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
-  { to: '/documents', icon: FileText, label: 'Documentos' },
-  { to: '/integrations', icon: Plug, label: 'Integraciones' },
-  { to: '/billing', icon: CreditCard, label: 'Créditos' },
-  { to: '/settings', icon: Settings, label: 'Configuración' },
+const navGroups = [
+  {
+    label: null, // Sin label = grupo principal
+    items: [
+      { to: '/', icon: LayoutDashboard, label: 'Inicio', end: true },
+    ],
+  },
+  {
+    label: 'Operaciones',
+    items: [
+      { to: '/calls', icon: Phone, label: 'Llamadas' },
+      { to: '/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
+      { to: '/campaigns', icon: Megaphone, label: 'Campanas' },
+    ],
+  },
+  {
+    label: 'CRM',
+    items: [
+      { to: '/contacts', icon: UserRound, label: 'Contactos' },
+      { to: '/appointments', icon: Calendar, label: 'Citas' },
+    ],
+  },
+  {
+    label: 'Configuracion',
+    items: [
+      { to: '/settings', icon: Bot, label: 'Agentes' },
+      { to: '/documents', icon: FileText, label: 'Documentos' },
+      { to: '/integrations', icon: Plug, label: 'Integraciones' },
+    ],
+  },
+  {
+    label: 'Cuenta',
+    items: [
+      { to: '/billing', icon: CreditCard, label: 'Creditos' },
+    ],
+  },
 ]
 
-const adminItems = [
-  { to: '/admin/clients', icon: Users, label: 'Clientes' },
-  { to: '/admin/pricing', icon: DollarSign, label: 'Precios' },
-]
+const adminGroup = {
+  label: 'Admin',
+  items: [
+    { to: '/admin/clients', icon: Users, label: 'Clientes' },
+    { to: '/admin/pricing', icon: DollarSign, label: 'Precios' },
+  ],
+}
 
 function NavItem({ to, icon: Icon, label, end, onClick }) {
   return (
@@ -44,6 +73,49 @@ function NavItem({ to, icon: Icon, label, end, onClick }) {
   )
 }
 
+function NavGroup({ group, onClick, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const location = useLocation()
+
+  // Auto-expand if any child is active
+  const hasActive = group.items.some(item =>
+    item.end ? location.pathname === item.to : location.pathname.startsWith(item.to)
+  )
+
+  const isOpen = open || hasActive
+
+  if (!group.label) {
+    // Sin label = renderizar items directamente
+    return group.items.map(item => (
+      <NavItem key={item.to} {...item} onClick={onClick} />
+    ))
+  }
+
+  return (
+    <div className="pt-3">
+      <button
+        onClick={() => setOpen(!isOpen)}
+        className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
+      >
+        {group.label}
+        <ChevronDown
+          size={12}
+          className={`transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`}
+        />
+      </button>
+      <div
+        className={`space-y-0.5 overflow-hidden transition-all duration-200 ${
+          isOpen ? 'max-h-96 opacity-100 mt-1' : 'max-h-0 opacity-0'
+        }`}
+      >
+        {group.items.map(item => (
+          <NavItem key={item.to} {...item} onClick={onClick} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function Sidebar() {
   const { user, signOut } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -59,7 +131,7 @@ export function Sidebar() {
       <button
         onClick={() => setOpen(true)}
         className="fixed top-3 left-3 z-50 lg:hidden p-2 rounded-lg bg-bg-secondary border border-border text-text-primary cursor-pointer"
-        aria-label="Abrir menú"
+        aria-label="Abrir menu"
       >
         <Menu size={20} />
       </button>
@@ -80,7 +152,7 @@ export function Sidebar() {
         <div className="p-4 border-b border-border flex items-center gap-2">
           <Radio size={20} className="text-accent" />
           <span className="font-bold text-sm">Voice AI</span>
-          <span className="text-xs text-text-muted ml-auto hidden lg:inline">v0.2</span>
+          <span className="text-[10px] text-text-muted ml-auto hidden lg:inline">v0.2</span>
           <button
             onClick={closeMobile}
             className="lg:hidden text-text-muted hover:text-text-primary cursor-pointer ml-auto"
@@ -90,20 +162,13 @@ export function Sidebar() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-1">
-          {navItems.map(item => (
-            <NavItem key={item.to} {...item} end={item.to === '/'} onClick={closeMobile} />
+        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+          {navGroups.map((group, i) => (
+            <NavGroup key={group.label || i} group={group} onClick={closeMobile} />
           ))}
 
           {isAdmin && (
-            <>
-              <div className="pt-4 pb-1 px-3">
-                <p className="text-xs text-text-muted uppercase tracking-wider">Admin</p>
-              </div>
-              {adminItems.map(item => (
-                <NavItem key={item.to} {...item} onClick={closeMobile} />
-              ))}
-            </>
+            <NavGroup group={adminGroup} onClick={closeMobile} defaultOpen={false} />
           )}
         </nav>
 
@@ -115,9 +180,9 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs truncate">{user?.email}</p>
-              <p className="text-xs text-text-muted">{user?.role}</p>
+              <p className="text-[10px] text-text-muted">{user?.role}</p>
             </div>
-            <button onClick={signOut} className="text-text-muted hover:text-danger cursor-pointer" title="Cerrar sesión">
+            <button onClick={signOut} className="text-text-muted hover:text-danger cursor-pointer" title="Cerrar sesion">
               <LogOut size={16} />
             </button>
           </div>

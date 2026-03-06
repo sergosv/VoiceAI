@@ -10,7 +10,8 @@ import { PageLoader } from '../components/ui/Spinner'
 import { ClientSelector } from '../components/ClientSelector'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { Megaphone, Plus } from 'lucide-react'
+import { Megaphone, Plus, PhoneOutgoing } from 'lucide-react'
+import { EmptyState } from '../components/EmptyState'
 
 const statusColors = {
   draft: 'bg-bg-hover text-text-secondary',
@@ -63,11 +64,14 @@ export function Campaigns() {
       {loading ? (
         <PageLoader />
       ) : campaigns.length === 0 ? (
-        <Card>
-          <p className="text-text-muted text-center py-12">
-            No hay campañas. Crea una nueva para comenzar a hacer llamadas outbound.
-          </p>
-        </Card>
+        <EmptyState
+          icon={PhoneOutgoing}
+          title="Sin campanas activas"
+          description="Las campanas te permiten hacer llamadas outbound automatizadas a listas de contactos. Crea tu primera campana para empezar."
+          action={() => setShowCreate(true)}
+          actionLabel="Crear campana"
+          actionIcon={Plus}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {campaigns.map(c => (

@@ -8,7 +8,7 @@ import { Input } from '../components/ui/Input'
 import { PageLoader } from '../components/ui/Spinner'
 import {
   Calendar, Wrench, Save, TestTube, Check,
-  Server, Globe, ChevronRight,
+  Server, Globe, ChevronRight, Plug,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -88,23 +88,38 @@ export function Integrations() {
   if (loading) return <PageLoader />
   if (!client) return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Integraciones</h1>
-      <p className="text-text-muted">Las integraciones de Google Calendar, WhatsApp y herramientas se configuran desde el detalle de cada cliente.</p>
-      <Card>
-        <Link to="/integrations/mcp" className="flex items-center justify-between group">
-          <div className="flex items-center gap-3">
-            <Server size={20} className="text-accent" />
-            <div>
-              <h2 className="text-lg font-semibold group-hover:text-accent transition-colors">MCP Servers</h2>
-              <p className="text-xs text-text-muted">
-                Conecta herramientas externas (CRMs, hojas de calculo, APIs)
-                via Model Context Protocol para que tus agentes las usen en llamadas.
-              </p>
+      <h1 className="text-2xl font-bold flex items-center gap-2"><Plug size={24} /> Integraciones</h1>
+      <p className="text-sm text-text-muted">Conecta servicios externos y configura herramientas para tus agentes.</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="hover:border-accent/30 transition-colors">
+          <Link to="/integrations/mcp" className="flex items-center justify-between group">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                <Server size={20} className="text-accent" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold group-hover:text-accent transition-colors">MCP Servers</h2>
+                <p className="text-xs text-text-muted">Herramientas externas via MCP</p>
+              </div>
             </div>
-          </div>
-          <ChevronRight size={20} className="text-text-muted group-hover:text-accent transition-colors" />
-        </Link>
-      </Card>
+            <ChevronRight size={18} className="text-text-muted group-hover:text-accent transition-colors" />
+          </Link>
+        </Card>
+        <Card className="hover:border-accent/30 transition-colors">
+          <Link to="/integrations/api" className="flex items-center justify-between group">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <Globe size={20} className="text-green-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold group-hover:text-accent transition-colors">API Integrations</h2>
+                <p className="text-xs text-text-muted">Endpoints HTTP como tools</p>
+              </div>
+            </div>
+            <ChevronRight size={18} className="text-text-muted group-hover:text-accent transition-colors" />
+          </Link>
+        </Card>
+      </div>
     </div>
   )
 
@@ -152,43 +167,37 @@ export function Integrations() {
 
       </div>
 
-      {/* MCP Servers */}
-      <Card>
-        <Link to="/integrations/mcp" className="flex items-center justify-between group">
-          <div className="flex items-center gap-3">
-            <Server size={20} className="text-accent" />
-            <div>
-              <h2 className="text-lg font-semibold group-hover:text-accent transition-colors">
-                MCP Servers
-              </h2>
-              <p className="text-xs text-text-muted">
-                Conecta herramientas externas (CRMs, hojas de calculo, APIs)
-                via Model Context Protocol para que tus agentes las usen en llamadas.
-              </p>
+      {/* MCP y API links */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="hover:border-accent/30 transition-colors">
+          <Link to="/integrations/mcp" className="flex items-center justify-between group">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+                <Server size={20} className="text-accent" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold group-hover:text-accent transition-colors">MCP Servers</h2>
+                <p className="text-xs text-text-muted">Herramientas externas via MCP</p>
+              </div>
             </div>
-          </div>
-          <ChevronRight size={20} className="text-text-muted group-hover:text-accent transition-colors" />
-        </Link>
-      </Card>
-
-      {/* API Integrations */}
-      <Card>
-        <Link to="/integrations/api" className="flex items-center justify-between group">
-          <div className="flex items-center gap-3">
-            <Globe size={20} className="text-accent" />
-            <div>
-              <h2 className="text-lg font-semibold group-hover:text-accent transition-colors">
-                API Integrations
-              </h2>
-              <p className="text-xs text-text-muted">
-                Conecta endpoints HTTP directamente como herramientas del agente
-                (consultar stock, verificar precios, registrar datos) sin necesidad de MCP.
-              </p>
+            <ChevronRight size={18} className="text-text-muted group-hover:text-accent transition-colors" />
+          </Link>
+        </Card>
+        <Card className="hover:border-accent/30 transition-colors">
+          <Link to="/integrations/api" className="flex items-center justify-between group">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <Globe size={20} className="text-green-400" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold group-hover:text-accent transition-colors">API Integrations</h2>
+                <p className="text-xs text-text-muted">Endpoints HTTP como tools</p>
+              </div>
             </div>
-          </div>
-          <ChevronRight size={20} className="text-text-muted group-hover:text-accent transition-colors" />
-        </Link>
-      </Card>
+            <ChevronRight size={18} className="text-text-muted group-hover:text-accent transition-colors" />
+          </Link>
+        </Card>
+      </div>
 
       {/* Herramientas del agente */}
       <Card>
