@@ -5,12 +5,31 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+
+
+# Crear mock del módulo stripe si no está instalado
+_stripe_mock = None
+if "stripe" not in sys.modules:
+    _stripe_mock = types.ModuleType("stripe")
+    _stripe_mock.Webhook = MagicMock()
+    _stripe_mock.error = types.ModuleType("stripe.error")
+
+    class _MockSigError(Exception):
+        pass
+
+    _stripe_mock.error.SignatureVerificationError = _MockSigError
+    sys.modules["stripe"] = _stripe_mock
+    sys.modules["stripe.error"] = _stripe_mock.error
+
+import stripe  # noqa: E402  — ya sea real o mock
 
 
 @pytest.fixture()
@@ -24,6 +43,14 @@ def mock_sb():
         sb = MagicMock()
         m.return_value = sb
         yield sb
+
+
+@pytest.fixture(autouse=True)
+def _reset_stripe_mock():
+    """Reset stripe.Webhook mock entre tests."""
+    if _stripe_mock is not None:
+        _stripe_mock.Webhook = MagicMock()
+    yield
 
 
 class TestStripeWebhook:
@@ -47,11 +74,11 @@ class TestStripeWebhook:
         finally:
             wh_mod.STRIPE_WEBHOOK_SECRET = orig
 
-    @patch("stripe.Webhook.construct_event", side_effect=ValueError("bad payload"))
-    def test_invalid_payload(self, mock_construct, client):
+    def test_invalid_payload(self, client):
         import api.routes.webhooks as wh_mod
         orig = wh_mod.STRIPE_WEBHOOK_SECRET
         wh_mod.STRIPE_WEBHOOK_SECRET = "whsec_test123"
+        stripe.Webhook.construct_event.side_effect = ValueError("bad payload")
         try:
             resp = client.post(
                 "/api/webhooks/stripe",
@@ -63,45 +90,42 @@ class TestStripeWebhook:
             wh_mod.STRIPE_WEBHOOK_SECRET = orig
 
     def test_invalid_signature(self, client):
-        import stripe
         import api.routes.webhooks as wh_mod
         orig = wh_mod.STRIPE_WEBHOOK_SECRET
         wh_mod.STRIPE_WEBHOOK_SECRET = "whsec_test123"
+        stripe.Webhook.construct_event.side_effect = stripe.error.SignatureVerificationError(
+            "bad sig"
+        )
         try:
-            with patch("stripe.Webhook.construct_event",
-                       side_effect=stripe.error.SignatureVerificationError("bad sig", "sig")):
-                resp = client.post(
-                    "/api/webhooks/stripe",
-                    content=b'{"type":"test"}',
-                    headers={"stripe-signature": "t=123,v1=badsig"},
-                )
-                assert resp.status_code == 400
+            resp = client.post(
+                "/api/webhooks/stripe",
+                content=b'{"type":"test"}',
+                headers={"stripe-signature": "t=123,v1=badsig"},
+            )
+            assert resp.status_code == 400
         finally:
             wh_mod.STRIPE_WEBHOOK_SECRET = orig
 
-    @patch("stripe.Webhook.construct_event")
-    def test_checkout_completed_adds_credits(self, mock_construct, client, mock_sb):
+    def test_checkout_completed_adds_credits(self, client, mock_sb):
         import api.routes.webhooks as wh_mod
         orig = wh_mod.STRIPE_WEBHOOK_SECRET
         wh_mod.STRIPE_WEBHOOK_SECRET = "whsec_test123"
-        try:
-            mock_construct.return_value = {
-                "type": "checkout.session.completed",
-                "data": {
-                    "object": {
-                        "id": "cs_test_123",
-                        "metadata": {
-                            "client_id": "client-uuid-1",
-                            "credits": "100",
-                            "package_id": "pkg-1",
-                        },
-                        "amount_total": 5000,  # $50.00
-                    }
+        stripe.Webhook.construct_event.return_value = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_123",
+                    "metadata": {
+                        "client_id": "client-uuid-1",
+                        "credits": "100",
+                        "package_id": "pkg-1",
+                    },
+                    "amount_total": 5000,
                 }
-            }
-
-            mock_sb.rpc.return_value.execute.return_value = MagicMock()
-
+            },
+        }
+        mock_sb.rpc.return_value.execute.return_value = MagicMock()
+        try:
             resp = client.post(
                 "/api/webhooks/stripe",
                 content=b'{"type":"checkout.session.completed"}',
@@ -122,24 +146,22 @@ class TestStripeWebhook:
         finally:
             wh_mod.STRIPE_WEBHOOK_SECRET = orig
 
-    @patch("stripe.Webhook.construct_event")
-    def test_checkout_missing_metadata(self, mock_construct, client, mock_sb):
+    def test_checkout_missing_metadata(self, client, mock_sb):
         """No acredita créditos si falta client_id o credits."""
         import api.routes.webhooks as wh_mod
         orig = wh_mod.STRIPE_WEBHOOK_SECRET
         wh_mod.STRIPE_WEBHOOK_SECRET = "whsec_test123"
-        try:
-            mock_construct.return_value = {
-                "type": "checkout.session.completed",
-                "data": {
-                    "object": {
-                        "id": "cs_test_456",
-                        "metadata": {},
-                        "amount_total": 0,
-                    }
+        stripe.Webhook.construct_event.return_value = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_456",
+                    "metadata": {},
+                    "amount_total": 0,
                 }
-            }
-
+            },
+        }
+        try:
             resp = client.post(
                 "/api/webhooks/stripe",
                 content=b'{"type":"checkout.session.completed"}',
@@ -150,18 +172,16 @@ class TestStripeWebhook:
         finally:
             wh_mod.STRIPE_WEBHOOK_SECRET = orig
 
-    @patch("stripe.Webhook.construct_event")
-    def test_other_event_type(self, mock_construct, client, mock_sb):
+    def test_other_event_type(self, client, mock_sb):
         """Otros tipos de eventos devuelven ok sin hacer nada."""
         import api.routes.webhooks as wh_mod
         orig = wh_mod.STRIPE_WEBHOOK_SECRET
         wh_mod.STRIPE_WEBHOOK_SECRET = "whsec_test123"
+        stripe.Webhook.construct_event.return_value = {
+            "type": "payment_intent.succeeded",
+            "data": {"object": {}},
+        }
         try:
-            mock_construct.return_value = {
-                "type": "payment_intent.succeeded",
-                "data": {"object": {}},
-            }
-
             resp = client.post(
                 "/api/webhooks/stripe",
                 content=b'{"type":"payment_intent.succeeded"}',
@@ -179,6 +199,7 @@ class TestMercadoPagoSignatureVerification:
 
     def test_verify_valid_signature(self):
         from api.routes.webhooks import _verify_mercadopago_signature
+        import api.routes.webhooks as wh_mod
 
         secret = "test-mp-secret"
         data_id = "12345"
@@ -198,12 +219,17 @@ class TestMercadoPagoSignatureVerification:
             "x-request-id": request_id,
         }
 
-        with patch("api.routes.webhooks.MERCADOPAGO_WEBHOOK_SECRET", secret):
+        orig = wh_mod.MERCADOPAGO_WEBHOOK_SECRET
+        wh_mod.MERCADOPAGO_WEBHOOK_SECRET = secret
+        try:
             result = _verify_mercadopago_signature(mock_request, body)
+        finally:
+            wh_mod.MERCADOPAGO_WEBHOOK_SECRET = orig
         assert result is True
 
     def test_verify_invalid_signature(self):
         from api.routes.webhooks import _verify_mercadopago_signature
+        import api.routes.webhooks as wh_mod
 
         body = json.dumps({"data": {"id": "12345"}}).encode()
         mock_request = MagicMock()
@@ -212,40 +238,59 @@ class TestMercadoPagoSignatureVerification:
             "x-request-id": "req-1",
         }
 
-        with patch("api.routes.webhooks.MERCADOPAGO_WEBHOOK_SECRET", "secret"):
+        orig = wh_mod.MERCADOPAGO_WEBHOOK_SECRET
+        wh_mod.MERCADOPAGO_WEBHOOK_SECRET = "secret"
+        try:
             result = _verify_mercadopago_signature(mock_request, body)
+        finally:
+            wh_mod.MERCADOPAGO_WEBHOOK_SECRET = orig
         assert result is False
 
     def test_verify_no_secret(self):
         from api.routes.webhooks import _verify_mercadopago_signature
+        import api.routes.webhooks as wh_mod
 
         mock_request = MagicMock()
-        with patch("api.routes.webhooks.MERCADOPAGO_WEBHOOK_SECRET", None):
+        orig = wh_mod.MERCADOPAGO_WEBHOOK_SECRET
+        wh_mod.MERCADOPAGO_WEBHOOK_SECRET = None
+        try:
             result = _verify_mercadopago_signature(mock_request, b"{}")
+        finally:
+            wh_mod.MERCADOPAGO_WEBHOOK_SECRET = orig
         assert result is False
 
     def test_verify_missing_ts_or_v1(self):
         from api.routes.webhooks import _verify_mercadopago_signature
+        import api.routes.webhooks as wh_mod
 
         mock_request = MagicMock()
         mock_request.headers = {
             "x-signature": "onlythis=value",
             "x-request-id": "req-1",
         }
-        with patch("api.routes.webhooks.MERCADOPAGO_WEBHOOK_SECRET", "secret"):
+        orig = wh_mod.MERCADOPAGO_WEBHOOK_SECRET
+        wh_mod.MERCADOPAGO_WEBHOOK_SECRET = "secret"
+        try:
             result = _verify_mercadopago_signature(mock_request, b'{"data":{"id":"1"}}')
+        finally:
+            wh_mod.MERCADOPAGO_WEBHOOK_SECRET = orig
         assert result is False
 
     def test_verify_bad_json_body(self):
         from api.routes.webhooks import _verify_mercadopago_signature
+        import api.routes.webhooks as wh_mod
 
         mock_request = MagicMock()
         mock_request.headers = {
             "x-signature": "ts=1234,v1=abc",
             "x-request-id": "req-1",
         }
-        with patch("api.routes.webhooks.MERCADOPAGO_WEBHOOK_SECRET", "secret"):
+        orig = wh_mod.MERCADOPAGO_WEBHOOK_SECRET
+        wh_mod.MERCADOPAGO_WEBHOOK_SECRET = "secret"
+        try:
             result = _verify_mercadopago_signature(mock_request, b"not json")
+        finally:
+            wh_mod.MERCADOPAGO_WEBHOOK_SECRET = orig
         assert result is False
 
 
