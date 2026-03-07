@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -32,11 +34,21 @@ from api.services.proactive_worker import start_proactive_worker
 # Rate limiter global
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Startup/shutdown: inicia workers background."""
+    start_cleanup_loop()
+    start_proactive_worker()
+    yield
+
+
 app = FastAPI(
     title="Voice AI Platform",
     version="0.3.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 
@@ -139,13 +151,6 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(widget.router, prefix="/api/widget", tags=["widget"])
 app.include_router(looptalk.router, prefix="/api/looptalk", tags=["looptalk"])
 app.include_router(proactive.router, prefix="/api/proactive", tags=["proactive"])
-
-@app.on_event("startup")
-async def startup_background_tasks() -> None:
-    """Inicia workers background: chat cleanup + proactive scheduler."""
-    start_cleanup_loop()
-    start_proactive_worker()
-
 
 # Dashboard React (build estático) — solo si existe el directorio dist
 dashboard_dir = Path(__file__).parent.parent / "dashboard" / "dist"
