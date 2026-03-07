@@ -17,6 +17,7 @@ import { PageLoader, Spinner } from '../components/ui/Spinner'
 import { PromptAssistant } from '../components/PromptAssistant'
 import { ChatTesterButton } from '../components/ChatTester'
 import { WhatsAppConfig } from '../components/WhatsAppConfig'
+import { GHLConfig } from '../components/GHLConfig'
 
 /* ─────────────────────────── Constants ─────────────────────────── */
 
@@ -67,6 +68,7 @@ const TABS = [
   { key: 'voice', label: 'Voz', icon: Volume2 },
   { key: 'calls', label: 'Llamadas', icon: Phone },
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
+  { key: 'ghl', label: 'GoHighLevel', icon: Zap },
   { key: 'intelligence', label: 'Inteligencia', icon: Brain },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
@@ -1448,6 +1450,11 @@ export function Settings() {
             {/* ── WhatsApp Tab ── */}
             {activeTab === 'whatsapp' && clientId && selectedAgent && (
               <WhatsAppConfig clientId={clientId} agentId={selectedAgent.id} />
+            )}
+
+            {/* ── GoHighLevel Tab ── */}
+            {activeTab === 'ghl' && clientId && selectedAgent && (
+              <GHLConfig clientId={clientId} agentId={selectedAgent.id} />
             )}
 
             {/* ── Inteligencia Tab ── */}
