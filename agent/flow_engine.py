@@ -418,9 +418,24 @@ class FlowEngine:
         return state
 
     def _evaluate_conditions(self, node: dict, state: FlowState) -> str:
-        """Evalúa condiciones de un nodo condition, retorna el handle ganador."""
+        """Evalúa condiciones de un nodo condition, retorna el handle ganador.
+
+        Variables de sistema disponibles (prefijo _):
+        - _turn_count: número de pasos ejecutados
+        - _sentiment: último sentimiento detectado (si está activo)
+        - _sentiment_score: score promedio de sentimiento (-2 a +2)
+        - _consecutive_negative: turnos negativos consecutivos
+        Todas las variables del flow están accesibles por su nombre.
+        """
         data = node.get("data", {})
         conditions = data.get("conditions", [])
+
+        # Variables de sistema inyectadas automáticamente
+        system_vars = {
+            "_turn_count": str(state.step_count),
+        }
+        # Merge: variables del flow + sistema (flow tiene prioridad)
+        all_vars = {**system_vars, **state.variables}
 
         for cond in conditions:
             variable = cond.get("variable", "")
@@ -428,7 +443,7 @@ class FlowEngine:
             value = cond.get("value", "")
             handle_id = cond.get("handleId", "default")
 
-            var_value = str(state.variables.get(variable, ""))
+            var_value = str(all_vars.get(variable, ""))
 
             if self._eval_operator(var_value, operator, value):
                 return handle_id
@@ -444,6 +459,12 @@ class FlowEngine:
             return var_value.lower().strip() != target.lower().strip()
         elif operator == "contains":
             return target.lower() in var_value.lower()
+        elif operator == "not_contains":
+            return target.lower() not in var_value.lower()
+        elif operator == "starts_with":
+            return var_value.lower().strip().startswith(target.lower().strip())
+        elif operator == "ends_with":
+            return var_value.lower().strip().endswith(target.lower().strip())
         elif operator == "not_empty":
             return bool(var_value.strip())
         elif operator == "empty":
@@ -453,11 +474,34 @@ class FlowEngine:
                 return float(var_value) > float(target)
             except (ValueError, TypeError):
                 return False
+        elif operator == "gte":
+            try:
+                return float(var_value) >= float(target)
+            except (ValueError, TypeError):
+                return False
         elif operator == "lt":
             try:
                 return float(var_value) < float(target)
             except (ValueError, TypeError):
                 return False
+        elif operator == "lte":
+            try:
+                return float(var_value) <= float(target)
+            except (ValueError, TypeError):
+                return False
+        elif operator == "regex":
+            try:
+                return bool(re.search(target, var_value, re.IGNORECASE))
+            except re.error:
+                logger.warning("Regex inválido en condición: %s", target)
+                return False
+        elif operator == "in":
+            # target es lista separada por comas: "a,b,c"
+            options = [o.strip().lower() for o in target.split(",")]
+            return var_value.lower().strip() in options
+        elif operator == "not_in":
+            options = [o.strip().lower() for o in target.split(",")]
+            return var_value.lower().strip() not in options
         return False
 
     def _validate_input(self, value: str, var_type: str) -> bool:
@@ -665,6 +709,15 @@ class FlowEngine:
                         f"Nodo transferir '{data.get('label', node['id'])}' no tiene número de transferencia."
                     )
 
+        # Operadores válidos para condiciones
+        valid_operators = {
+            "equals", "not_equals", "contains", "not_contains",
+            "starts_with", "ends_with", "not_empty", "empty",
+            "gt", "gte", "lt", "lte", "regex", "in", "not_in",
+        }
+        # Variables de sistema (no requieren definición en el flujo)
+        system_vars = {"_turn_count", "_sentiment", "_sentiment_score", "_consecutive_negative"}
+
         # Verificar que nodos condition tienen condiciones
         for node in nodes:
             if node.get("type") == "condition":
@@ -673,13 +726,19 @@ class FlowEngine:
                     warnings.append(
                         f"Nodo condición '{data.get('label', node['id'])}' no tiene condiciones definidas."
                     )
-                # Verificar variables usadas en condiciones existen
+                # Verificar variables y operadores en condiciones
                 for cond in data.get("conditions", []):
                     var_name = cond.get("variable", "")
-                    if var_name and var_name not in defined_vars:
+                    if var_name and var_name not in defined_vars and var_name not in system_vars:
                         warnings.append(
                             f"Nodo condición '{node['id']}': variable '{var_name}' "
                             "no está definida en ningún nodo del flujo."
+                        )
+                    op = cond.get("operator", "")
+                    if op and op not in valid_operators:
+                        warnings.append(
+                            f"Nodo condición '{node['id']}': operador '{op}' no reconocido. "
+                            f"Válidos: {', '.join(sorted(valid_operators))}"
                         )
 
         # Verificar action nodes sin failure edge

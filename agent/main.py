@@ -20,7 +20,12 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent, build_orchestrated_agent
 from agent.billing import CallBilling
+from agent.guardrails import GuardrailsConfig, GuardrailsEngine
+from agent.intent import IntentConfig, RealtimeIntentExtractor
+from agent.language_detect import LanguageDetectionConfig, LanguageDetector
 from agent.memory import AgentMemory
+from agent.quality import QualityConfig, score_call_quality
+from agent.sentiment import RealtimeSentimentAnalyzer, SentimentConfig
 from agent.config_loader import (
     AgentConfig,
     ResolvedConfig,
@@ -248,6 +253,56 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.exception("Error cargando memoria, continuando sin contexto")
             memory = None
 
+    # Sentimiento en tiempo real
+    sentiment_cfg = SentimentConfig.from_dict(config.agent.sentiment_config)
+    sentiment_analyzer: RealtimeSentimentAnalyzer | None = None
+    if sentiment_cfg.enabled:
+        sentiment_analyzer = RealtimeSentimentAnalyzer(
+            config=sentiment_cfg,
+            language=config.client.language,
+        )
+        logger.info(
+            "Sentimiento en tiempo real activado para '%s/%s' (umbral=%d, auto_transfer=%s)",
+            config.client.slug, config.agent.slug,
+            sentiment_cfg.escalation_threshold, sentiment_cfg.auto_transfer,
+        )
+
+    # Intent extraction en tiempo real
+    intent_cfg = IntentConfig.from_dict(config.agent.intent_config)
+    intent_extractor: RealtimeIntentExtractor | None = None
+    if intent_cfg.enabled:
+        intent_extractor = RealtimeIntentExtractor(config=intent_cfg)
+        logger.info(
+            "Intent extraction activado para '%s/%s' (%d intents)",
+            config.client.slug, config.agent.slug, len(intent_cfg.intents),
+        )
+
+    # Guardrails
+    guardrails_cfg = GuardrailsConfig.from_dict(config.agent.guardrails_config)
+    guardrails: GuardrailsEngine | None = None
+    if guardrails_cfg.enabled:
+        guardrails = GuardrailsEngine(guardrails_cfg)
+        logger.info(
+            "Guardrails activados para '%s/%s' (%d temas prohibidos)",
+            config.client.slug, config.agent.slug, len(guardrails_cfg.prohibited_topics),
+        )
+
+    # Detección de idioma dinámica
+    lang_cfg = LanguageDetectionConfig.from_dict(config.agent.language_detection_config)
+    language_detector: LanguageDetector | None = None
+    if lang_cfg.enabled:
+        language_detector = LanguageDetector(
+            config=lang_cfg,
+            default_language=config.client.language,
+        )
+        logger.info(
+            "Detección de idioma activada para '%s/%s' (idiomas: %s)",
+            config.client.slug, config.agent.slug, lang_cfg.supported_languages,
+        )
+
+    # Quality scoring config
+    quality_cfg = QualityConfig.from_dict(config.agent.quality_config)
+
     # Construir agente dinámico
     is_orchestrated = False
     if (
@@ -442,6 +497,85 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     def on_user_input(ev) -> None:
         if ev.is_final:
             handler.add_transcript_entry("user", ev.transcript)
+            # Guardrails: detectar prompt injection
+            if guardrails:
+                injection = guardrails.check_user_input(ev.transcript)
+                if not injection.passed:
+                    logger.warning(
+                        "Prompt injection detectado: %s", injection.violations
+                    )
+            # Analizar sentimiento, intent y idioma en background
+            if sentiment_analyzer or intent_extractor or language_detector:
+                asyncio.ensure_future(_analyze_user_turn(ev.transcript))
+
+    async def _analyze_user_turn(text: str) -> None:
+        """Analiza sentimiento, intent e idioma del turno del usuario."""
+        # Ejecutar análisis en paralelo
+        tasks = []
+        task_names = []
+        if sentiment_analyzer:
+            tasks.append(sentiment_analyzer.analyze_turn(text))
+            task_names.append("sentiment")
+        if intent_extractor:
+            tasks.append(intent_extractor.extract_intent(text))
+            task_names.append("intent")
+        if language_detector:
+            tasks.append(language_detector.detect_turn(text))
+            task_names.append("language")
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Mapear resultados por nombre
+        result_map = {}
+        for name, result in zip(task_names, results):
+            if not isinstance(result, Exception):
+                result_map[name] = result
+
+        # Language detection: si se decidió un switch, loggear
+        if "language" in result_map and result_map["language"]:
+            detected_lang = result_map["language"]
+            logger.info(
+                "Switch de idioma detectado: %s → actualizar pipeline",
+                detected_lang,
+            )
+            # El prompt override se puede inyectar si está configurado
+            if language_detector:
+                override = language_detector.get_language_prompt_override()
+                if override and hasattr(voice_agent, "instructions"):
+                    voice_agent.instructions = override
+                    logger.info("System prompt actualizado por cambio de idioma")
+
+        # Sentimiento: inyectar directiva si cambió
+        sentiment = result_map.get("sentiment")
+        if not sentiment_analyzer or sentiment is None:
+            return
+        directive = sentiment_analyzer.get_empathy_directive()
+
+        # Inyectar directiva emocional al agente si cambió
+        if directive and hasattr(voice_agent, "instructions"):
+            # Limpiar directiva anterior si existe
+            base = voice_agent.instructions
+            for marker in ("## ALERTA:", "## ALERT:", "## ALERTA URGENTE:", "## URGENT ALERT:"):
+                idx = base.find(marker)
+                if idx != -1:
+                    base = base[:idx].rstrip()
+            voice_agent.instructions = base + directive
+            logger.info(
+                "Directiva emocional inyectada al prompt (sentiment=%s)",
+                sentiment,
+            )
+
+        # Auto-transferir si se alcanzó el umbral
+        if sentiment_analyzer.should_auto_transfer():
+            sentiment_analyzer.mark_transfer_done()
+            logger.warning("Auto-transfer por frustración sostenida")
+            await session.generate_reply(
+                instructions=(
+                    "El cliente está muy frustrado. Discúlpate brevemente y "
+                    "dile que lo vas a transferir con un supervisor para que "
+                    "lo atiendan mejor. Luego usa transfer_to_human."
+                )
+            )
 
     @session.on("conversation_item_added")
     def on_conversation_item(ev) -> None:
@@ -463,7 +597,27 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Pasar agent_turns si es modo orquestado
         if is_orchestrated and hasattr(voice_agent, "agent_turns"):
             handler.set_agent_turns(voice_agent.agent_turns)
+        # Pasar resúmenes de inteligencia si están activos
+        if sentiment_analyzer:
+            handler.set_sentiment_summary(
+                sentiment_analyzer.get_call_sentiment_summary()
+            )
+        if intent_extractor:
+            handler.set_intent_summary(
+                intent_extractor.get_call_intent_summary()
+            )
         await handler.finalize(status="completed")
+
+        # Quality scoring async (no bloquea el shutdown)
+        if quality_cfg.enabled and len(handler._transcript) >= 2:
+            asyncio.create_task(
+                _async_quality_score(
+                    call_id=handler._transcript,
+                    transcript=list(handler._transcript),
+                    business_type=config.client.business_type,
+                    room_name=ctx.room.name,
+                )
+            )
 
         # Billing: consumir créditos por la llamada
         duration = int(
@@ -488,6 +642,40 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 )
             except Exception:
                 logger.exception("Error almacenando memoria de largo plazo")
+
+    async def _async_quality_score(
+        call_id: list,
+        transcript: list[dict],
+        business_type: str | None,
+        room_name: str,
+    ) -> None:
+        """Ejecuta quality scoring async y guarda en DB."""
+        try:
+            from agent.db import get_supabase
+
+            result = await score_call_quality(transcript, business_type)
+            if result and result.get("quality_score") is not None:
+                sb = get_supabase()
+                # Buscar el call por room name para actualizar
+                calls = (
+                    sb.table("calls")
+                    .select("id")
+                    .eq("livekit_room_name", room_name)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if calls.data:
+                    sb.table("calls").update({
+                        "quality_score": result["quality_score"],
+                    }).eq("id", calls.data[0]["id"]).execute()
+                    logger.info(
+                        "Quality score guardado: %d para room %s",
+                        result["quality_score"],
+                        room_name,
+                    )
+        except Exception:
+            logger.exception("Error en quality scoring async")
 
     ctx.add_shutdown_callback(on_shutdown)
 

@@ -49,6 +49,18 @@ class AgentConfig:
     # Flow builder
     conversation_mode: str = "prompt"
     conversation_flow: dict | None = None
+    # Sentimiento en tiempo real
+    sentiment_config: dict | None = None
+    # Intent extraction
+    intent_config: dict | None = None
+    # Guardrails
+    guardrails_config: dict | None = None
+    # Detección de idioma
+    language_detection_config: dict | None = None
+    # Quality scoring
+    quality_config: dict | None = None
+    # Proactive agent
+    proactive_config: dict | None = None
 
     # Properties de conveniencia (compatibilidad con pipeline_builder)
     @property
@@ -429,6 +441,12 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         orchestrator_priority=agent_row.get("orchestrator_priority", 0),
         conversation_mode=agent_row.get("conversation_mode", "prompt"),
         conversation_flow=agent_row.get("conversation_flow"),
+        sentiment_config=agent_row.get("sentiment_config"),
+        intent_config=agent_row.get("intent_config"),
+        guardrails_config=agent_row.get("guardrails_config"),
+        language_detection_config=agent_row.get("language_detection_config"),
+        quality_config=agent_row.get("quality_config"),
+        proactive_config=agent_row.get("proactive_config"),
     )
 
     client = SlimClientConfig(

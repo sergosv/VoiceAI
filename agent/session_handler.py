@@ -58,10 +58,20 @@ class SessionHandler:
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
         self._agent_turns: list[dict] = []
+        self._sentiment_summary: dict | None = None
+        self._intent_summary: dict | None = None
 
     def set_agent_turns(self, turns: list[dict]) -> None:
         """Establece el historial de ruteo de agentes (modo orquestado)."""
         self._agent_turns = turns
+
+    def set_sentiment_summary(self, summary: dict) -> None:
+        """Establece el resumen de sentimiento en tiempo real."""
+        self._sentiment_summary = summary
+
+    def set_intent_summary(self, summary: dict) -> None:
+        """Establece el resumen de intents detectados."""
+        self._intent_summary = summary
 
     def add_transcript_entry(self, role: str, text: str) -> None:
         """Agrega una entrada a la transcripción."""
@@ -131,6 +141,10 @@ class SessionHandler:
         }
         if self._agent_turns:
             call_data["agent_turns"] = self._agent_turns
+        if self._sentiment_summary:
+            call_data["sentiment_realtime"] = self._sentiment_summary
+        if self._intent_summary:
+            call_data["intent_realtime"] = self._intent_summary
         call_result = sb.table("calls").insert(call_data).execute()
         call_id = call_result.data[0]["id"] if call_result.data else None
 
@@ -213,6 +227,21 @@ class SessionHandler:
                 )
             except Exception:
                 logger.exception("Error auto-capturando contacto")
+
+        # Evaluar reglas proactivas post-llamada
+        if self._config.agent.proactive_config:
+            try:
+                _evaluate_proactive_rules(
+                    config=self._config,
+                    call_id=call_id,
+                    status=status,
+                    transcript=self._transcript,
+                    caller_number=self._caller_number,
+                    callee_number=self._callee_number,
+                    direction=self._direction,
+                )
+            except Exception:
+                logger.exception("Error evaluando reglas proactivas post-llamada")
 
         # Lanzar análisis universal IA como task async para TODAS las llamadas
         if call_id and len(self._transcript) >= 2:
@@ -440,6 +469,130 @@ async def _async_universal_analysis(
 
     except Exception:
         logger.exception("Error en análisis universal async para call %s", call_id)
+
+
+def _evaluate_proactive_rules(
+    config: ResolvedConfig,
+    call_id: str | None,
+    status: str,
+    transcript: list[dict],
+    caller_number: str | None,
+    callee_number: str | None,
+    direction: str,
+) -> None:
+    """Evalúa reglas proactivas del agente y crea acciones programadas post-llamada.
+
+    Reglas soportadas:
+    - callback_missed_call: si la llamada fue corta o no contestada
+    - followup_no_conversion: si la llamada terminó sin cita/venta
+    - reminder_appointment: si se agendó una cita (requiere datos de la cita)
+    - post_sale: si hubo conversión exitosa
+    """
+    proactive_cfg = config.agent.proactive_config
+    if not proactive_cfg or not proactive_cfg.get("enabled"):
+        return
+
+    rules = proactive_cfg.get("rules", [])
+    if not rules:
+        return
+
+    # Determinar número destino
+    target_number = caller_number if direction == "inbound" else callee_number
+    if not target_number:
+        return
+
+    sb = get_supabase()
+    now = datetime.now(timezone.utc)
+
+    for rule in rules:
+        rule_type = rule.get("type", "")
+        delay_minutes = rule.get("delay_minutes", 60)
+        channel = rule.get("channel", "call")
+        message = rule.get("message", "")
+        max_attempts = rule.get("max_attempts", 2)
+        schedule_config = rule.get("schedule")
+
+        # Verificar horario si existe
+        if schedule_config:
+            from datetime import timedelta
+            scheduled_time = now + timedelta(minutes=delay_minutes)
+            allowed_hours = schedule_config.get("hours", "09:00-19:00")
+            allowed_days = schedule_config.get("days", ["mon", "tue", "wed", "thu", "fri"])
+            day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+            if day_map.get(scheduled_time.weekday()) not in allowed_days:
+                continue
+            try:
+                start_h, end_h = allowed_hours.split("-")
+                sh, sm = map(int, start_h.split(":"))
+                eh, em = map(int, end_h.split(":"))
+                hour_decimal = scheduled_time.hour + scheduled_time.minute / 60
+                start_decimal = sh + sm / 60
+                end_decimal = eh + em / 60
+                if not (start_decimal <= hour_decimal <= end_decimal):
+                    continue
+            except (ValueError, AttributeError):
+                pass
+
+        should_create = False
+        from datetime import timedelta
+
+        if rule_type == "callback_missed_call":
+            # Llamada perdida o muy corta (< 2 turnos de transcript)
+            if status in ("missed", "no_answer") or len(transcript) < 2:
+                should_create = True
+
+        elif rule_type == "followup_no_conversion":
+            # Llamada completada pero sin cita (heurística: no se usó schedule_appointment)
+            condition = rule.get("condition", {})
+            if status == "completed" and len(transcript) >= 2:
+                has_appointment = any(
+                    "cita" in t.get("text", "").lower() or "agendada" in t.get("text", "").lower()
+                    for t in transcript if t.get("role") == "assistant"
+                )
+                if condition.get("no_appointment") and not has_appointment:
+                    should_create = True
+                elif not condition:
+                    should_create = True
+
+        elif rule_type == "post_sale":
+            # Conversión exitosa (heurística: transcript menciona confirmación)
+            if status == "completed" and len(transcript) >= 2:
+                has_conversion = any(
+                    any(w in t.get("text", "").lower() for w in ("confirmado", "agendada", "reservado", "listo"))
+                    for t in transcript if t.get("role") == "assistant"
+                )
+                if has_conversion:
+                    should_create = True
+
+        if should_create:
+            scheduled_at = (now + timedelta(minutes=delay_minutes)).isoformat()
+
+            # Reemplazar variables en el mensaje
+            final_message = message
+            if "{{name}}" in final_message:
+                final_message = final_message.replace("{{name}}", target_number)
+
+            try:
+                sb.table("scheduled_actions").insert({
+                    "agent_id": config.agent.id,
+                    "client_id": config.client.id,
+                    "rule_type": rule_type,
+                    "channel": channel,
+                    "target_number": target_number,
+                    "message": final_message,
+                    "scheduled_at": scheduled_at,
+                    "max_attempts": max_attempts,
+                    "source": "rule",
+                    "source_call_id": call_id,
+                    "metadata": {"rule": rule},
+                    "status": "pending",
+                }).execute()
+                logger.info(
+                    "Acción proactiva creada: %s -> %s @ %s vía %s",
+                    rule_type, target_number, scheduled_at, channel,
+                )
+            except Exception:
+                logger.exception("Error creando acción proactiva '%s'", rule_type)
 
 
 def _update_campaign_counters(sb: Client, campaign_id: str) -> None:

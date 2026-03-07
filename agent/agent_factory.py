@@ -13,6 +13,8 @@ from agent.config_loader import ResolvedConfig
 from agent.flow_engine import FlowEngine, FlowState
 from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
+from agent.tools.memory_tool import recall_memory_search
+from agent.tools.schedule_tool import schedule_reminder_action
 from agent.tools.whatsapp_tool import send_whatsapp_message
 from agent.tools.crm_tool import save_contact, update_contact_notes
 from agent.config_loader import load_whatsapp_config_by_agent_id
@@ -247,6 +249,67 @@ class VoiceAgent(Agent):
             client_id=self._config.client.id,
             phone=caller_phone,
             notes=notes,
+        )
+
+    @function_tool()
+    async def recall_memory(
+        self,
+        context: RunContext,
+        query: str,
+    ) -> str:
+        """Busca en el historial de interacciones pasadas con este contacto.
+
+        Usa esta herramienta cuando el usuario pregunte sobre conversaciones
+        anteriores, acuerdos previos, o información que ya compartió antes.
+
+        Args:
+            query: Pregunta o tema a buscar en el historial (ej: "cita anterior", "último pedido").
+        """
+        contact_id = getattr(context, "_memory_contact_id", None) or ""
+        if not contact_id:
+            return "No tengo historial previo de este contacto."
+
+        return await recall_memory_search(
+            query=query,
+            client_id=self._config.client.id,
+            contact_id=contact_id,
+        )
+
+    @function_tool()
+    async def schedule_reminder(
+        self,
+        context: RunContext,
+        description: str,
+        datetime_str: str,
+        channel: str = "call",
+    ) -> str:
+        """Programa un recordatorio o seguimiento para el contacto.
+
+        Usa esta herramienta cuando el usuario pida que le recuerdes algo,
+        que lo llames después, o que le mandes un mensaje en cierta fecha.
+
+        Args:
+            description: Qué recordar (ej: "Cita con el doctor", "Pago de factura").
+            datetime_str: Fecha y hora en formato YYYY-MM-DDTHH:MM:SS (ej: "2026-03-08T14:00:00").
+            channel: Canal del recordatorio: "call" para llamada, "whatsapp" para mensaje.
+        """
+        if not self._tool_enabled("schedule_reminder"):
+            return "La función de recordatorios no está habilitada."
+
+        caller_phone = getattr(context, "_caller_phone", None) or ""
+        if not caller_phone:
+            return "No tengo un número de teléfono para programar el recordatorio."
+
+        contact_id = getattr(context, "_memory_contact_id", None)
+
+        return await schedule_reminder_action(
+            description=description,
+            datetime_str=datetime_str,
+            channel=channel,
+            agent_id=self._config.agent.id,
+            client_id=self._config.client.id,
+            target_number=caller_phone,
+            target_contact_id=contact_id,
         )
 
     @function_tool()
@@ -557,6 +620,12 @@ TOOL_INSTRUCTIONS = {
     "search_knowledge": (
         "Tienes acceso a la BASE DE CONOCIMIENTOS del negocio. Cuando te pregunten "
         "sobre servicios, precios, horarios o información del negocio, busca en ella."
+    ),
+    "schedule_reminder": (
+        "Puedes PROGRAMAR RECORDATORIOS. Si el usuario te pide que le recuerdes algo, "
+        "que lo llames después, o que le mandes un mensaje en cierta fecha, usa "
+        "schedule_reminder. Pregúntale qué quiere que le recuerdes, cuándo, y si "
+        "prefiere llamada o WhatsApp."
     ),
 }
 

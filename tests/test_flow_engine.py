@@ -379,6 +379,133 @@ class TestConditionEvaluation:
         assert engine._eval_operator("3", "lt", "5")
         assert not engine._eval_operator("10", "lt", "5")
 
+    def test_condition_gte_lte(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("5", "gte", "5")
+        assert engine._eval_operator("6", "gte", "5")
+        assert not engine._eval_operator("4", "gte", "5")
+        assert engine._eval_operator("5", "lte", "5")
+        assert engine._eval_operator("4", "lte", "5")
+        assert not engine._eval_operator("6", "lte", "5")
+
+    def test_condition_starts_with(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("consulta general", "starts_with", "consulta")
+        assert not engine._eval_operator("urgencia", "starts_with", "consulta")
+
+    def test_condition_ends_with(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("correo@gmail.com", "ends_with", "gmail.com")
+        assert not engine._eval_operator("correo@yahoo.com", "ends_with", "gmail.com")
+
+    def test_condition_not_contains(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("hola mundo", "not_contains", "error")
+        assert not engine._eval_operator("hay un error", "not_contains", "error")
+
+    def test_condition_regex(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("9991234567", "regex", r"^\d{10}$")
+        assert not engine._eval_operator("abc", "regex", r"^\d{10}$")
+
+    def test_condition_regex_invalid(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        # Regex inválido no debe crashear
+        assert not engine._eval_operator("test", "regex", "[invalid")
+
+    def test_condition_in(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("rojo", "in", "rojo,azul,verde")
+        assert not engine._eval_operator("amarillo", "in", "rojo,azul,verde")
+        # Con espacios
+        assert engine._eval_operator("azul", "in", "rojo, azul, verde")
+
+    def test_condition_not_in(self) -> None:
+        engine = FlowEngine({"nodes": [], "edges": []})
+        assert engine._eval_operator("amarillo", "not_in", "rojo,azul,verde")
+        assert not engine._eval_operator("rojo", "not_in", "rojo,azul,verde")
+
+    def test_condition_with_system_var_turn_count(self) -> None:
+        """Condición puede evaluar _turn_count (variable de sistema)."""
+        flow = _make_flow(
+            [
+                _start_node(),
+                _message_node("m1", "Hola", wait_for_response=True),
+                _condition_node(
+                    "cond-1",
+                    [{"variable": "_turn_count", "operator": "gte", "value": "2", "handleId": "h-many"}],
+                    default_handle="h-few",
+                ),
+                _message_node("msg-many", "Ya llevamos rato"),
+                _message_node("msg-few", "Apenas empezamos"),
+                _end_node(),
+            ],
+            [
+                _edge("start-1", "m1"),
+                _edge("m1", "cond-1"),
+                _edge("cond-1", "msg-many", "h-many"),
+                _edge("cond-1", "msg-few", "h-few"),
+                _edge("msg-many", "end-1"),
+                _edge("msg-few", "end-1"),
+            ],
+        )
+        engine = FlowEngine(flow)
+        state = engine.start()
+        state, _ = engine.process_user_input(state, "")  # start → m1
+        state, action = engine.process_user_input(state, "ok")  # m1 → cond → eval
+        # step_count debería ser >= 2 después de 2 avances
+        assert state.current_node_id in ("msg-many", "msg-few")
+
+    def test_condition_branching_with_lead_score(self) -> None:
+        """Condición que evalúa un lead_score numérico para branching."""
+        flow = _make_flow(
+            [
+                _start_node(),
+                _collect_node("c1", "lead_score", "number", "Del 1 al 100, qué tan interesado?"),
+                _condition_node(
+                    "cond-1",
+                    [
+                        {"variable": "lead_score", "operator": "gte", "value": "70", "handleId": "h-hot"},
+                        {"variable": "lead_score", "operator": "gte", "value": "40", "handleId": "h-warm"},
+                    ],
+                    default_handle="h-cold",
+                ),
+                _message_node("msg-hot", "Excelente, te transfiero con ventas"),
+                _message_node("msg-warm", "Te envío más información"),
+                _message_node("msg-cold", "Gracias por tu tiempo"),
+                _end_node(),
+            ],
+            [
+                _edge("start-1", "c1"),
+                _edge("c1", "cond-1"),
+                _edge("cond-1", "msg-hot", "h-hot"),
+                _edge("cond-1", "msg-warm", "h-warm"),
+                _edge("cond-1", "msg-cold", "h-cold"),
+                _edge("msg-hot", "end-1"),
+                _edge("msg-warm", "end-1"),
+                _edge("msg-cold", "end-1"),
+            ],
+        )
+        engine = FlowEngine(flow)
+
+        # Test con score alto
+        state = engine.start()
+        state, _ = engine.process_user_input(state, "")
+        state, action = engine.process_user_input(state, "85", "85")
+        assert state.current_node_id == "msg-hot"
+
+        # Test con score medio
+        state = engine.start()
+        state, _ = engine.process_user_input(state, "")
+        state, action = engine.process_user_input(state, "50", "50")
+        assert state.current_node_id == "msg-warm"
+
+        # Test con score bajo
+        state = engine.start()
+        state, _ = engine.process_user_input(state, "")
+        state, action = engine.process_user_input(state, "20", "20")
+        assert state.current_node_id == "msg-cold"
+
 
 class TestInterpolation:
     def test_interpolate_variables(self) -> None:
@@ -445,6 +572,37 @@ class TestValidation:
         valid, errors, warnings = FlowEngine.validate_flow({"nodes": [], "edges": []})
         assert not valid
         assert any("no tiene nodos" in e for e in errors)
+
+    def test_validate_unknown_operator(self) -> None:
+        flow = _make_flow(
+            [
+                _start_node(),
+                _condition_node(
+                    "cond-1",
+                    [{"variable": "x", "operator": "banana", "value": "1", "handleId": "h-1"}],
+                ),
+                _end_node(),
+            ],
+            [_edge("start-1", "cond-1"), _edge("cond-1", "end-1")],
+        )
+        _, _, warnings = FlowEngine.validate_flow(flow)
+        assert any("banana" in w and "no reconocido" in w for w in warnings)
+
+    def test_validate_system_vars_no_warning(self) -> None:
+        """Variables de sistema (_turn_count, etc.) no generan warning."""
+        flow = _make_flow(
+            [
+                _start_node(),
+                _condition_node(
+                    "cond-1",
+                    [{"variable": "_turn_count", "operator": "gte", "value": "5", "handleId": "h-1"}],
+                ),
+                _end_node(),
+            ],
+            [_edge("start-1", "cond-1"), _edge("cond-1", "end-1")],
+        )
+        _, _, warnings = FlowEngine.validate_flow(flow)
+        assert not any("_turn_count" in w for w in warnings)
 
 
 class TestSystemPrompt:

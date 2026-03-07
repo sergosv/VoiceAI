@@ -116,6 +116,13 @@ class AgentOut(BaseModel):
     # Flow builder
     conversation_mode: str = "prompt"
     conversation_flow: dict | None = None
+    # Inteligencia de agentes
+    sentiment_config: dict | None = None
+    intent_config: dict | None = None
+    guardrails_config: dict | None = None
+    language_detection_config: dict | None = None
+    quality_config: dict | None = None
+    proactive_config: dict | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -148,6 +155,13 @@ class AgentCreateRequest(BaseModel):
     # Flow builder
     conversation_mode: str = "prompt"
     conversation_flow: dict | None = None
+    # Inteligencia de agentes
+    sentiment_config: dict | None = None
+    intent_config: dict | None = None
+    guardrails_config: dict | None = None
+    language_detection_config: dict | None = None
+    quality_config: dict | None = None
+    proactive_config: dict | None = None
 
 
 class AgentUpdateRequest(BaseModel):
@@ -178,6 +192,13 @@ class AgentUpdateRequest(BaseModel):
     # Flow builder
     conversation_mode: str | None = None
     conversation_flow: dict | None = None
+    # Inteligencia de agentes
+    sentiment_config: dict | None = None
+    intent_config: dict | None = None
+    guardrails_config: dict | None = None
+    language_detection_config: dict | None = None
+    quality_config: dict | None = None
+    proactive_config: dict | None = None
 
 
 # ── Clients ───────────────────────────────────────────

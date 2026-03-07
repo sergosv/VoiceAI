@@ -24,9 +24,10 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 from api.routes import (
     agents, ai, analytics, api_integrations, auth, billing, calls, campaigns, chat,
     clients, contacts, appointments, costs, dashboard, documents, evolution,
-    looptalk, mcp, templates, voices, webhooks, whatsapp, whatsapp_webhooks, widget,
+    looptalk, mcp, proactive, templates, voices, webhooks, whatsapp, whatsapp_webhooks, widget,
 )
 from api.services.chat_store import start_cleanup_loop
+from api.services.proactive_worker import start_proactive_worker
 
 # Rate limiter global
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
@@ -137,11 +138,13 @@ app.include_router(templates.router, prefix="/api/templates", tags=["templates"]
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(widget.router, prefix="/api/widget", tags=["widget"])
 app.include_router(looptalk.router, prefix="/api/looptalk", tags=["looptalk"])
+app.include_router(proactive.router, prefix="/api/proactive", tags=["proactive"])
 
 @app.on_event("startup")
-async def startup_chat_cleanup() -> None:
-    """Inicia el loop de limpieza de conversaciones de chat."""
+async def startup_background_tasks() -> None:
+    """Inicia workers background: chat cleanup + proactive scheduler."""
     start_cleanup_loop()
+    start_proactive_worker()
 
 
 # Dashboard React (build estático) — solo si existe el directorio dist
