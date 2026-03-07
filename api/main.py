@@ -6,26 +6,48 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+from api.logging_config import RequestIdMiddleware, setup_logging
 
 load_dotenv()
 
+# Configurar logging estructurado (JSON en producción)
+setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
+
 from api.routes import (
-    agents, ai, api_integrations, auth, billing, calls, campaigns, chat,
+    agents, ai, analytics, api_integrations, auth, billing, calls, campaigns, chat,
     clients, contacts, appointments, costs, dashboard, documents, evolution,
-    mcp, templates, voices, webhooks, whatsapp, whatsapp_webhooks,
+    looptalk, mcp, templates, voices, webhooks, whatsapp, whatsapp_webhooks, widget,
 )
 from api.services.chat_store import start_cleanup_loop
 
+# Rate limiter global
+limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+
 app = FastAPI(
     title="Voice AI Platform",
-    version="0.2.0",
+    version="0.3.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+app.state.limiter = limiter
+
+
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Demasiadas solicitudes. Intenta de nuevo en un momento."},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 # CORS — localhost para dev, ALLOWED_ORIGINS para producción
 _origins = [
@@ -39,30 +61,53 @@ if _extra:
 # Cloudflare Pages: aceptar deployment-specific URLs (hash.project.pages.dev)
 _cf_pages_domain = os.environ.get("CF_PAGES_DOMAIN", "")
 
-
-def _cors_allow_origin(origin: str) -> bool:
-    """Permite origins exactos + subdominios de Cloudflare Pages."""
-    if origin in _origins:
-        return True
-    if _cf_pages_domain and origin.endswith(f".{_cf_pages_domain}"):
-        return True
-    return False
-
+_cf_regex = (
+    rf"https://.*\.{_cf_pages_domain.replace('.', r'\.')}"
+    if _cf_pages_domain
+    else r"https://.*\.voiceai-69f\.pages\.dev"
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_origin_regex=rf"https://.*\.voiceai-69f\.pages\.dev" if not _cf_pages_domain else rf"https://.*\.{_cf_pages_domain.replace('.', r'\.')}",
+    allow_origin_regex=_cf_regex,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Request-ID"],
 )
+
+# Correlation ID middleware (genera request_id por petición)
+app.add_middleware(RequestIdMiddleware)
+
+
+# Inyectar versión en todas las respuestas
+@app.middleware("http")
+async def add_version_header(request: Request, call_next):  # type: ignore[no-untyped-def]
+    response = await call_next(request)
+    response.headers["X-API-Version"] = app.version
+    return response
 
 
 # Health check
 @app.get("/api/health")
 async def health_check() -> dict[str, str]:
-    return {"status": "ok", "service": "voice-ai-platform"}
+    return {"status": "ok", "service": "voice-ai-platform", "version": app.version}
+
+
+# Widget JS — servido con CORS abierto para embeber en sitios externos
+@app.get("/widget.js")
+async def serve_widget_js() -> Response:
+    widget_path = Path(__file__).parent.parent / "dashboard" / "dist" / "widget.js"
+    if not widget_path.exists():
+        widget_path = Path(__file__).parent.parent / "dashboard" / "public" / "widget.js"
+    if not widget_path.exists():
+        return Response(content="// widget not found", media_type="application/javascript")
+    content = widget_path.read_text(encoding="utf-8")
+    return Response(
+        content=content,
+        media_type="application/javascript",
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"},
+    )
 
 
 # Rutas API
@@ -89,6 +134,9 @@ app.include_router(evolution.router, prefix="/api/clients", tags=["evolution"])
 app.include_router(whatsapp.inbox_router, prefix="/api/whatsapp", tags=["whatsapp-inbox"])
 app.include_router(whatsapp_webhooks.router, prefix="/api/webhooks/whatsapp", tags=["whatsapp-webhooks"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
+app.include_router(widget.router, prefix="/api/widget", tags=["widget"])
+app.include_router(looptalk.router, prefix="/api/looptalk", tags=["looptalk"])
 
 @app.on_event("startup")
 async def startup_chat_cleanup() -> None:

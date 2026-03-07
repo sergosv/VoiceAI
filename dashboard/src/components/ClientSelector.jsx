@@ -8,7 +8,11 @@ export function ClientSelector({ value, onChange }) {
 
   useEffect(() => {
     if (user?.role !== 'admin') return
-    api.get('/clients').then(setClients).catch(console.error)
+    let cancelled = false
+    api.get('/clients')
+      .then(data => { if (!cancelled) setClients(data) })
+      .catch(() => {}) // selector falla silenciosamente — no bloquea UI
+    return () => { cancelled = true }
   }, [user])
 
   // Solo mostrar para admin

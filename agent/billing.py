@@ -13,13 +13,11 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from supabase import Client, create_client
+from supabase import Client
+
+from agent.db import get_supabase as _get_supabase
 
 logger = logging.getLogger("billing")
-
-
-def _get_supabase() -> Client:
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
 
 
 class CallBilling:

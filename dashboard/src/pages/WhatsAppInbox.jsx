@@ -87,7 +87,7 @@ export function WhatsAppInbox() {
     try {
       const data = await api.get('/whatsapp/stats')
       setStats(data)
-    } catch { /* ignore */ }
+    } catch { /* stats son no-críticos */ }
   }
 
   async function handleSend(e) {

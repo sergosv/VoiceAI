@@ -29,10 +29,12 @@ const McpServers = lazy(() => import('./pages/McpServers').then(m => ({ default:
 const AgentWizard = lazy(() => import('./pages/AgentWizard').then(m => ({ default: m.AgentWizard })))
 const ApiIntegrations = lazy(() => import('./pages/ApiIntegrations').then(m => ({ default: m.ApiIntegrations })))
 
+const Analytics = lazy(() => import('./pages/Analytics').then(m => ({ default: m.Analytics })))
 const Billing = lazy(() => import('./pages/Billing').then(m => ({ default: m.Billing })))
 const PricingConfig = lazy(() => import('./pages/admin/PricingConfig').then(m => ({ default: m.PricingConfig })))
 const FlowBuilder = lazy(() => import('./pages/FlowBuilder').then(m => ({ default: m.FlowBuilder })))
 const WhatsAppInbox = lazy(() => import('./pages/WhatsAppInbox').then(m => ({ default: m.WhatsAppInbox })))
+const LoopTalk = lazy(() => import('./pages/LoopTalk').then(m => ({ default: m.LoopTalk })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -52,6 +54,7 @@ export default function App() {
               {/* Dashboard */}
               <Route element={<DashboardLayout />}>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/analytics" element={<Analytics />} />
                 <Route path="/calls" element={<Calls />} />
                 <Route path="/calls/:id" element={<CallDetail />} />
                 <Route path="/contacts" element={<Contacts />} />
@@ -68,6 +71,7 @@ export default function App() {
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/create-agent" element={<AgentWizard />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/looptalk" element={<LoopTalk />} />
 
                 {/* Admin — protegido */}
                 <Route path="/admin/clients" element={<AdminRoute><ClientsList /></AdminRoute>} />

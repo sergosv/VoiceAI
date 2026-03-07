@@ -7,6 +7,7 @@ responde cada turno según la intención del usuario.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -80,16 +81,22 @@ async def decide_agent(
 
     try:
         client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
-        response = await client.aio.models.generate_content(
-            model=coordinator_model,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=100,
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=coordinator_model,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=100,
+                ),
             ),
+            timeout=COORDINATOR_TIMEOUT_S,
         )
         raw = response.text.strip() if response.text else ""
         return _parse_agent_id(raw, [a["id"] for a in agents_metadata])
+    except asyncio.TimeoutError:
+        logger.warning("Timeout en coordinador (%.1fs)", COORDINATOR_TIMEOUT_S)
+        return None
     except Exception:
         logger.exception("Error en coordinador ADK")
         return None

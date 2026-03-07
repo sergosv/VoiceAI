@@ -7,8 +7,8 @@ on:
     branches: [master]
 
 jobs:
-  test-python:
-    name: Python Tests
+  lint:
+    name: Lint & Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,9 +19,36 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt black isort flake8 mypy
 
-      - name: Run tests
+      - name: Black (format check)
+        run: python -m black --check --line-length 100 agent/ api/ tests/
+
+      - name: isort (import order check)
+        run: python -m isort --check-only --profile black --line-length 100 agent/ api/ tests/
+
+      - name: Flake8 (style)
+        run: python -m flake8 agent/ api/ --max-line-length 100 --extend-ignore E501,W503,E203
+
+      - name: Mypy (type check)
+        run: python -m mypy agent/ api/ --ignore-missing-imports --no-error-summary || true
+
+  test-python:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest-cov
+
+      - name: Run tests with coverage
         env:
           SUPABASE_URL: https://test.supabase.co
           SUPABASE_SERVICE_KEY: test-key
@@ -34,7 +61,19 @@ jobs:
           LIVEKIT_URL: wss://test.livekit.cloud
           LIVEKIT_API_KEY: test-key
           LIVEKIT_API_SECRET: test-secret
-        run: python -m pytest tests/ -v --tb=short
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --cov=agent --cov=api \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=30
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
   build-dashboard:
     name: Dashboard Build

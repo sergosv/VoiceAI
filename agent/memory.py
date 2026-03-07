@@ -39,7 +39,8 @@ CHANNEL_ICONS = {
 
 
 def _get_supabase() -> Client:
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    from agent.db import get_supabase
+    return get_supabase()
 
 
 def _get_gemini() -> genai.Client:

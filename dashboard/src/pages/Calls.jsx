@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Phone } from 'lucide-react'
 import { api } from '../lib/api'
+import { useToast } from '../context/ToastContext'
 import { CallsTable } from '../components/CallsTable'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -15,6 +16,7 @@ const STATUS_OPTIONS = [
 ]
 
 export function Calls() {
+  const toast = useToast()
   const [calls, setCalls] = useState([])
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -24,6 +26,7 @@ export function Calls() {
   const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     const params = new URLSearchParams({ page, per_page: 20 })
     if (statusFilter) params.set('status', statusFilter)
@@ -31,10 +34,11 @@ export function Calls() {
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
     api.get(`/calls?${params}`)
-      .then(setCalls)
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [page, statusFilter, clientId, dateFrom, dateTo])
+      .then(data => { if (!cancelled) setCalls(data) })
+      .catch(err => { if (!cancelled) toast.error(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page, statusFilter, clientId, dateFrom, dateTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleClear() {
     setStatusFilter('')

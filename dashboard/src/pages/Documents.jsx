@@ -102,7 +102,7 @@ export function Documents() {
     const params = clientId ? `?client_id=${clientId}` : ''
     api.get(`/documents${params}`)
       .then(setDocs)
-      .catch(console.error)
+      .catch(err => toast.error(err.message))
       .finally(() => setLoading(false))
   }
 

@@ -277,11 +277,14 @@ async def _process_locked(
     # 10. Persistir historial actualizado
     serialized = serialize_history(conversation.history)
     now = datetime.now(timezone.utc).isoformat()
-    sb.table("whatsapp_conversations").update({
-        "history": serialized,
-        "message_count": (conv_row.get("message_count", 0) or 0) + 2,
-        "last_message_at": now,
-    }).eq("id", conv_id).execute()
+    try:
+        sb.table("whatsapp_conversations").update({
+            "history": serialized,
+            "message_count": (conv_row.get("message_count", 0) or 0) + 2,
+            "last_message_at": now,
+        }).eq("id", conv_id).execute()
+    except Exception:
+        logger.exception("WA: error actualizando conversación %s", conv_id)
 
 
 # ── Helpers ─────────────────────────────────────────────
@@ -392,13 +395,20 @@ async def _get_or_create_conversation(
         "status": "active",
         "message_count": 0,
     }
-    sb.table("whatsapp_conversations").insert(new_conv).execute()
+    try:
+        sb.table("whatsapp_conversations").insert(new_conv).execute()
+    except Exception:
+        logger.exception("WA: error creando conversación para %s", remote_phone)
+        return None
     logger.info("WA: nueva sesión %s para %s", new_conv["id"], remote_phone)
 
     # Enviar greeting si configurado
     if greeting:
         provider = get_provider(wa_config["provider"])
-        await provider.send_text(wa_config, remote_phone, greeting)
+        try:
+            await provider.send_text(wa_config, remote_phone, greeting)
+        except Exception:
+            logger.exception("WA: error enviando greeting a %s", remote_phone)
         # Guardar greeting como mensaje outbound
         await _save_message(
             sb,

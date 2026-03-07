@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import {
   Target, Building2, ArrowDownToLine, ArrowUpFromLine, RefreshCw,
   FileText, Workflow, ChevronLeft, ChevronRight, Sparkles, Check, Copy,
@@ -14,6 +15,7 @@ const STEP_LABELS = ['Objetivo', 'Industria', 'Direccion', 'Plantilla', 'Persona
 
 export function AgentWizard() {
   const { user } = useAuth()
+  const toast = useToast()
   const navigate = useNavigate()
 
   const [step, setStep] = useState(0)
@@ -49,15 +51,15 @@ export function AgentWizard() {
     ]).then(([objs, verts]) => {
       setObjectives(objs)
       setVerticals(verts)
-    }).catch(console.error)
-  }, [])
+    }).catch(err => toast.error(err.message))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Buscar templates cuando se selecciona vertical + direccion
   useEffect(() => {
     if (selectedVertical && selectedDirection) {
       const params = new URLSearchParams({ vertical: selectedVertical, direction: selectedDirection })
       if (selectedObjective) params.append('objective', selectedObjective)
-      api.get(`/templates/search?${params}`).then(setTemplates).catch(console.error)
+      api.get(`/templates/search?${params}`).then(setTemplates).catch(err => toast.error(err.message))
     }
   }, [selectedVertical, selectedDirection, selectedObjective])
 
@@ -72,7 +74,7 @@ export function AgentWizard() {
       setResult(data)
       setStep(5)
     } catch (err) {
-      console.error('Generate error:', err)
+      toast.error(err.message || 'Error al generar')
     } finally {
       setGenerating(false)
     }

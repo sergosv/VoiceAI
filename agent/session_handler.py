@@ -8,10 +8,11 @@ import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from supabase import create_client, Client
+from supabase import Client
 
 from agent.call_analyzer import analyze_call_transcript, analyze_call_universal
 from agent.config_loader import ResolvedConfig
+from agent.db import get_supabase
 from agent.phone_utils import normalize_phone
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ RATES = {
 
 
 def _get_supabase() -> Client:
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    return get_supabase()
 
 
 class SessionHandler:

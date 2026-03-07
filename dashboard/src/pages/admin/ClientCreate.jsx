@@ -23,8 +23,8 @@ export function ClientCreate() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    api.get('/voices').then(setVoices).catch(console.error)
-  }, [])
+    api.get('/voices').then(setVoices).catch(err => toast.error(err.message))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function updateField(field, value) {
     setForm(f => ({ ...f, [field]: value }))

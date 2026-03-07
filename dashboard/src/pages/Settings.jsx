@@ -342,7 +342,7 @@ export function Settings() {
           selectAgent(target, cid)
         }
       })
-      .catch(console.error)
+      .catch(err => toast.error(err.message))
       .finally(() => setLoading(false))
   }, [user]) // eslint-disable-line react-hooks/exhaustive-deps
 

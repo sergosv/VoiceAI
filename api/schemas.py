@@ -2,10 +2,49 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+# ── Validadores reutilizables ────────────────────────────
+
+_PHONE_RE = re.compile(r"^\+?[0-9\s\-()]{7,20}$")
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$")
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+
+def _validate_phone(v: str) -> str:
+    """Valida formato de teléfono básico."""
+    if not _PHONE_RE.match(v.strip()):
+        raise ValueError("Formato de teléfono inválido. Usa 7-20 dígitos, opcionalmente con +, -, (), espacios.")
+    return v.strip()
+
+
+def _validate_email(v: str) -> str:
+    """Valida formato de email básico."""
+    if not _EMAIL_RE.match(v.strip()):
+        raise ValueError("Formato de email inválido.")
+    return v.strip().lower()
+
+
+def _validate_slug(v: str) -> str:
+    """Valida formato de slug."""
+    if not _SLUG_RE.match(v):
+        raise ValueError("Slug inválido: solo letras minúsculas, números y guiones (3-50 chars).")
+    return v
+
+
+def _validate_url(v: str) -> str:
+    """Valida que sea una URL http/https."""
+    v = v.strip()
+    if not v.startswith(("http://", "https://")):
+        raise ValueError("URL debe comenzar con http:// o https://")
+    if len(v) > 2048:
+        raise ValueError("URL demasiado larga (máx 2048 caracteres).")
+    return v
 
 
 # ── Auth ──────────────────────────────────────────────
@@ -21,10 +60,22 @@ class UserOut(BaseModel):
 
 class RegisterUserRequest(BaseModel):
     email: str
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
     role: str = "client"
     client_id: str | None = None
-    display_name: str | None = None
+    display_name: str | None = Field(None, max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return _validate_email(v)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        if v not in ("admin", "client"):
+            raise ValueError("Role debe ser 'admin' o 'client'.")
+        return v
 
 
 # ── Voices ────────────────────────────────────────────
@@ -70,8 +121,8 @@ class AgentOut(BaseModel):
 
 
 class AgentCreateRequest(BaseModel):
-    name: str
-    slug: str | None = None
+    name: str = Field(..., min_length=1, max_length=100)
+    slug: str | None = Field(None, max_length=50)
     system_prompt: str | None = None
     greeting: str | None = None
     examples: str | None = None
@@ -177,16 +228,35 @@ class ClientOut(BaseModel):
 
 
 class ClientCreateRequest(BaseModel):
-    name: str
-    slug: str
+    name: str = Field(..., min_length=1, max_length=200)
+    slug: str = Field(..., min_length=3, max_length=50)
     business_type: str = "generic"
-    agent_name: str = "María"
+    agent_name: str = Field("María", max_length=100)
     voice_key: str = "es_female_warm"
     language: str = "es"
     greeting: str | None = None
     system_prompt: str | None = None
     owner_email: str | None = None
     skip_store: bool = False
+
+    @field_validator("slug")
+    @classmethod
+    def validate_slug(cls, v: str) -> str:
+        return _validate_slug(v)
+
+    @field_validator("owner_email")
+    @classmethod
+    def validate_owner_email(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_email(v)
+        return v
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, v: str) -> str:
+        if v not in ("es", "en", "pt", "fr"):
+            raise ValueError("Idioma no soportado. Usa: es, en, pt, fr.")
+        return v
 
 
 class ClientUpdateRequest(BaseModel):
@@ -231,6 +301,11 @@ class ClientUpdateRequest(BaseModel):
 class AssignPhoneRequest(BaseModel):
     phone_number: str
     skip_livekit: bool = False
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        return _validate_phone(v)
 
 
 class AvailableNumberOut(BaseModel):
@@ -399,11 +474,30 @@ class ContactOut(BaseModel):
 
 
 class ContactCreateRequest(BaseModel):
-    name: str | None = None
+    name: str | None = Field(None, max_length=200)
     phone: str
     email: str | None = None
-    notes: str | None = None
+    notes: str | None = Field(None, max_length=2000)
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        return _validate_phone(v)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_email(v)
+        return v
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str]) -> list[str]:
+        if len(v) > 20:
+            raise ValueError("Máximo 20 tags por contacto.")
+        return [t.strip()[:50] for t in v if t.strip()]
 
 
 class ContactUpdateRequest(BaseModel):
@@ -525,10 +619,24 @@ class McpServerOut(BaseModel):
 
 
 class McpServerCreateRequest(BaseModel):
-    name: str
-    description: str | None = None
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=500)
     connection_type: str = "http"
     url: str | None = None
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is not None:
+            return _validate_url(v)
+        return v
+
+    @field_validator("connection_type")
+    @classmethod
+    def validate_connection_type(cls, v: str) -> str:
+        if v not in ("http", "stdio"):
+            raise ValueError("connection_type debe ser 'http' o 'stdio'.")
+        return v
     transport_type: str = "sse"
     headers: dict[str, str] = Field(default_factory=dict)
     command: str | None = None
@@ -602,6 +710,13 @@ class PurchaseRequest(BaseModel):
     package_id: str
     payment_method: str  # 'stripe' o 'mercadopago'
 
+    @field_validator("payment_method")
+    @classmethod
+    def validate_payment_method(cls, v: str) -> str:
+        if v not in ("stripe", "mercadopago"):
+            raise ValueError("Método de pago debe ser 'stripe' o 'mercadopago'.")
+        return v
+
 
 class CreditTransactionOut(BaseModel):
     id: str
@@ -656,9 +771,14 @@ class PricingUpdate(BaseModel):
 
 class GiftCreditsRequest(BaseModel):
     client_id: str
-    credits: float
-    reason: str
+    credits: float = Field(..., gt=0, le=100000)
+    reason: str = Field(..., min_length=3, max_length=500)
     admin_email: str
+
+    @field_validator("admin_email")
+    @classmethod
+    def validate_admin_email(cls, v: str) -> str:
+        return _validate_email(v)
 
 
 # ── Generic ───────────────────────────────────────────
@@ -689,9 +809,14 @@ class ApiIntegrationOut(BaseModel):
 
 
 class ApiIntegrationCreateRequest(BaseModel):
-    name: str
-    description: str = ""
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field("", max_length=500)
     url: str
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        return _validate_url(v)
     method: str = "POST"
     headers: dict[str, str] = Field(default_factory=dict)
     body_template: dict | None = None

@@ -7,6 +7,7 @@ cargando la configuración del agente + cliente desde Supabase.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -46,8 +47,20 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    format="%(asctime)s %(levelname)s [%(room)s] %(name)s — %(message)s",
 )
+# Filter que inyecta room_name en cada log record
+_old_factory = logging.getLogRecordFactory()
+
+
+def _record_factory(*args: object, **kwargs: object) -> logging.LogRecord:
+    record = _old_factory(*args, **kwargs)
+    if not hasattr(record, "room"):
+        record.room = "-"  # type: ignore[attr-defined]
+    return record
+
+
+logging.setLogRecordFactory(_record_factory)
 logger = logging.getLogger("voice-ai")
 
 server = AgentServer()
@@ -57,6 +70,17 @@ server = AgentServer()
 async def entrypoint(ctx: agents.JobContext) -> None:
     """Punto de entrada para cada llamada."""
     await ctx.connect(auto_subscribe=agents.AutoSubscribe.AUDIO_ONLY)
+
+    # Setear room como correlation ID para todos los logs de esta llamada
+    _old = logging.getLogRecordFactory()
+    _room = ctx.room.name
+
+    def _room_factory(*a: object, **kw: object) -> logging.LogRecord:
+        r = _old(*a, **kw)
+        r.room = _room  # type: ignore[attr-defined]
+        return r
+
+    logging.setLogRecordFactory(_room_factory)
 
     logger.info("Nueva sesión en room: %s", ctx.room.name)
 
@@ -86,7 +110,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # Si no hay SIP (ej: test desde web), esperar un momento
     if not called_number:
-        import asyncio
         await asyncio.sleep(2)
         for p in ctx.room.remote_participants.values():
             if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
@@ -95,7 +118,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 break
 
     # Detectar modo outbound desde metadata del room
-    import json
     outbound_mode = False
     campaign_script: str | None = None
     outbound_client_id: str | None = None

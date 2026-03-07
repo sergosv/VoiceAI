@@ -15,7 +15,8 @@ async function request(path, options = {}) {
     headers['Content-Type'] = 'application/json'
   }
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers })
+  const { signal, ...rest } = options
+  const res = await fetch(`${BASE}${path}`, { ...rest, headers, signal })
 
   if (res.status === 401) {
     await supabase.auth.signOut()
@@ -32,9 +33,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  get: (path) => request(path),
-  post: (path, data) => request(path, { method: 'POST', body: JSON.stringify(data) }),
-  patch: (path, data) => request(path, { method: 'PATCH', body: JSON.stringify(data) }),
-  delete: (path) => request(path, { method: 'DELETE' }),
-  upload: (path, formData) => request(path, { method: 'POST', body: formData }),
+  get: (path, { signal } = {}) => request(path, { signal }),
+  post: (path, data, { signal } = {}) => request(path, { method: 'POST', body: JSON.stringify(data), signal }),
+  patch: (path, data, { signal } = {}) => request(path, { method: 'PATCH', body: JSON.stringify(data), signal }),
+  delete: (path, { signal } = {}) => request(path, { method: 'DELETE', signal }),
+  upload: (path, formData, { signal } = {}) => request(path, { method: 'POST', body: formData, signal }),
 }

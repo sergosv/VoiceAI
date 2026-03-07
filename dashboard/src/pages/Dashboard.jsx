@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Phone, Clock, DollarSign, FileText } from 'lucide-react'
 import { api } from '../lib/api'
+import { useToast } from '../context/ToastContext'
 import { StatsCard } from '../components/StatsCard'
 import { UsageChart } from '../components/UsageChart'
 import { CallsTable } from '../components/CallsTable'
@@ -10,6 +11,7 @@ import { ClientSelector } from '../components/ClientSelector'
 import { OnboardingChecklist } from '../components/OnboardingChecklist'
 
 export function Dashboard() {
+  const toast = useToast()
   const [overview, setOverview] = useState(null)
   const [usage, setUsage] = useState(null)
   const [recentCalls, setRecentCalls] = useState([])
@@ -17,6 +19,7 @@ export function Dashboard() {
   const [clientId, setClientId] = useState(null)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
     const cq = clientId ? `client_id=${clientId}&` : ''
     Promise.all([
@@ -24,12 +27,17 @@ export function Dashboard() {
       api.get(`/dashboard/usage?${cq}days=30`),
       api.get(`/calls?${cq}per_page=5`),
     ]).then(([ov, us, calls]) => {
+      if (cancelled) return
       setOverview(ov)
       setUsage(us)
       setRecentCalls(calls)
-    }).catch(console.error)
-      .finally(() => setLoading(false))
-  }, [clientId])
+    }).catch(err => {
+      if (!cancelled) toast.error(err.message)
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <PageLoader />
 

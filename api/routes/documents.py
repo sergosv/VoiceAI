@@ -80,10 +80,23 @@ async def upload_document(
             detail="Cliente no tiene FileSearchStore configurado",
         )
 
-    # Guardar archivo temporal y subir a Gemini
+    # Leer y validar tamaño (máx 50 MB)
+    MAX_FILE_SIZE = 50 * 1024 * 1024
     suffix = Path(file.filename or "doc").suffix
     file_content = await file.read()
     file_size = len(file_content)
+
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Archivo demasiado grande ({file_size // (1024*1024)} MB). Máximo: 50 MB.",
+        )
+
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo está vacío.",
+        )
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(file_content)

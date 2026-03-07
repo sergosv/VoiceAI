@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
-  ChevronDown, Bot, Sparkles,
+  ChevronDown, Bot, Sparkles, BarChart3, FlaskConical,
 } from 'lucide-react'
 
 const navGroups = [
@@ -12,6 +12,7 @@ const navGroups = [
     label: null, // Sin label = grupo principal
     items: [
       { to: '/', icon: LayoutDashboard, label: 'Inicio', end: true },
+      { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     ],
   },
   {
@@ -36,6 +37,7 @@ const navGroups = [
       { to: '/settings', icon: Bot, label: 'Agentes' },
       { to: '/documents', icon: FileText, label: 'Documentos' },
       { to: '/integrations', icon: Plug, label: 'Integraciones' },
+      { to: '/looptalk', icon: FlaskConical, label: 'LoopTalk' },
     ],
   },
   {

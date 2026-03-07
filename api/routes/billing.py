@@ -91,7 +91,7 @@ async def purchase_credits(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Paquete no encontrado")
 
     pkg = pkg_result.data[0]
-    base_url = os.environ.get("DASHBOARD_URL", "https://app.example.com")
+    base_url = os.environ.get("DASHBOARD_URL", "https://innotecnia.app")
 
     if purchase.payment_method == "stripe":
         return await create_stripe_checkout(

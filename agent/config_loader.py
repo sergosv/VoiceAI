@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import warnings
 from dataclasses import dataclass, field
 
-from supabase import create_client, Client
+from supabase import Client
+
+# Timeout para queries a Supabase (segundos)
+DB_QUERY_TIMEOUT_S = 8.0
 
 logger = logging.getLogger(__name__)
 
@@ -178,10 +182,9 @@ class ClientConfig:
 
 
 def _get_supabase() -> Client:
-    """Crea cliente Supabase con service key."""
-    url = os.environ["SUPABASE_URL"]
-    key = os.environ["SUPABASE_SERVICE_KEY"]
-    return create_client(url, key)
+    """Retorna cliente Supabase singleton."""
+    from agent.db import get_supabase
+    return get_supabase()
 
 
 # ── Nuevas funciones de carga (multi-agent) ─────────────
@@ -191,25 +194,40 @@ async def load_config_by_phone(phone_number: str) -> ResolvedConfig | None:
     """Carga config buscando por número de teléfono del agente."""
     sb = _get_supabase()
 
-    # Buscar en agents por número exacto
-    result = (
-        sb.table("agents")
-        .select("*, clients(*)")
-        .eq("phone_number", phone_number)
-        .eq("is_active", True)
-        .limit(1)
-        .execute()
-    )
+    try:
+        # Buscar en agents por número exacto (con timeout)
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: sb.table("agents")
+                .select("*, clients(*)")
+                .eq("phone_number", phone_number)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            ),
+            timeout=DB_QUERY_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout cargando config por teléfono: %s", phone_number)
+        return None
 
     if not result.data:
         # Buscar con variantes de número
         clean = phone_number.lstrip("+")
-        all_agents = (
-            sb.table("agents")
-            .select("*, clients(*)")
-            .eq("is_active", True)
-            .execute()
-        )
+        try:
+            all_agents = await asyncio.wait_for(
+                asyncio.to_thread(
+                    lambda: sb.table("agents")
+                    .select("*, clients(*)")
+                    .eq("is_active", True)
+                    .execute()
+                ),
+                timeout=DB_QUERY_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Timeout cargando agentes para búsqueda fuzzy")
+            return None
+
         for row in all_agents.data:
             db_phone = (row.get("phone_number") or "").lstrip("+")
             if db_phone and (

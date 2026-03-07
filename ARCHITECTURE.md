@@ -3,7 +3,7 @@
 
 **Proyecto**: voice-ai-platform  
 **Owner**: Sergio / Innotecnia  
-**Fecha**: Febrero 2026  
+**Fecha**: Marzo 2026
 **Mercado objetivo**: México / LATAM  
 **Visión**: Construir un VAPI/Retell propio — plataforma SaaS donde cada cliente obtiene su agente de voz personalizado con número telefónico, knowledge base, y dashboard.
 
@@ -14,10 +14,10 @@
 | Componente | Tecnología | Modelo/Versión |
 |---|---|---|
 | **Orquestación** | LiveKit Cloud (Plan Build) | Agents Framework (Python) |
-| **STT** | Deepgram | Nova-3 + Flux (turn detection semántico) |
-| **LLM** | Google Gemini | gemini-3-flash-preview |
-| **RAG** | Gemini File Search | Storage gratis, indexing $0.15/1M tokens |
-| **TTS** | Cartesia | Sonic 3 (snapshot: sonic-3-2026-01-12) |
+| **STT** | Deepgram (default) | Nova-3 + Flux — BYOK: Google, OpenAI |
+| **LLM** | Google Gemini (default) | gemini-2.5-flash — BYOK: OpenAI, Anthropic |
+| **RAG** | Gemini File Search | Vector stores nativos por cliente |
+| **TTS** | Cartesia (default) | Sonic 3 — BYOK: ElevenLabs, OpenAI |
 | **Telefonía** | Twilio | SIP Trunking → LiveKit SIP |
 | **Base de Datos** | Supabase | PostgreSQL + Auth + Realtime |
 | **Backend API** | Python FastAPI | Para admin endpoints |
@@ -126,15 +126,20 @@ voice-ai-platform/
 ├── livekit.toml             # Config LiveKit agent
 │
 ├── agent/                   # === CORE: LiveKit Voice Agent ===
-│   ├── main.py              # Entrypoint LiveKit agent worker
+│   ├── main.py              # Entrypoint LiveKit agent (AgentServer + rtc_session)
 │   ├── agent_factory.py     # Crea agentes dinámicos por cliente (VoiceAgent + voice rules)
 │   ├── pipeline_builder.py  # Factory BYOK: build_stt(), build_llm(), build_tts(), build_realtime_model()
 │   ├── session_handler.py   # Maneja lifecycle de cada llamada (transcript, costs, DB)
 │   ├── config_loader.py     # Carga config de agente+cliente desde DB (by phone/agent_id/client_id)
+│   ├── billing.py           # CallBilling — créditos por llamada (1 crédito = 1 min)
+│   ├── memory.py            # AgentMemory — memoria de largo plazo por contacto
+│   ├── orchestrator.py      # Multi-agente: OrchestratorAgent con routing por turno (Gemini ADK)
+│   ├── mcp_builder.py       # Construye MCPServerHTTP/Stdio desde config DB
+│   ├── db.py                # Supabase client singleton para el proceso agente
 │   ├── call_analyzer.py     # Análisis post-llamada con Gemini (outbound campaigns)
 │   ├── phone_utils.py       # Utilidades de números telefónicos
-│   ├── voice_quality.py     # Constantes: filler phrases, backchannels, timing
-│   └── tools/               # Herramientas que el agente puede usar
+│   ├── voice_quality.py     # Filler phrases, backchannels, timing
+│   └── tools/               # Herramientas que el agente puede usar (@function_tool)
 │       ├── __init__.py
 │       ├── file_search.py   # Gemini File Search por cliente
 │       ├── calendar_tool.py # Google Calendar — agendar citas
@@ -151,9 +156,10 @@ voice-ai-platform/
 │   └── test_call.py         # Test rápido de un agente
 │
 ├── api/                     # === API: FastAPI endpoints ===
-│   ├── main.py              # FastAPI app (API + static dashboard)
-│   ├── deps.py              # Dependencias comunes (auth, DB)
-│   ├── schemas.py           # Pydantic models para request/response
+│   ├── main.py              # FastAPI app (API + static dashboard + rate limiter)
+│   ├── deps.py              # Dependencias comunes (Supabase singleton)
+│   ├── schemas.py           # Pydantic v2 models + field validators
+│   ├── logging_config.py    # Structured logging + correlation IDs (RequestIdMiddleware)
 │   ├── middleware/
 │   │   └── auth.py          # Supabase JWT auth (ES256 via JWKS)
 │   ├── routes/
@@ -161,14 +167,26 @@ voice-ai-platform/
 │   │   ├── clients.py       # CRUD clientes
 │   │   ├── agents.py        # CRUD agentes + assign/purchase phone
 │   │   ├── calls.py         # Historial de llamadas
-│   │   ├── documents.py     # Upload/manage docs (File Search)
+│   │   ├── documents.py     # Upload/manage docs (File Search, 50MB limit)
 │   │   ├── contacts.py      # CRM contactos
 │   │   ├── appointments.py  # CRM citas
 │   │   ├── campaigns.py     # Campañas outbound
 │   │   ├── voices.py        # Catálogo de voces (Cartesia, ElevenLabs, OpenAI)
 │   │   ├── dashboard.py     # Stats para dashboard principal
 │   │   ├── chat.py          # Chat tester (probar agentes via texto)
-│   │   └── ai.py            # Generación/mejora de prompts con IA
+│   │   ├── ai.py            # Generación/mejora de prompts con IA
+│   │   ├── billing.py       # Balance, packages, transactions, purchase, gift
+│   │   ├── webhooks.py      # Stripe (firma verificada) + MercadoPago webhooks
+│   │   ├── mcp.py           # MCP server CRUD + templates
+│   │   ├── api_integrations.py  # API integrations CRUD
+│   │   ├── whatsapp.py      # WhatsApp config + inbox
+│   │   ├── whatsapp_webhooks.py # WhatsApp inbound webhooks
+│   │   ├── evolution.py     # Evolution API QR connect
+│   │   ├── templates.py     # Template store: objectives, verticals, search, generate
+│   │   └── costs.py         # Pricing config (admin)
+│   ├── generator/
+│   │   ├── system_prompt.py # AI prompt generator
+│   │   └── builder_flow.py  # Flow builder generator
 │   └── services/
 │       ├── client_service.py    # Lógica de negocio clientes
 │       ├── document_service.py  # Lógica de negocio documentos
@@ -188,7 +206,16 @@ voice-ai-platform/
 │       ├── 006_byok_columns.sql       # stt/llm/tts provider + api_key per agent
 │       ├── 007_campaign_analysis.sql  # AI analysis fields on campaign_calls
 │       ├── 008_conversational_quality.sql  # contact dedup, timeline
-│       └── 009_agents_table.sql       # Multi-agent: agents table
+│       ├── 009_agents_table.sql       # Multi-agent: agents table
+│       ├── 010_flow_builder.sql       # Flow builder JSON + agent mode
+│       ├── 011_mcp_servers.sql        # MCP server configs
+│       ├── 012_api_integrations.sql   # External API integrations
+│       ├── 013_memory_tables.sql      # Long-term memory (contact_memories)
+│       ├── 014_orchestration.sql      # Multi-agent orchestration fields
+│       ├── 015_billing.sql            # credit_balances, credit_transactions, credit_packages
+│       ├── 016_whatsapp_configs.sql   # WhatsApp per-agent config
+│       ├── 017_whatsapp_messages.sql  # WhatsApp message log
+│       └── 018_template_store.sql     # Frameworks, verticals, objectives, templates
 │
 ├── config/                  # === CONFIGURACIÓN ===
 │   ├── voices.json          # Catálogo de voces por provider
@@ -206,31 +233,55 @@ voice-ai-platform/
 │   │   │   ├── Calls.jsx             # Lista de llamadas
 │   │   │   ├── CallDetail.jsx        # Detalle + transcripción
 │   │   │   ├── Documents.jsx         # Gestión de knowledge base
-│   │   │   ├── Settings.jsx          # Config de agente + BYOK pipeline
-│   │   │   ├── AgentDetail.jsx       # Detalle/edición de agente individual
+│   │   │   ├── Settings.jsx          # Config unificada (5 tabs: General, Voz, Llamadas, WhatsApp, Avanzado)
+│   │   │   ├── AgentWizard.jsx       # Wizard 6 pasos para crear agentes desde templates
 │   │   │   ├── Contacts.jsx          # CRM contactos
 │   │   │   ├── ContactDetail.jsx     # Detalle contacto + timeline
 │   │   │   ├── Appointments.jsx      # Citas agendadas
 │   │   │   ├── Campaigns.jsx         # Campañas outbound
 │   │   │   ├── CampaignDetail.jsx    # Detalle campaña + análisis AI
 │   │   │   ├── Integrations.jsx      # Google Calendar, WhatsApp, tools
-│   │   │   └── admin/                # Solo admin: ClientsList, ClientDetail, ClientCreate
+│   │   │   ├── McpServers.jsx        # MCP server management
+│   │   │   ├── ApiIntegrations.jsx   # External API integrations
+│   │   │   ├── FlowBuilder.jsx       # Visual flow builder (React Flow)
+│   │   │   ├── WhatsAppInbox.jsx     # WhatsApp inbox/conversations
+│   │   │   ├── Billing.jsx           # Credits, packages, transactions
+│   │   │   └── admin/                # Solo admin: ClientsList, ClientDetail, ClientCreate, PricingConfig
 │   │   └── components/
-│   │       ├── Sidebar.jsx           # Navegación lateral
+│   │       ├── Sidebar.jsx           # Nav lateral colapsable (6 grupos)
+│   │       ├── Breadcrumbs.jsx       # Breadcrumbs automáticos por ruta
+│   │       ├── CommandPalette.jsx    # Ctrl+K búsqueda global
+│   │       ├── FilterBar.jsx         # Filtros chip + date range + SortableHeader
+│   │       ├── OnboardingChecklist.jsx # Checklist 4 pasos
+│   │       ├── EmptyState.jsx        # Estado vacío reutilizable
 │   │       ├── ChatTester.jsx        # Modal para probar agentes via texto
 │   │       ├── PromptAssistant.jsx   # Asistente AI para generar prompts
 │   │       ├── TranscriptViewer.jsx  # Visualizador de transcripciones
 │   │       ├── CallsTable.jsx        # Tabla reutilizable de llamadas
 │   │       ├── ContactTimeline.jsx   # Timeline de interacciones
+│   │       ├── WhatsAppConfig.jsx    # Config WhatsApp per-agent
 │   │       ├── StatsCard.jsx, UsageChart.jsx, ClientSelector.jsx, AdminRoute.jsx
-│   │       └── ui/                   # Componentes base (Button, Input, etc.)
+│   │       ├── flow/                 # Flow builder nodes + panels
+│   │       └── ui/                   # Componentes base (Button, Input, Modal, Badge, etc.)
 │   └── dist/                # Build de producción
 │
-└── tests/                   # === TESTS ===
+├── .github/workflows/
+│   └── ci.yml               # CI: lint (black, isort, flake8, mypy) + tests + dashboard build
+│
+└── tests/                   # === TESTS (199 tests, 46%+ coverage) ===
     ├── test_agent_factory.py
     ├── test_config_loader.py
     ├── test_file_search.py
-    └── test_admin_scripts.py
+    ├── test_admin_scripts.py
+    ├── test_session_handler.py
+    ├── test_billing.py
+    ├── test_logging_config.py
+    ├── test_api_agents.py
+    ├── test_api_contacts.py
+    ├── test_api_appointments.py
+    ├── test_api_campaigns.py
+    ├── test_api_voices.py
+    └── ... (more test files)
 ```
 
 ---
@@ -580,14 +631,23 @@ SUPABASE_URL=https://xxxxxxxx.supabase.co
 SUPABASE_SERVICE_KEY=eyJxxxxxxxxxxxxxxxx
 SUPABASE_ANON_KEY=eyJxxxxxxxxxxxxxxxx
 
+# === Stripe (billing) ===
+STRIPE_SECRET_KEY=sk_xxxxxxxxxxxxxxxx
+STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxx
+
+# === MercadoPago (billing) ===
+MERCADOPAGO_ACCESS_TOKEN=APP_USR-xxxxxxxx
+MERCADOPAGO_WEBHOOK_SECRET=xxxxxxxxxxxxxxxx
+
 # === App Config ===
 APP_ENV=development
-LOG_LEVEL=DEBUG
+LOG_FORMAT=json          # json para producción, omitir para texto
 DEFAULT_LANGUAGE=es
 DEFAULT_MAX_CALL_DURATION=300
 
 # === CORS (producción) ===
 ALLOWED_ORIGINS=https://your-domain.railway.app
+CF_PAGES_DOMAIN=voiceai-69f.pages.dev
 ```
 
 ---
@@ -856,14 +916,59 @@ En Twilio Console:
 - Genera prompts por industria y configuración del negocio
 - Mejora prompts existentes con sugerencias
 
-### FASE 4 — Pendiente
+### FASE 4 — MCP Integration ✅
 
-**Objetivos futuros**:
-1. Onboarding self-service para nuevos clientes
-2. Billing automático (Stripe)
-3. Analytics avanzados (sentiment, conversion rates)
-4. Conmutador IVR (menú de opciones pre-agente)
-5. Deploy latest to LiveKit Cloud + Railway
+1. ✅ MCP builder (MCPServerHTTP, MCPServerStdio) desde config DB
+2. ✅ MCP server CRUD API + templates (Brave Search, etc.)
+3. ✅ LiveKit native `Agent(mcp_servers=[])` integration
+4. ✅ MCP tools en chat tester y WhatsApp (no solo voz)
+
+### FASE 5 — Billing ✅
+
+1. ✅ Modelo 1 crédito = 1 minuto, billing incremental >5min
+2. ✅ `agent/billing.py` — CallBilling class (check, start, finish)
+3. ✅ Credit packages, transactions, balance API
+4. ✅ Stripe webhook con verificación de firma
+5. ✅ MercadoPago webhook (preparado, pendiente SDK)
+6. ✅ Gift credits (admin), pricing config
+
+### FASE 6 — Flow Builder + API Integrations ✅
+
+1. ✅ Visual flow builder (React Flow) con 8 tipos de nodos
+2. ✅ Flow engine runtime en el agente de voz
+3. ✅ API integrations CRUD y ejecución en tools
+
+### FASE 7 — UX/UI Overhaul ✅
+
+1. ✅ Sidebar colapsable con 6 grupos
+2. ✅ Breadcrumbs automáticos, CommandPalette (Ctrl+K)
+3. ✅ FilterBar, SortableHeader, EmptyState, OnboardingChecklist
+4. ✅ Settings unificado (5 tabs: General, Voz, Llamadas, WhatsApp, Avanzado)
+5. ✅ Agent selector pills + multi-agent orchestration UI
+
+### FASE 8 — Template Store + Agent Wizard ✅
+
+1. ✅ Qualification frameworks (BANT, CHAMP, SPIN, Simple)
+2. ✅ Industry verticals (7) + objectives (7) + templates
+3. ✅ Dual generator: system_prompt + builder_flow
+4. ✅ Agent wizard 6 pasos
+
+### FASE 9 — Hardening ✅
+
+1. ✅ Security: rate limiting, input validation, CORS hardening, webhook signatures
+2. ✅ Robustness: DB singleton, timeouts on all external calls, error recovery
+3. ✅ Tests: 199 tests, 46%+ coverage, CI pipeline (lint + test + build)
+4. ✅ Observability: structured logging, correlation IDs, X-Request-ID
+5. ✅ Frontend: toast error handling, cancelled pattern, Modal accessibility
+6. ✅ Dockerfiles unified to Python 3.13, API versioning header
+
+### Pendiente
+
+1. Probar WhatsApp en vivo (webhook Railway → Evolution API)
+2. Analytics de llamadas — dashboard de métricas
+3. Web widget embeddable para sitios web de clientes
+4. Sentry integration (error tracking en producción)
+5. Onboarding self-service para nuevos clientes
 
 ---
 

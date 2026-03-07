@@ -3,6 +3,7 @@ import { ChevronRight, Home } from 'lucide-react'
 
 const ROUTE_LABELS = {
   '': 'Inicio',
+  'analytics': 'Analytics',
   'calls': 'Llamadas',
   'contacts': 'Contactos',
   'appointments': 'Citas',
@@ -20,6 +21,7 @@ const ROUTE_LABELS = {
   'new': 'Nuevo',
   'pricing': 'Precios',
   'flow': 'Flow Builder',
+  'looptalk': 'LoopTalk',
 }
 
 export function Breadcrumbs() {

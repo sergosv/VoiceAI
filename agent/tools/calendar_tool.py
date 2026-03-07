@@ -13,13 +13,15 @@ except ImportError:
     # Fallback si zoneinfo no tiene datos (ej: Windows sin tzdata)
     TZ_MEXICO = timezone(timedelta(hours=-6))
 
-from supabase import create_client, Client
+from supabase import Client
+
+from agent.db import get_supabase
 
 logger = logging.getLogger(__name__)
 
 
 def _get_supabase() -> Client:
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    return get_supabase()
 
 
 async def schedule_appointment(

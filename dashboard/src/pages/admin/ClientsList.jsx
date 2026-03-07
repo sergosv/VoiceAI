@@ -18,10 +18,12 @@ export function ClientsList() {
   const confirm = useConfirm()
 
   useEffect(() => {
+    let cancelled = false
     api.get('/clients')
-      .then(setClients)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+      .then(data => { if (!cancelled) setClients(data) })
+      .catch(err => { if (!cancelled) toast.error(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [])
 
   async function handleToggleActive(e, client) {

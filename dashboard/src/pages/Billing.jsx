@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { CreditCard, TrendingUp, TrendingDown, Gift, AlertTriangle, Receipt } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { PageLoader } from '../components/ui/Spinner'
 import { FilterBar, SortableHeader } from '../components/FilterBar'
@@ -55,6 +56,7 @@ const TYPE_OPTIONS = [
 
 export function Billing() {
   const { user } = useAuth()
+  const toast = useToast()
   const [balance, setBalance] = useState(null)
   const [packages, setPackages] = useState([])
   const [transactions, setTransactions] = useState([])
@@ -72,17 +74,23 @@ export function Billing() {
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
+    let cancelled = false
     Promise.all([
       api.get('/billing/balance'),
       api.get('/billing/packages'),
       api.get('/billing/transactions'),
     ]).then(([bal, pkgs, txs]) => {
+      if (cancelled) return
       setBalance(bal)
       setPackages(pkgs)
       setTransactions(txs)
-    }).catch(console.error)
-      .finally(() => setLoading(false))
-  }, [clientId])
+    }).catch(err => {
+      if (!cancelled) toast.error(err.message)
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Client-side filtering and sorting
   const filteredTx = useMemo(() => {
@@ -133,8 +141,7 @@ export function Billing() {
         window.location.href = data.checkout_url
       }
     } catch (err) {
-      console.error('Purchase error:', err)
-      alert('Error al procesar compra. Intenta de nuevo.')
+      toast.error(err.message || 'Error al procesar compra. Intenta de nuevo.')
     } finally {
       setPurchasing(null)
     }

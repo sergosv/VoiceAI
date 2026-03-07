@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from supabase import create_client as create_supabase_client
 
 from api.deps import get_supabase
@@ -12,10 +14,12 @@ from api.middleware.auth import CurrentUser, get_current_user, require_admin
 from api.schemas import MessageResponse, RegisterUserRequest, UserOut
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("/me", response_model=UserOut)
-async def get_me(user: CurrentUser = Depends(get_current_user)) -> UserOut:
+@limiter.limit("60/minute")
+async def get_me(request: Request, user: CurrentUser = Depends(get_current_user)) -> UserOut:
     """Retorna datos del usuario autenticado."""
     return UserOut(
         id=user.id,
@@ -27,7 +31,9 @@ async def get_me(user: CurrentUser = Depends(get_current_user)) -> UserOut:
 
 
 @router.post("/register-user", response_model=UserOut, status_code=201)
+@limiter.limit("10/minute")
 async def register_user(
+    request: Request,
     req: RegisterUserRequest,
     admin: CurrentUser = Depends(require_admin),
 ) -> UserOut:
