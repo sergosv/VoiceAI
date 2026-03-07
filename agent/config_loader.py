@@ -110,9 +110,6 @@ class SlimClientConfig:
     file_search_store_name: str | None = None
     google_calendar_id: str | None = None
     google_service_account_key: dict | None = None
-    whatsapp_instance_id: str | None = None
-    whatsapp_api_url: str | None = None
-    whatsapp_api_key: str | None = None
     enabled_tools: list[str] = field(default_factory=lambda: ["search_knowledge"])
     business_hours: dict | None = None
     is_active: bool = True
@@ -160,9 +157,6 @@ class ClientConfig:
     # Integraciones Phase 3
     google_calendar_id: str | None = None
     google_service_account_key: dict | None = None
-    whatsapp_instance_id: str | None = None
-    whatsapp_api_url: str | None = None
-    whatsapp_api_key: str | None = None
     enabled_tools: list[str] = field(default_factory=lambda: ["search_knowledge"])
     conversation_examples: str | None = None
     # BYOK — Voice Pipeline
@@ -447,9 +441,6 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         file_search_store_name=client_row.get("file_search_store_name"),
         google_calendar_id=client_row.get("google_calendar_id"),
         google_service_account_key=client_row.get("google_service_account_key"),
-        whatsapp_instance_id=client_row.get("whatsapp_instance_id"),
-        whatsapp_api_url=client_row.get("whatsapp_api_url"),
-        whatsapp_api_key=client_row.get("whatsapp_api_key"),
         enabled_tools=client_row.get("enabled_tools") or ["search_knowledge"],
         business_hours=client_row.get("business_hours"),
         is_active=client_row.get("is_active", True),
@@ -566,9 +557,6 @@ def _row_to_config(row: dict) -> ClientConfig:
         after_hours_message=row.get("after_hours_message"),
         google_calendar_id=row.get("google_calendar_id"),
         google_service_account_key=row.get("google_service_account_key"),
-        whatsapp_instance_id=row.get("whatsapp_instance_id"),
-        whatsapp_api_url=row.get("whatsapp_api_url"),
-        whatsapp_api_key=row.get("whatsapp_api_key"),
         enabled_tools=row.get("enabled_tools") or ["search_knowledge"],
         conversation_examples=row.get("conversation_examples"),
         voice_mode=row.get("voice_mode", "pipeline"),

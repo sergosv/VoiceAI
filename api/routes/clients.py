@@ -280,8 +280,7 @@ async def update_client(
         "agent_name", "language", "voice_id",
         "max_call_duration_seconds", "transfer_number", "business_hours",
         "after_hours_message",
-        "google_calendar_id", "whatsapp_instance_id", "whatsapp_api_url",
-        "whatsapp_api_key", "enabled_tools",
+        "google_calendar_id", "enabled_tools",
         "voice_mode", "stt_provider", "llm_provider", "tts_provider",
         "stt_api_key", "llm_api_key", "tts_api_key",
         "realtime_api_key", "realtime_voice", "realtime_model",
@@ -460,45 +459,6 @@ async def delete_client(
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
     return MessageResponse(message="Cliente eliminado")
-
-
-@router.post("/{client_id}/test-whatsapp", response_model=MessageResponse)
-async def test_whatsapp(
-    client_id: str,
-    user: CurrentUser = Depends(get_current_user),
-) -> MessageResponse:
-    """Envía un mensaje de prueba por WhatsApp."""
-    if user.role == "client" and user.client_id != client_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
-
-    sb = get_supabase()
-    result = (
-        sb.table("clients")
-        .select("whatsapp_instance_id, whatsapp_api_url, whatsapp_api_key, phone_number")
-        .eq("id", client_id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-
-    client = result.data[0]
-    if not client.get("whatsapp_instance_id") or not client.get("whatsapp_api_url") or not client.get("whatsapp_api_key"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="WhatsApp no configurado")
-
-    from agent.tools.whatsapp_tool import send_whatsapp_message
-    phone = client.get("phone_number", "")
-    if not phone:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sin número de teléfono para enviar prueba")
-
-    msg = await send_whatsapp_message(
-        api_url=client["whatsapp_api_url"],
-        api_key=client["whatsapp_api_key"],
-        instance_id=client["whatsapp_instance_id"],
-        phone_number=phone,
-        message="Mensaje de prueba desde Voice AI Platform",
-    )
-    return MessageResponse(message=msg)
 
 
 @router.post("/{client_id}/test-calendar", response_model=MessageResponse)

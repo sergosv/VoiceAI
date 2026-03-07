@@ -205,8 +205,6 @@ class ClientOut(BaseModel):
     owner_email: str | None = None
     monthly_minutes_limit: int = 500
     google_calendar_id: str | None = None
-    whatsapp_instance_id: str | None = None
-    whatsapp_api_url: str | None = None
     enabled_tools: list[str] = Field(default_factory=lambda: ["search_knowledge"])
     # BYOK voice pipeline
     voice_mode: str = "pipeline"
@@ -277,9 +275,6 @@ class ClientUpdateRequest(BaseModel):
     monthly_minutes_limit: int | None = None
     # Integraciones
     google_calendar_id: str | None = None
-    whatsapp_instance_id: str | None = None
-    whatsapp_api_url: str | None = None
-    whatsapp_api_key: str | None = None
     enabled_tools: list[str] | None = None
     # BYOK voice pipeline
     voice_mode: str | None = None

@@ -199,14 +199,19 @@ async def run_test(
     sb = get_supabase()
 
     try:
+        _start_ms = __import__("time").time()
+
         # Marcar como running
-        sb.table("looptalk_runs").update({
+        sb.table("test_runs").update({
             "status": "running",
+            "started_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).isoformat(),
         }).eq("id", run_id).execute()
 
         # Cargar persona
         persona_result = (
-            sb.table("looptalk_personas")
+            sb.table("test_personas")
             .select("*")
             .eq("id", persona_id)
             .limit(1)
@@ -289,12 +294,18 @@ async def run_test(
         score = evaluation.get("score", 0)
 
         # Guardar resultado
-        sb.table("looptalk_runs").update({
+        _now = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
+        _duration = int((__import__("time").time() - _start_ms) * 1000)
+        sb.table("test_runs").update({
             "status": "completed",
             "conversation_log": conversation_log,
             "evaluation": evaluation,
             "score": score,
-            "turns_used": len([m for m in conversation_log if m["role"] == "persona"]),
+            "turn_count": len([m for m in conversation_log if m["role"] == "persona"]),
+            "completed_at": _now.isoformat(),
+            "duration_ms": _duration,
         }).eq("id", run_id).execute()
 
         logger.info(
@@ -304,7 +315,7 @@ async def run_test(
 
     except Exception as e:
         logger.error("Test run %s falló: %s", run_id, e, exc_info=True)
-        sb.table("looptalk_runs").update({
+        sb.table("test_runs").update({
             "status": "failed",
             "evaluation": {
                 "error": str(e),
