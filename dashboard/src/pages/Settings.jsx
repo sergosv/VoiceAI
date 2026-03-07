@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Save, Volume2, Zap, RefreshCw, Eye, FileText, Bot, Plus, Trash2, Mic,
   Brain, Key, ChevronDown, ChevronUp, Check, Phone, MessageCircle, Settings2,
+  Shield, Globe, Star, Bell,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -66,6 +67,7 @@ const TABS = [
   { key: 'voice', label: 'Voz', icon: Volume2 },
   { key: 'calls', label: 'Llamadas', icon: Phone },
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
+  { key: 'intelligence', label: 'Inteligencia', icon: Brain },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
 
@@ -202,6 +204,342 @@ function CostEstimator({ sttProvider, llmProvider, ttsProvider }) {
   )
 }
 
+/* ─────────────────── Intelligence Tab Component ─────────────────── */
+
+const RULE_TYPES = [
+  { value: 'callback_missed_call', label: 'Callback llamada perdida' },
+  { value: 'followup_no_conversion', label: 'Seguimiento sin conversion' },
+  { value: 'reminder_appointment', label: 'Recordatorio de cita' },
+  { value: 'post_sale', label: 'Post-venta' },
+  { value: 'reengagement', label: 'Reengagement' },
+  { value: 'custom', label: 'Personalizado' },
+]
+
+const SUPPORTED_LANGUAGES = [
+  { code: 'es', label: 'Espanol' },
+  { code: 'en', label: 'English' },
+  { code: 'pt', label: 'Portugues' },
+  { code: 'fr', label: 'Francais' },
+]
+
+function ToggleSwitch({ checked, onChange }) {
+  return (
+    <label className="relative inline-flex items-center cursor-pointer">
+      <input type="checkbox" className="sr-only peer" checked={checked} onChange={e => onChange(e.target.checked)} />
+      <div className="w-9 h-5 bg-bg-hover rounded-full peer peer-checked:bg-accent/80 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+    </label>
+  )
+}
+
+function IntelligenceSectionCard({ icon: Icon, iconColor, title, description, enabled, onToggle, children }) {
+  return (
+    <Card className="space-y-0">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon size={16} className={iconColor} />
+          <h2 className="text-sm font-semibold text-text-secondary">{title}</h2>
+        </div>
+        <ToggleSwitch checked={enabled} onChange={onToggle} />
+      </div>
+      {description && (
+        <p className="text-xs text-text-muted mt-1">{description}</p>
+      )}
+      {enabled && (
+        <div className="mt-4 space-y-4">
+          {children}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function IntelligenceTab({ form, setForm }) {
+  // Config updater helpers
+  function updateConfig(configKey, defaults) {
+    return (key, value) => {
+      setForm(f => ({
+        ...f,
+        [configKey]: { ...(f[configKey] || { enabled: false, ...defaults }), [key]: value },
+      }))
+    }
+  }
+
+  const updateSentiment = updateConfig('sentiment_config', { escalation_threshold: 3, auto_transfer: false, notify_on_negative: false })
+  const updateIntent = updateConfig('intent_config', { custom_intents: '', track_unresolved: true })
+  const updateGuardrails = updateConfig('guardrails_config', { prohibited_topics: '', blocked_patterns: '', max_response_length: '', detect_prompt_injection: true })
+  const updateLanguage = updateConfig('language_detection_config', { supported_languages: ['es'], detection_turns: 2 })
+  const updateQuality = updateConfig('quality_config', { min_score_alert: 50 })
+  const updateProactive = updateConfig('proactive_config', { rules: [] })
+
+  const sc = form.sentiment_config || {}
+  const ic = form.intent_config || {}
+  const gc = form.guardrails_config || {}
+  const ldc = form.language_detection_config || {}
+  const qc = form.quality_config || {}
+  const pc = form.proactive_config || {}
+
+  function addProactiveRule() {
+    const newRule = { type: 'callback_missed_call', delay_minutes: 5, channel: 'call', message: '', max_attempts: 1 }
+    const currentRules = pc.rules || []
+    updateProactive('rules', [...currentRules, newRule])
+  }
+
+  function updateRule(index, key, value) {
+    const rules = [...(pc.rules || [])]
+    rules[index] = { ...rules[index], [key]: value }
+    updateProactive('rules', rules)
+  }
+
+  function removeRule(index) {
+    const rules = [...(pc.rules || [])]
+    rules.splice(index, 1)
+    updateProactive('rules', rules)
+  }
+
+  function toggleLanguage(code) {
+    const current = ldc.supported_languages || ['es']
+    const next = current.includes(code) ? current.filter(c => c !== code) : [...current, code]
+    if (next.length === 0) return // Al menos uno
+    updateLanguage('supported_languages', next)
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* ── Sentimiento en Tiempo Real ── */}
+      <IntelligenceSectionCard
+        icon={Brain}
+        iconColor="text-pink-400"
+        title="Sentimiento en Tiempo Real"
+        description="Detecta emociones negativas durante la llamada y reacciona automaticamente."
+        enabled={sc.enabled || false}
+        onToggle={v => updateSentiment('enabled', v)}
+      >
+        <Input
+          label="Umbral de escalacion (1-10)"
+          type="number"
+          min={1}
+          max={10}
+          value={sc.escalation_threshold ?? 3}
+          onChange={e => updateSentiment('escalation_threshold', parseInt(e.target.value) || 3)}
+        />
+        <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sc.auto_transfer || false}
+            onChange={e => updateSentiment('auto_transfer', e.target.checked)}
+            className="rounded border-border bg-bg-primary text-accent focus:ring-accent"
+          />
+          Transferir automaticamente al detectar sentimiento critico
+        </label>
+        <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sc.notify_on_negative || false}
+            onChange={e => updateSentiment('notify_on_negative', e.target.checked)}
+            className="rounded border-border bg-bg-primary text-accent focus:ring-accent"
+          />
+          Notificar al detectar sentimiento negativo
+        </label>
+      </IntelligenceSectionCard>
+
+      {/* ── Intent Extraction ── */}
+      <IntelligenceSectionCard
+        icon={Zap}
+        iconColor="text-yellow-400"
+        title="Extraccion de Intenciones"
+        description="Identifica automaticamente la intencion del usuario en cada mensaje."
+        enabled={ic.enabled || false}
+        onToggle={v => updateIntent('enabled', v)}
+      >
+        <Textarea
+          label="Intenciones personalizadas (separadas por coma)"
+          placeholder="cotizacion, soporte tecnico, reclamacion"
+          value={ic.custom_intents || ''}
+          onChange={e => updateIntent('custom_intents', e.target.value)}
+          rows={3}
+        />
+        <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={ic.track_unresolved !== false}
+            onChange={e => updateIntent('track_unresolved', e.target.checked)}
+            className="rounded border-border bg-bg-primary text-accent focus:ring-accent"
+          />
+          Rastrear intenciones no resueltas
+        </label>
+      </IntelligenceSectionCard>
+
+      {/* ── Guardrails ── */}
+      <IntelligenceSectionCard
+        icon={Shield}
+        iconColor="text-red-400"
+        title="Guardrails"
+        description="Protege al agente de temas prohibidos, inyeccion de prompts y respuestas largas."
+        enabled={gc.enabled || false}
+        onToggle={v => updateGuardrails('enabled', v)}
+      >
+        <Textarea
+          label="Temas prohibidos (uno por linea)"
+          placeholder={"precio competencia\ninformacion confidencial"}
+          value={gc.prohibited_topics || ''}
+          onChange={e => updateGuardrails('prohibited_topics', e.target.value)}
+          rows={3}
+        />
+        <Textarea
+          label="Patrones bloqueados (regex, uno por linea)"
+          placeholder={"\\b(contraseña|password)\\b\n\\d{16}"}
+          value={gc.blocked_patterns || ''}
+          onChange={e => updateGuardrails('blocked_patterns', e.target.value)}
+          rows={3}
+        />
+        <Input
+          label="Longitud maxima de respuesta (caracteres, opcional)"
+          type="number"
+          min={0}
+          value={gc.max_response_length || ''}
+          onChange={e => updateGuardrails('max_response_length', e.target.value ? parseInt(e.target.value) : '')}
+          placeholder="Sin limite"
+        />
+        <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+          <input
+            type="checkbox"
+            checked={gc.detect_prompt_injection !== false}
+            onChange={e => updateGuardrails('detect_prompt_injection', e.target.checked)}
+            className="rounded border-border bg-bg-primary text-accent focus:ring-accent"
+          />
+          Detectar inyeccion de prompts
+        </label>
+      </IntelligenceSectionCard>
+
+      {/* ── Deteccion de Idioma ── */}
+      <IntelligenceSectionCard
+        icon={Globe}
+        iconColor="text-blue-400"
+        title="Deteccion de Idioma"
+        description="Detecta el idioma del usuario y adapta las respuestas automaticamente."
+        enabled={ldc.enabled || false}
+        onToggle={v => updateLanguage('enabled', v)}
+      >
+        <div>
+          <label className="block text-xs text-text-muted mb-2">Idiomas soportados</label>
+          <div className="flex flex-wrap gap-2">
+            {SUPPORTED_LANGUAGES.map(lang => {
+              const active = (ldc.supported_languages || ['es']).includes(lang.code)
+              return (
+                <button
+                  key={lang.code}
+                  type="button"
+                  onClick={() => toggleLanguage(lang.code)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    active
+                      ? 'bg-accent/20 text-accent border border-accent/40'
+                      : 'bg-bg-hover text-text-muted border border-border hover:border-text-muted'
+                  }`}
+                >
+                  {lang.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <Input
+          label="Turnos para deteccion (1-5)"
+          type="number"
+          min={1}
+          max={5}
+          value={ldc.detection_turns ?? 2}
+          onChange={e => updateLanguage('detection_turns', parseInt(e.target.value) || 2)}
+        />
+      </IntelligenceSectionCard>
+
+      {/* ── Quality Scoring ── */}
+      <IntelligenceSectionCard
+        icon={Star}
+        iconColor="text-amber-400"
+        title="Quality Scoring"
+        description="Evalua automaticamente la calidad de cada interaccion."
+        enabled={qc.enabled || false}
+        onToggle={v => updateQuality('enabled', v)}
+      >
+        <Input
+          label="Score minimo para alerta (0-100)"
+          type="number"
+          min={0}
+          max={100}
+          value={qc.min_score_alert ?? 50}
+          onChange={e => updateQuality('min_score_alert', parseInt(e.target.value) || 50)}
+        />
+      </IntelligenceSectionCard>
+
+      {/* ── Agente Proactivo ── */}
+      <IntelligenceSectionCard
+        icon={Bell}
+        iconColor="text-green-400"
+        title="Agente Proactivo"
+        description="Define reglas para que el agente contacte proactivamente a los usuarios."
+        enabled={pc.enabled || false}
+        onToggle={v => updateProactive('enabled', v)}
+      >
+        {(pc.rules || []).map((rule, i) => (
+          <Card key={i} className="space-y-3 !bg-bg-primary border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-text-secondary">Regla {i + 1}</span>
+              <button
+                type="button"
+                onClick={() => removeRule(i)}
+                className="text-red-400 hover:text-red-300 transition-colors"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Select
+                label="Tipo"
+                value={rule.type}
+                onChange={e => updateRule(i, 'type', e.target.value)}
+                options={RULE_TYPES}
+              />
+              <Select
+                label="Canal"
+                value={rule.channel}
+                onChange={e => updateRule(i, 'channel', e.target.value)}
+                options={[
+                  { value: 'call', label: 'Llamada' },
+                  { value: 'whatsapp', label: 'WhatsApp' },
+                ]}
+              />
+              <Input
+                label="Retraso (minutos)"
+                type="number"
+                min={0}
+                value={rule.delay_minutes ?? 5}
+                onChange={e => updateRule(i, 'delay_minutes', parseInt(e.target.value) || 0)}
+              />
+              <Input
+                label="Intentos maximos"
+                type="number"
+                min={1}
+                value={rule.max_attempts ?? 1}
+                onChange={e => updateRule(i, 'max_attempts', parseInt(e.target.value) || 1)}
+              />
+            </div>
+            <Textarea
+              label="Mensaje"
+              placeholder="Hola, te estamos contactando porque..."
+              value={rule.message || ''}
+              onChange={e => updateRule(i, 'message', e.target.value)}
+              rows={2}
+            />
+          </Card>
+        ))}
+        <Button variant="secondary" onClick={addProactiveRule} className="w-full">
+          <Plus size={14} className="mr-1" /> Agregar regla
+        </Button>
+      </IntelligenceSectionCard>
+    </div>
+  )
+}
+
 /* ─────────────────────── Main Component ─────────────────────────── */
 
 export function Settings() {
@@ -235,6 +573,8 @@ export function Settings() {
     stt_api_key: '', llm_api_key: '', tts_api_key: '', realtime_api_key: '',
     realtime_voice: 'alloy', realtime_model: 'gpt-4o-realtime-preview', voice_id: '',
     role_description: '', orchestrator_enabled: true, orchestrator_priority: 0,
+    sentiment_config: null, intent_config: null, guardrails_config: null,
+    language_detection_config: null, quality_config: null, proactive_config: null,
   })
 
   // Track server-side API key existence
@@ -274,6 +614,12 @@ export function Settings() {
       role_description: agentData.role_description || '',
       orchestrator_enabled: agentData.orchestrator_enabled !== false,
       orchestrator_priority: agentData.orchestrator_priority || 0,
+      sentiment_config: agentData.sentiment_config || null,
+      intent_config: agentData.intent_config || null,
+      guardrails_config: agentData.guardrails_config || null,
+      language_detection_config: agentData.language_detection_config || null,
+      quality_config: agentData.quality_config || null,
+      proactive_config: agentData.proactive_config || null,
     })
     setServerKeys({
       has_stt_api_key: sc.has_api_key || false,
@@ -407,6 +753,12 @@ export function Settings() {
         orchestrator_enabled: form.orchestrator_enabled,
         orchestrator_priority: form.orchestrator_priority,
         conversation_mode: form.conversation_mode,
+        sentiment_config: form.sentiment_config,
+        intent_config: form.intent_config,
+        guardrails_config: form.guardrails_config,
+        language_detection_config: form.language_detection_config,
+        quality_config: form.quality_config,
+        proactive_config: form.proactive_config,
       }
 
       // Solo enviar API keys si se escribieron nuevas
@@ -1096,6 +1448,11 @@ export function Settings() {
             {/* ── WhatsApp Tab ── */}
             {activeTab === 'whatsapp' && clientId && selectedAgent && (
               <WhatsAppConfig clientId={clientId} agentId={selectedAgent.id} />
+            )}
+
+            {/* ── Inteligencia Tab ── */}
+            {activeTab === 'intelligence' && (
+              <IntelligenceTab form={form} setForm={setForm} />
             )}
 
             {/* ── Avanzado Tab ── */}

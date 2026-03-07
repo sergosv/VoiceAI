@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity } from 'lucide-react'
 import { api } from '../lib/api'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
@@ -29,6 +29,37 @@ const ACCION_LABELS = {
   enviar_info: 'Enviar info',
   agendar_cita: 'Agendar cita',
   ninguna: 'Ninguna',
+}
+
+const SENTIMENT_RT_COLORS = {
+  happy: 'bg-green-400',
+  positive: 'bg-green-400',
+  neutral: 'bg-gray-400',
+  negative: 'bg-orange-400',
+  frustrated: 'bg-red-400',
+  angry: 'bg-red-400',
+}
+
+const SENTIMENT_RT_TEXT = {
+  happy: 'text-green-400',
+  positive: 'text-green-400',
+  neutral: 'text-gray-400',
+  negative: 'text-orange-400',
+  frustrated: 'text-red-400',
+  angry: 'text-red-400',
+}
+
+const INTENT_RT_LABELS = {
+  agendar_cita: 'Agendar',
+  consulta_precio: 'Precio',
+  consulta_horario: 'Horario',
+  consulta_servicio: 'Servicio',
+  queja: 'Queja',
+  cancelar: 'Cancelar',
+  seguimiento: 'Seguimiento',
+  cotizacion: 'Cotización',
+  soporte_tecnico: 'Soporte',
+  otro: 'Otro',
 }
 
 export function CallDetail() {
@@ -168,6 +199,16 @@ export function CallDetail() {
                   Lead: {call.lead_score}/100
                 </span>
               )}
+              {call.quality_score != null && (
+                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                  call.quality_score >= 80 ? 'bg-green-500/15 text-green-400' :
+                  call.quality_score >= 50 ? 'bg-yellow-500/15 text-yellow-400' :
+                  'bg-red-500/15 text-red-400'
+                }`}>
+                  <Star size={12} className="inline mr-1" />
+                  Calidad: {call.quality_score}/100
+                </span>
+              )}
             </div>
 
             {/* Resumen IA */}
@@ -202,6 +243,120 @@ export function CallDetail() {
                 </ul>
               </div>
             )}
+          </Card>
+        )}
+
+        {/* Sentimiento en Tiempo Real */}
+        {call.sentiment_realtime?.timeline?.length > 0 && (
+          <Card className="lg:col-span-2 space-y-3">
+            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+              <Activity size={16} className="text-accent" /> Sentimiento en Tiempo Real
+            </h2>
+
+            {/* Stats chips */}
+            <div className="flex flex-wrap gap-2">
+              {call.sentiment_realtime.average_score != null && (
+                <span className="px-2 py-1 rounded text-[11px] font-medium bg-bg-hover text-text-secondary">
+                  Promedio: {call.sentiment_realtime.average_score.toFixed(1)}
+                </span>
+              )}
+              {call.sentiment_realtime.dominant_sentiment && (
+                <span className={`px-2 py-1 rounded text-[11px] font-medium bg-bg-hover ${
+                  SENTIMENT_RT_TEXT[call.sentiment_realtime.dominant_sentiment] || 'text-text-secondary'
+                }`}>
+                  Dominante: {call.sentiment_realtime.dominant_sentiment}
+                </span>
+              )}
+              {call.sentiment_realtime.max_consecutive_negative > 0 && (
+                <span className="px-2 py-1 rounded text-[11px] font-medium bg-red-500/10 text-red-400">
+                  {call.sentiment_realtime.max_consecutive_negative} negativo(s) consecutivos
+                </span>
+              )}
+              {call.sentiment_realtime.switched_empathy && (
+                <span className="px-2 py-1 rounded text-[11px] font-medium bg-accent/10 text-accent">
+                  Empatia activada
+                </span>
+              )}
+            </div>
+
+            {/* Timeline bar */}
+            <div>
+              <div className="flex gap-px rounded overflow-hidden">
+                {call.sentiment_realtime.timeline.map((t, i) => (
+                  <div
+                    key={i}
+                    className={`group relative h-6 flex-1 min-w-[6px] ${SENTIMENT_RT_COLORS[t.sentiment] || 'bg-gray-500'} opacity-80 hover:opacity-100 transition-opacity cursor-default`}
+                  >
+                    {/* Tooltip */}
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 w-48 pointer-events-none">
+                      <div className="bg-bg-primary border border-border rounded px-2 py-1.5 text-[11px] shadow-lg">
+                        <div className="font-medium text-text-primary mb-0.5">Turno {t.turn} — {t.sentiment}</div>
+                        <div className="text-text-muted line-clamp-2">{t.text}</div>
+                        {t.score != null && <div className="text-text-muted mt-0.5">Score: {t.score.toFixed(2)}</div>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Turn labels */}
+              <div className="flex gap-px mt-1">
+                {call.sentiment_realtime.timeline.map((t, i) => (
+                  <div key={i} className="flex-1 min-w-[6px] text-center">
+                    <span className="text-[9px] text-text-muted">{t.turn}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap gap-3 text-[10px] text-text-muted">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-400" />Positivo</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-gray-400" />Neutral</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-400" />Negativo</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-400" />Frustrado</span>
+            </div>
+          </Card>
+        )}
+
+        {/* Intent Distribution */}
+        {call.intent_realtime?.intent_counts && Object.keys(call.intent_realtime.intent_counts).length > 0 && (
+          <Card className="lg:col-span-1 space-y-3">
+            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+              <Target size={16} className="text-accent" /> Intents Detectados
+            </h2>
+
+            {/* Primary intent badge */}
+            {call.intent_realtime.primary_intent && (
+              <div>
+                <span className="px-2 py-1 rounded text-xs font-medium bg-accent/15 text-accent">
+                  Principal: {INTENT_RT_LABELS[call.intent_realtime.primary_intent] || call.intent_realtime.primary_intent}
+                </span>
+              </div>
+            )}
+
+            {/* Horizontal bars */}
+            <div className="space-y-2">
+              {Object.entries(call.intent_realtime.intent_counts)
+                .sort(([, a], [, b]) => b - a)
+                .map(([intent, count]) => {
+                  const maxCount = Math.max(...Object.values(call.intent_realtime.intent_counts))
+                  const pct = maxCount > 0 ? (count / maxCount) * 100 : 0
+                  return (
+                    <div key={intent} className="space-y-0.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-text-secondary">{INTENT_RT_LABELS[intent] || intent}</span>
+                        <span className="text-text-muted font-mono">{count}</span>
+                      </div>
+                      <div className="h-1.5 bg-bg-hover rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-accent rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
           </Card>
         )}
 

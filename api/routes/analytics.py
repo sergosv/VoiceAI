@@ -261,3 +261,149 @@ async def analytics_duration_distribution(
         result.append({"range": label, "count": count})
 
     return result
+
+
+@router.get("/sentiment-distribution")
+async def analytics_sentiment_distribution(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+) -> list[dict[str, Any]]:
+    """Distribución de sentimiento en llamadas del período."""
+    sb = get_supabase()
+    cid = _effective_cid(user, client_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    query = sb.table("calls").select(
+        "sentiment_realtime"
+    ).gte("started_at", since).not_.is_("sentiment_realtime", "null")
+    if cid:
+        query = query.eq("client_id", cid)
+    calls = query.execute().data
+
+    counts: dict[str, int] = {}
+    for c in calls:
+        sr = c.get("sentiment_realtime")
+        if isinstance(sr, dict):
+            sentiment = sr.get("dominant_sentiment", "unknown")
+        else:
+            sentiment = "unknown"
+        counts[sentiment] = counts.get(sentiment, 0) + 1
+
+    return [{"sentiment": k, "count": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])]
+
+
+@router.get("/quality-distribution")
+async def analytics_quality_distribution(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Distribución de calidad de llamadas en rangos."""
+    sb = get_supabase()
+    cid = _effective_cid(user, client_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    query = sb.table("calls").select(
+        "quality_score"
+    ).gte("started_at", since).not_.is_("quality_score", "null")
+    if cid:
+        query = query.eq("client_id", cid)
+    calls = query.execute().data
+
+    buckets = [
+        ("Excelente", 80, 100),
+        ("Bueno", 60, 79),
+        ("Regular", 40, 59),
+        ("Bajo", 0, 39),
+    ]
+
+    scores = [float(c.get("quality_score", 0) or 0) for c in calls]
+    overall_avg = round(sum(scores) / len(scores), 1) if scores else 0
+
+    distribution = []
+    for label, lo, hi in buckets:
+        bucket_scores = [s for s in scores if lo <= s <= hi]
+        count = len(bucket_scores)
+        avg = round(sum(bucket_scores) / count, 1) if count else 0
+        distribution.append({
+            "range": label, "min": lo, "max": hi, "count": count, "avg": avg,
+        })
+
+    return {"overall_avg": overall_avg, "distribution": distribution}
+
+
+@router.get("/top-intents")
+async def analytics_top_intents(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+) -> list[dict[str, Any]]:
+    """Intents más comunes en llamadas del período."""
+    sb = get_supabase()
+    cid = _effective_cid(user, client_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    query = sb.table("calls").select(
+        "intent_realtime"
+    ).gte("started_at", since).not_.is_("intent_realtime", "null")
+    if cid:
+        query = query.eq("client_id", cid)
+    calls = query.execute().data
+
+    counts: dict[str, int] = {}
+    for c in calls:
+        ir = c.get("intent_realtime")
+        if isinstance(ir, dict):
+            intent = ir.get("primary_intent", "unknown")
+        else:
+            intent = "unknown"
+        counts[intent] = counts.get(intent, 0) + 1
+
+    total = sum(counts.values())
+    result = []
+    for intent, count in sorted(counts.items(), key=lambda x: -x[1]):
+        result.append({
+            "intent": intent,
+            "count": count,
+            "percentage": round(count / total * 100, 1) if total else 0,
+        })
+
+    return result
+
+
+@router.get("/proactive-stats")
+async def analytics_proactive_stats(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Estadísticas de acciones proactivas programadas."""
+    sb = get_supabase()
+    cid = _effective_cid(user, client_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    query = sb.table("scheduled_actions").select(
+        "id, status, channel, action_type"
+    ).gte("created_at", since)
+    if cid:
+        query = query.eq("client_id", cid)
+    actions = query.execute().data
+
+    by_status: dict[str, int] = {}
+    by_channel: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    for a in actions:
+        s = a.get("status", "unknown")
+        by_status[s] = by_status.get(s, 0) + 1
+        ch = a.get("channel", "unknown")
+        by_channel[ch] = by_channel.get(ch, 0) + 1
+        t = a.get("action_type", "unknown")
+        by_type[t] = by_type.get(t, 0) + 1
+
+    return {
+        "total": len(actions),
+        "by_status": by_status,
+        "by_channel": by_channel,
+        "by_type": by_type,
+    }
