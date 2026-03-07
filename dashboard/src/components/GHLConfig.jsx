@@ -101,7 +101,12 @@ export function GHLConfig({ clientId, agentId }) {
   }
 
   const webhookBase = import.meta.env.VITE_API_URL || window.location.origin + '/api'
-  const webhookUrl = `${webhookBase}/webhooks/whatsapp/gohighlevel`
+  // Para el webhook siempre mostrar la URL publica (no localhost)
+  const isLocal = webhookBase.includes('localhost') || webhookBase.includes('127.0.0.1')
+  const webhookDisplayBase = isLocal
+    ? 'https://voiceai-production-f4e4.up.railway.app/api'
+    : webhookBase
+  const webhookUrl = `${webhookDisplayBase}/webhooks/gohighlevel`
 
   function copyWebhook() {
     navigator.clipboard.writeText(webhookUrl)

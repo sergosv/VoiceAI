@@ -1,4 +1,4 @@
-"""Webhooks públicos para WhatsApp (GHL + Evolution API)."""
+"""Webhooks públicos para mensajería (GHL multi-canal + Evolution WhatsApp)."""
 
 from __future__ import annotations
 
@@ -13,22 +13,21 @@ from api.services.whatsapp.service import process_inbound_message
 
 logger = logging.getLogger(__name__)
 
+# Router para Evolution (WhatsApp) — montado en /api/webhooks/whatsapp
 router = APIRouter()
+
+# Router para GHL (multi-canal) — montado en /api/webhooks/gohighlevel
+ghl_router = APIRouter()
 
 _evo = EvolutionProvider()
 _ghl = GoHighLevelProvider()
 
 
-@router.post("/gohighlevel")
-async def webhook_gohighlevel(request: Request) -> Response:
-    """Webhook público para GoHighLevel.
-
-    Retorna 200 inmediato y procesa en background.
-    """
+async def _handle_ghl_webhook(request: Request) -> Response:
+    """Procesa webhook de GoHighLevel (todos los canales)."""
     body = await request.body()
     headers = dict(request.headers)
 
-    # Validar firma
     if not _ghl.validate_webhook(headers, body):
         logger.warning("GHL webhook: firma inválida")
         return Response(status_code=401)
@@ -40,15 +39,29 @@ async def webhook_gohighlevel(request: Request) -> Response:
 
     msg = _ghl.parse_webhook(payload)
     if msg:
-        logger.info("GHL webhook: mensaje de %s", msg.remote_phone)
+        logger.info("GHL webhook: mensaje de %s (canal=%s)", msg.remote_phone, msg.channel)
         asyncio.create_task(_safe_process(msg))
 
     return Response(status_code=200)
 
 
+# Ruta principal: /api/webhooks/gohighlevel
+@ghl_router.post("")
+async def webhook_gohighlevel(request: Request) -> Response:
+    """Webhook público para GoHighLevel (multi-canal)."""
+    return await _handle_ghl_webhook(request)
+
+
+# Backwards compatibility: /api/webhooks/whatsapp/gohighlevel
+@router.post("/gohighlevel")
+async def webhook_gohighlevel_legacy(request: Request) -> Response:
+    """Webhook legacy — redirige al handler principal."""
+    return await _handle_ghl_webhook(request)
+
+
 @router.post("/evolution")
 async def webhook_evolution(request: Request) -> Response:
-    """Webhook público para Evolution API.
+    """Webhook público para Evolution API (WhatsApp).
 
     Retorna 200 inmediato y procesa en background.
     """
@@ -70,4 +83,4 @@ async def _safe_process(msg) -> None:
     try:
         await process_inbound_message(msg)
     except Exception:
-        logger.exception("Error procesando mensaje WhatsApp de %s", msg.remote_phone)
+        logger.exception("Error procesando mensaje de %s", msg.remote_phone)
