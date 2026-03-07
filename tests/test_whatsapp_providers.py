@@ -155,6 +155,7 @@ class TestGoHighLevelProvider:
         assert msg.remote_phone == "5215551234567"
         assert msg.text == "Quiero agendar una cita"
         assert msg.message_type == "text"
+        assert msg.channel == "whatsapp"
         assert msg.ghl_location_id == "loc123"
         assert msg.provider_message_id == "ghl-msg-001"
 
@@ -168,15 +169,58 @@ class TestGoHighLevelProvider:
         msg = self.provider.parse_webhook(payload)
         assert msg is None
 
-    def test_filter_non_whatsapp(self):
+    def test_parse_sms(self):
+        """GHL acepta SMS como canal."""
         payload = {
             "direction": "inbound",
             "messageType": "TYPE_SMS",
             "body": "Texto SMS",
             "phone": "+5215551234567",
+            "locationId": "loc123",
         }
         msg = self.provider.parse_webhook(payload)
-        assert msg is None
+        assert msg is not None
+        assert msg.channel == "sms"
+        assert msg.text == "Texto SMS"
+
+    def test_parse_webchat(self):
+        """GHL acepta Live Chat / Web Chat."""
+        payload = {
+            "direction": "inbound",
+            "messageType": "TYPE_LIVE_CHAT",
+            "body": "Hola desde el widget",
+            "phone": "",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.channel == "webchat"
+
+    def test_parse_facebook(self):
+        """GHL acepta Facebook Messenger."""
+        payload = {
+            "direction": "inbound",
+            "messageType": "TYPE_FACEBOOK",
+            "body": "Mensaje de Facebook",
+            "phone": "+5215551234567",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.channel == "facebook"
+
+    def test_parse_instagram(self):
+        """GHL acepta Instagram DM."""
+        payload = {
+            "direction": "inbound",
+            "messageType": "TYPE_INSTAGRAM",
+            "body": "DM de Instagram",
+            "phone": "",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.channel == "instagram"
 
     def test_parse_with_channel_field(self):
         """GHL puede enviar el canal en un campo diferente."""
@@ -191,15 +235,28 @@ class TestGoHighLevelProvider:
         msg = self.provider.parse_webhook(payload)
         assert msg is not None
         assert msg.text == "Hola desde WhatsApp"
+        assert msg.channel == "whatsapp"
 
-    def test_filter_no_phone(self):
+    def test_filter_no_phone_non_digital(self):
+        """Sin phone y canal que requiere phone → None."""
         payload = {
             "direction": "inbound",
-            "messageType": "TYPE_WHATSAPP",
+            "messageType": "TYPE_SMS",
             "body": "Sin phone",
         }
         msg = self.provider.parse_webhook(payload)
         assert msg is None
+
+    def test_no_phone_ok_for_webchat(self):
+        """Web chat no necesita phone."""
+        payload = {
+            "direction": "inbound",
+            "messageType": "TYPE_LIVE_CHAT",
+            "body": "Hola",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
 
     def test_parse_with_attachments(self):
         payload = {
@@ -218,6 +275,19 @@ class TestGoHighLevelProvider:
         """Sin GHL_WEBHOOK_SECRET, acepta todo."""
         monkeypatch.delenv("GHL_WEBHOOK_SECRET", raising=False)
         assert self.provider.validate_webhook({}, b"{}") is True
+
+    def test_resolve_channel_unknown(self):
+        """Canal desconocido → 'unknown'."""
+        payload = {
+            "direction": "inbound",
+            "messageType": "SOME_NEW_TYPE",
+            "body": "Nuevo canal",
+            "phone": "+5215551234567",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.channel == "unknown"
 
 
 # ── Router ─────────────────────────────────────────────

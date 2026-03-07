@@ -1,4 +1,4 @@
-"""ABC para proveedores de WhatsApp + dataclass InboundMessage."""
+"""ABC para proveedores de mensajería + dataclass InboundMessage."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ class InboundMessage:
     remote_phone: str  # Número del remitente (con código país, sin +)
     text: str
     message_type: str = "text"  # text | image | audio | video | document
+    channel: str = "whatsapp"  # whatsapp | sms | webchat | facebook | instagram | email
     provider_message_id: str | None = None
     # Identificador del proveedor para resolver la config
     ghl_location_id: str | None = None

@@ -18,35 +18,63 @@ GHL_API_BASE = "https://services.leadconnectorhq.com"
 class GoHighLevelProvider(WhatsAppProvider):
     """Implementación de WhatsApp vía GoHighLevel API."""
 
+    # Mapeo de messageType de GHL a canal normalizado
+    _CHANNEL_MAP: dict[str, str] = {
+        "type_whatsapp": "whatsapp",
+        "whatsapp": "whatsapp",
+        "type_sms": "sms",
+        "sms": "sms",
+        "type_live_chat": "webchat",
+        "live_chat": "webchat",
+        "type_facebook": "facebook",
+        "facebook": "facebook",
+        "type_instagram": "instagram",
+        "instagram": "instagram",
+        "type_email": "email",
+        "email": "email",
+        "type_google_my_business": "google",
+        "gmb": "google",
+    }
+
+    def _resolve_channel(self, payload: dict) -> str:
+        """Resuelve el canal normalizado del mensaje GHL."""
+        msg_type = payload.get("messageType", "").lower().strip()
+        if msg_type in self._CHANNEL_MAP:
+            return self._CHANNEL_MAP[msg_type]
+
+        channel = payload.get("channel", "").lower().strip()
+        if channel in self._CHANNEL_MAP:
+            return self._CHANNEL_MAP[channel]
+
+        # Fallback: buscar por substring
+        for key, value in self._CHANNEL_MAP.items():
+            if key in msg_type or key in channel:
+                return value
+
+        return "unknown"
+
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         """Parsea webhook InboundMessage de GHL.
 
-        Filtra: direction=inbound + messageType que incluya WhatsApp.
+        Acepta todos los canales: WhatsApp, SMS, Web Chat, Facebook, Instagram, etc.
+        Filtra: solo direction=inbound.
         """
-        # GHL envía el tipo de evento en el campo 'type'
         direction = payload.get("direction")
         if direction != "inbound":
             return None
 
-        # Verificar que es un mensaje de WhatsApp
-        msg_type = payload.get("messageType", "")
-        if "whatsapp" not in msg_type.lower() and msg_type.upper() != "TYPE_WHATSAPP":
-            # GHL puede enviar como TYPE_WHATSAPP o WhatsApp
-            # También aceptar si el canal es whatsapp
-            channel = payload.get("channel", "")
-            if "whatsapp" not in channel.lower():
-                return None
+        channel = self._resolve_channel(payload)
 
         text = payload.get("body", "") or payload.get("message", "")
         phone = payload.get("phone", "") or payload.get("contactPhone", "")
         location_id = payload.get("locationId", "")
         msg_id = payload.get("messageId") or payload.get("id")
 
-        if not phone:
+        if not phone and channel not in ("webchat", "facebook", "instagram"):
             return None
 
         # Limpiar phone
-        clean_phone = phone.lstrip("+").replace(" ", "").replace("-", "")
+        clean_phone = (phone or "").lstrip("+").replace(" ", "").replace("-", "")
 
         # Detectar tipo de contenido
         content_type = "text"
@@ -67,6 +95,7 @@ class GoHighLevelProvider(WhatsAppProvider):
             remote_phone=clean_phone,
             text=text,
             message_type=content_type,
+            channel=channel,
             provider_message_id=msg_id,
             ghl_location_id=location_id,
         )
