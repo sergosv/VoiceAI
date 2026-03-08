@@ -1633,7 +1633,10 @@ export function Settings() {
                         </div>
                         <PipelineSelect
                           value={form.stt_provider}
-                          onChange={v => setForm(f => ({ ...f, stt_provider: v }))}
+                          onChange={v => {
+                            setForm(f => ({ ...f, stt_provider: v, stt_api_key: '' }))
+                            setServerKeys(s => ({ ...s, has_stt_api_key: false }))
+                          }}
                           options={STT_OPTIONS.map(o => ({
                             value: o.value,
                             label: o.label + (o.included ? ' (incluido)' : ' (tu API key)'),
@@ -1660,7 +1663,10 @@ export function Settings() {
                         </div>
                         <PipelineSelect
                           value={form.llm_provider}
-                          onChange={v => setForm(f => ({ ...f, llm_provider: v }))}
+                          onChange={v => {
+                            setForm(f => ({ ...f, llm_provider: v, llm_api_key: '' }))
+                            setServerKeys(s => ({ ...s, has_llm_api_key: false }))
+                          }}
                           options={LLM_OPTIONS.map(o => ({
                             value: o.value,
                             label: o.label + (o.included ? ' (incluido)' : ' (tu API key)'),
@@ -1687,7 +1693,10 @@ export function Settings() {
                         </div>
                         <PipelineSelect
                           value={form.tts_provider}
-                          onChange={v => setForm(f => ({ ...f, tts_provider: v }))}
+                          onChange={v => {
+                            setForm(f => ({ ...f, tts_provider: v, tts_api_key: '' }))
+                            setServerKeys(s => ({ ...s, has_tts_api_key: false }))
+                          }}
                           options={TTS_OPTIONS.map(o => ({
                             value: o.value,
                             label: o.label + (o.included ? ' (incluido)' : ' (tu API key)'),

@@ -250,7 +250,11 @@ async def update_agent(
         voice_config["voice_id"] = req.voice_id
         voice_changed = True
     if req.tts_provider is not None:
+        # Si cambia el provider, limpiar la api_key vieja (no aplica al nuevo provider)
+        old_provider = voice_config.get("provider")
         voice_config["provider"] = req.tts_provider
+        if old_provider and old_provider != req.tts_provider:
+            voice_config.pop("api_key", None)
         voice_changed = True
     if req.tts_api_key is not None:
         voice_config["api_key"] = req.tts_api_key
@@ -271,7 +275,10 @@ async def update_agent(
     llm_config = dict(agent_row.get("llm_config") or {})
     llm_changed = False
     if req.llm_provider is not None:
+        old_provider = llm_config.get("provider")
         llm_config["provider"] = req.llm_provider
+        if old_provider and old_provider != req.llm_provider:
+            llm_config.pop("api_key", None)
         llm_changed = True
     if req.llm_api_key is not None:
         llm_config["api_key"] = req.llm_api_key
@@ -283,7 +290,10 @@ async def update_agent(
     stt_config = dict(agent_row.get("stt_config") or {})
     stt_changed = False
     if req.stt_provider is not None:
+        old_provider = stt_config.get("provider")
         stt_config["provider"] = req.stt_provider
+        if old_provider and old_provider != req.stt_provider:
+            stt_config.pop("api_key", None)
         stt_changed = True
     if req.stt_api_key is not None:
         stt_config["api_key"] = req.stt_api_key
