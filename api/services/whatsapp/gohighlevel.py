@@ -101,6 +101,7 @@ class GoHighLevelProvider(WhatsAppProvider):
             channel=channel,
             provider_message_id=msg_id,
             ghl_location_id=location_id,
+            ghl_contact_id=contact_id or None,
         )
 
     async def send_text(self, config: dict, to_phone: str, text: str) -> str | None:

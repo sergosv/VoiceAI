@@ -117,6 +117,10 @@ async def process_inbound_message(msg: InboundMessage) -> None:
 
     config_id = wa_config["id"]
 
+    # Inyectar contactId de GHL para que send_text pueda usarlo
+    if msg.ghl_contact_id:
+        wa_config["_ghl_contact_id"] = msg.ghl_contact_id
+
     if not wa_config.get("auto_reply", True):
         logger.info("WA: auto_reply desactivado para config %s", config_id)
         await _save_message(sb, None, msg, "inbound")

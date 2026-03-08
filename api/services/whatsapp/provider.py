@@ -17,6 +17,7 @@ class InboundMessage:
     provider_message_id: str | None = None
     # Identificador del proveedor para resolver la config
     ghl_location_id: str | None = None
+    ghl_contact_id: str | None = None
     evo_instance_id: str | None = None
 
 

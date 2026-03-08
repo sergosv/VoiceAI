@@ -157,7 +157,23 @@ class TestGoHighLevelProvider:
         assert msg.message_type == "text"
         assert msg.channel == "whatsapp"
         assert msg.ghl_location_id == "loc123"
+        assert msg.ghl_contact_id is None  # No contactId in payload
         assert msg.provider_message_id == "ghl-msg-001"
+
+    def test_parse_inbound_with_contact_id(self):
+        """GHL contactId se propaga para enviar respuestas."""
+        payload = {
+            "direction": "inbound",
+            "messageType": "TYPE_LIVE_CHAT",
+            "body": "Hola",
+            "phone": "",
+            "contactId": "ghl-contact-abc123",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.ghl_contact_id == "ghl-contact-abc123"
+        assert msg.remote_phone == "ghl-contact-abc123"  # Fallback cuando no hay phone
 
     def test_filter_outbound(self):
         payload = {
