@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from api.auth import get_current_user
+from api.routes.auth import get_current_user
 from api.services.api_key_service import (
     create_api_key,
     delete_api_key,

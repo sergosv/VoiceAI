@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from api.auth import get_current_user
+from api.routes.auth import get_current_user
 from api.deps import get_supabase
 from api.schemas import ConversationResultOut
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from api.auth import get_current_user
+from api.routes.auth import get_current_user
 from api.services.webhook_service import (
     create_webhook_endpoint,
     delete_webhook_endpoint,
