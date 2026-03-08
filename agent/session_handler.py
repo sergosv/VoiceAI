@@ -60,6 +60,7 @@ class SessionHandler:
         self._agent_turns: list[dict] = []
         self._sentiment_summary: dict | None = None
         self._intent_summary: dict | None = None
+        self._mode_results: dict | None = None
 
     def set_agent_turns(self, turns: list[dict]) -> None:
         """Establece el historial de ruteo de agentes (modo orquestado)."""
@@ -72,6 +73,10 @@ class SessionHandler:
     def set_intent_summary(self, summary: dict) -> None:
         """Establece el resumen de intents detectados."""
         self._intent_summary = summary
+
+    def set_mode_results(self, results: dict) -> None:
+        """Establece los resultados del modo de conversación (survey/quiz/negotiation/interview)."""
+        self._mode_results = results
 
     def add_transcript_entry(self, role: str, text: str) -> None:
         """Agrega una entrada a la transcripción."""
@@ -147,6 +152,42 @@ class SessionHandler:
             call_data["intent_realtime"] = self._intent_summary
         call_result = sb.table("calls").insert(call_data).execute()
         call_id = call_result.data[0]["id"] if call_result.data else None
+
+        # Guardar resultados de modo estructurado si aplica
+        if self._mode_results and call_id:
+            try:
+                mode = self._mode_results.get("mode", "")
+                result_data = {
+                    "call_id": call_id,
+                    "agent_id": self._agent_id,
+                    "client_id": self._client_id,
+                    "mode": mode,
+                    "answers": self._mode_results.get("answers", []),
+                    "completed": self._mode_results.get("completed", False),
+                    "metadata": {},
+                }
+                if mode in ("quiz", "interview"):
+                    result_data["score"] = self._mode_results.get("score")
+                    result_data["max_score"] = self._mode_results.get("max_score")
+                    result_data["passed"] = self._mode_results.get("passed")
+                if mode == "negotiation":
+                    result_data["metadata"] = {
+                        "negotiation_history": self._mode_results.get("negotiation_history", []),
+                        "final_offer": self._mode_results.get("final_offer"),
+                        "deal_closed": self._mode_results.get("deal_closed", False),
+                    }
+                if mode == "interview":
+                    result_data["metadata"]["category_scores"] = self._mode_results.get(
+                        "category_scores", {}
+                    )
+                # Contacto si lo tenemos
+                if self._memory_contact_id:
+                    result_data["contact_id"] = self._memory_contact_id
+
+                sb.table("conversation_results").insert(result_data).execute()
+                logger.info("Mode results guardados: %s (completed=%s)", mode, result_data["completed"])
+            except Exception:
+                logger.exception("Error guardando conversation_results")
 
         # Actualizar campaign_calls si es una llamada de campaña
         if self._campaign_id and self._direction == "outbound":

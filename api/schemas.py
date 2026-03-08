@@ -130,6 +130,7 @@ class AgentOut(BaseModel):
     # Flow builder
     conversation_mode: str = "prompt"
     conversation_flow: dict | None = None
+    mode_config: dict = Field(default_factory=dict)
     # Inteligencia de agentes
     sentiment_config: dict | None = None
     intent_config: dict | None = None
@@ -169,6 +170,7 @@ class AgentCreateRequest(BaseModel):
     # Flow builder
     conversation_mode: str = "prompt"
     conversation_flow: dict | None = None
+    mode_config: dict | None = None
     # Inteligencia de agentes
     sentiment_config: dict | None = None
     intent_config: dict | None = None
@@ -206,6 +208,7 @@ class AgentUpdateRequest(BaseModel):
     # Flow builder
     conversation_mode: str | None = None
     conversation_flow: dict | None = None
+    mode_config: dict | None = None
     # Inteligencia de agentes
     sentiment_config: dict | None = None
     intent_config: dict | None = None
@@ -213,6 +216,25 @@ class AgentUpdateRequest(BaseModel):
     language_detection_config: dict | None = None
     quality_config: dict | None = None
     proactive_config: dict | None = None
+
+
+# ── Conversation Results ─────────────────────────────
+
+class ConversationResultOut(BaseModel):
+    id: str
+    call_id: str | None = None
+    agent_id: str
+    client_id: str
+    contact_id: str | None = None
+    mode: str
+    answers: list = Field(default_factory=list)
+    score: float | None = None
+    max_score: float | None = None
+    passed: bool | None = None
+    summary: str | None = None
+    metadata: dict = Field(default_factory=dict)
+    completed: bool = False
+    created_at: datetime | None = None
 
 
 # ── Clients ───────────────────────────────────────────

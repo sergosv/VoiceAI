@@ -136,6 +136,7 @@ async def create_agent(
         "orchestrator_priority": req.orchestrator_priority,
         "conversation_mode": req.conversation_mode,
         "conversation_flow": req.conversation_flow,
+        "mode_config": req.mode_config or {},
     }
 
     result = sb.table("agents").insert(data).execute()
@@ -200,7 +201,7 @@ async def update_agent(
         "name", "system_prompt", "greeting", "examples", "agent_mode", "agent_type",
         "transfer_number", "after_hours_message", "max_call_duration_seconds", "is_active",
         "role_description", "orchestrator_enabled", "orchestrator_priority",
-        "conversation_mode", "conversation_flow",
+        "conversation_mode", "conversation_flow", "mode_config",
     }
     for f in direct_fields:
         if f in req_data:

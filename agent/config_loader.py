@@ -46,9 +46,10 @@ class AgentConfig:
     role_description: str | None = None
     orchestrator_enabled: bool = True
     orchestrator_priority: int = 0
-    # Flow builder
+    # Flow builder / Conversation modes
     conversation_mode: str = "prompt"
     conversation_flow: dict | None = None
+    mode_config: dict = field(default_factory=dict)
     # Sentimiento en tiempo real
     sentiment_config: dict | None = None
     # Intent extraction
@@ -441,6 +442,7 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         orchestrator_priority=agent_row.get("orchestrator_priority", 0),
         conversation_mode=agent_row.get("conversation_mode", "prompt"),
         conversation_flow=agent_row.get("conversation_flow"),
+        mode_config=agent_row.get("mode_config") or {},
         sentiment_config=agent_row.get("sentiment_config"),
         intent_config=agent_row.get("intent_config"),
         guardrails_config=agent_row.get("guardrails_config"),

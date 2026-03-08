@@ -11,6 +11,7 @@ from livekit.agents.llm import FunctionCallOutput, function_tool
 
 from agent.config_loader import ResolvedConfig
 from agent.flow_engine import FlowEngine, FlowState
+from agent.mode_engine import ModeEngine, ModeState
 from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
 from agent.tools.memory_tool import recall_memory_search
@@ -540,6 +541,103 @@ class FlowVoiceAgent(VoiceAgent):
                 break
 
 
+class ModeVoiceAgent(VoiceAgent):
+    """Agente de voz que opera en un modo estructurado (survey, quiz, negotiation, interview).
+
+    Usa ModeEngine para manejar progresión de preguntas, scoring y prompts
+    dinámicos por turno via _swap_system_prompt().
+    """
+
+    def __init__(
+        self,
+        config: ResolvedConfig,
+        mode_engine: ModeEngine,
+        base_rules: str = "",
+        mcp_servers: list | None = None,
+        api_integrations: list[dict] | None = None,
+    ) -> None:
+        super().__init__(config, mcp_servers=mcp_servers, api_integrations=api_integrations)
+        self._mode_engine = mode_engine
+        self._mode_state: ModeState = mode_engine.start()
+        self._base_rules = base_rules
+        self._turn_count = 0
+
+    @property
+    def mode_state(self) -> ModeState:
+        return self._mode_state
+
+    @property
+    def mode_engine(self) -> ModeEngine:
+        return self._mode_engine
+
+    def _swap_system_prompt(self, chat_ctx: llm.ChatContext, new_instructions: str) -> None:
+        """Reemplaza el system prompt en el chat context."""
+        for item in chat_ctx.items:
+            if hasattr(item, "role") and item.role == "system":
+                if hasattr(item, "content"):
+                    item.content = new_instructions
+                return
+        from livekit.agents.llm import ChatMessage
+        chat_ctx.items.insert(0, ChatMessage(role="system", content=new_instructions))
+
+    def _extract_last_user_message(self, chat_ctx: llm.ChatContext) -> str | None:
+        """Extrae el último mensaje del usuario del chat context."""
+        for item in reversed(chat_ctx.items):
+            if hasattr(item, "role") and item.role == "user":
+                if hasattr(item, "content"):
+                    content = item.content
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        for part in content:
+                            if isinstance(part, str):
+                                return part
+                            if hasattr(part, "text"):
+                                return part.text
+        return None
+
+    async def llm_node(
+        self,
+        chat_ctx: llm.ChatContext,
+        tools: list,
+        model_settings: llm.ModelSettings,
+    ) -> AsyncIterator:
+        """Intercepta el LLM para inyectar el prompt del modo actual.
+
+        En el primer turno, genera el prompt inicial (primera pregunta).
+        En turnos subsecuentes, procesa la respuesta del usuario y avanza.
+        """
+        self._turn_count += 1
+
+        if self._turn_count > 1 and not self._mode_state.completed:
+            user_msg = self._extract_last_user_message(chat_ctx)
+            if user_msg:
+                self._mode_state, feedback = self._mode_engine.process_answer(
+                    self._mode_state, user_msg
+                )
+                logger.info(
+                    "Mode '%s' avanzó a pregunta %d/%d (completed=%s)",
+                    self._mode_state.mode,
+                    self._mode_state.current_question_idx,
+                    self._mode_engine.question_count,
+                    self._mode_state.completed,
+                )
+                # Inyectar feedback como mensaje del sistema si hay
+                if feedback:
+                    from livekit.agents.llm import ChatMessage
+                    chat_ctx.items.append(
+                        ChatMessage(role="system", content=f"[Feedback]: {feedback}")
+                    )
+
+        # Generar prompt dinámico del modo actual
+        mode_prompt = self._mode_engine.build_system_prompt(
+            self._mode_state, self._base_rules
+        )
+        self._swap_system_prompt(chat_ctx, mode_prompt)
+
+        return Agent.llm_node(self, chat_ctx, tools, model_settings)
+
+
 def _voice_rules(config: ResolvedConfig) -> str:
     """Genera reglas de voz con fecha/hora actual y datos del agente."""
     from datetime import datetime, timezone, timedelta
@@ -769,6 +867,12 @@ def build_agent(
             config, memory_context, mcp_servers, api_integrations, caller_number
         )
 
+    # Si el agente está en modo estructurado (survey/quiz/negotiation/interview)
+    if config.agent.conversation_mode in ("survey", "quiz", "negotiation", "interview"):
+        return _build_mode_agent(
+            config, memory_context, mcp_servers, api_integrations
+        )
+
     # Inyectar contexto temporal + memoria + reglas de voz + instrucciones de herramientas
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
     api_instructions = _build_api_instructions(api_integrations or [])
@@ -835,6 +939,45 @@ def _build_flow_agent(
         "FlowVoiceAgent creado para '%s' / '%s' — modo flujo, apis: %d",
         config.client.name,
         config.agent.name,
+        len(api_integrations or []),
+    )
+    return agent
+
+
+def _build_mode_agent(
+    config: ResolvedConfig,
+    memory_context: str = "",
+    mcp_servers: list | None = None,
+    api_integrations: list[dict] | None = None,
+) -> ModeVoiceAgent:
+    """Construye un ModeVoiceAgent para modos estructurados (survey/quiz/negotiation/interview)."""
+    base_rules = config.agent.system_prompt
+    if memory_context:
+        base_rules += "\n" + memory_context
+    base_rules += _voice_rules(config)
+    base_rules += _build_tool_instructions(config.client.enabled_tools)
+    base_rules += _build_api_instructions(api_integrations or [])
+    if config.agent.examples:
+        base_rules += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
+
+    mode_engine = ModeEngine(
+        mode=config.agent.conversation_mode,
+        config=config.agent.mode_config,
+    )
+
+    agent = ModeVoiceAgent(
+        config=config,
+        mode_engine=mode_engine,
+        base_rules=base_rules,
+        mcp_servers=mcp_servers,
+        api_integrations=api_integrations,
+    )
+    logger.info(
+        "ModeVoiceAgent creado para '%s' / '%s' — modo %s (%d preguntas), apis: %d",
+        config.client.name,
+        config.agent.name,
+        config.agent.conversation_mode,
+        mode_engine.question_count,
         len(api_integrations or []),
     )
     return agent

@@ -71,6 +71,7 @@ const TABS = [
   { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
   { key: 'ghl', label: 'GoHighLevel', icon: Zap },
   { key: 'intelligence', label: 'Inteligencia', icon: Brain },
+  { key: 'api', label: 'API', icon: Key },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
 
@@ -543,6 +544,259 @@ function IntelligenceTab({ form, setForm }) {
   )
 }
 
+/* ─────────────────────── API Keys Panel ─────────────────────────── */
+
+function ApiKeysPanel({ clientId }) {
+  const [keys, setKeys] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [newKeyName, setNewKeyName] = useState('')
+  const [newKeyScopes, setNewKeyScopes] = useState('')
+  const [createdKey, setCreatedKey] = useState(null)
+  const { toast } = useToast()
+
+  const loadKeys = useCallback(async () => {
+    try {
+      const data = await api.get(`/api-keys/${clientId}`)
+      setKeys(data)
+    } catch { /* ignore */ }
+    setLoading(false)
+  }, [clientId])
+
+  useEffect(() => { loadKeys() }, [loadKeys])
+
+  async function handleCreate() {
+    if (!newKeyName.trim()) return
+    setCreating(true)
+    try {
+      const scopes = newKeyScopes.trim() ? newKeyScopes.split(',').map(s => s.trim()) : []
+      const result = await api.post(`/api-keys/${clientId}`, { name: newKeyName, scopes })
+      setCreatedKey(result.key)
+      setNewKeyName('')
+      setNewKeyScopes('')
+      toast('API key creada. Copia la key ahora — no se volvera a mostrar.', 'success')
+      await loadKeys()
+    } catch (e) {
+      toast(e.message || 'Error creando API key', 'error')
+    }
+    setCreating(false)
+  }
+
+  async function handleRevoke(id) {
+    try {
+      await api.post(`/api-keys/${clientId}/${id}/revoke`)
+      toast('API key revocada', 'success')
+      await loadKeys()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
+  async function handleDelete(id) {
+    try {
+      await api.delete(`/api-keys/${clientId}/${id}`)
+      toast('API key eliminada', 'success')
+      await loadKeys()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+        <Key size={16} className="text-accent" />
+        API Keys
+      </h2>
+      <p className="text-xs text-text-muted">
+        Crea keys para acceder a la Public API (endpoints /api/v1/). Cada key se muestra solo una vez al crearla.
+      </p>
+
+      {/* Crear key */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newKeyName}
+          onChange={e => setNewKeyName(e.target.value)}
+          placeholder="Nombre de la key"
+          className="flex-1 bg-bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50"
+        />
+        <input
+          type="text"
+          value={newKeyScopes}
+          onChange={e => setNewKeyScopes(e.target.value)}
+          placeholder="Scopes (ej: calls:read,contacts:read)"
+          className="flex-1 bg-bg-secondary border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-accent/50"
+        />
+        <Button onClick={handleCreate} disabled={creating || !newKeyName.trim()}>
+          {creating ? <Spinner size={14} /> : <Plus size={14} />}
+          <span className="ml-1">Crear</span>
+        </Button>
+      </div>
+
+      {/* Key recien creada */}
+      {createdKey && (
+        <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg space-y-1">
+          <p className="text-xs text-green-400 font-medium">Tu nueva API key (copiala ahora):</p>
+          <code className="block text-xs bg-bg-primary rounded px-2 py-1 font-mono break-all select-all">{createdKey}</code>
+          <button onClick={() => { navigator.clipboard.writeText(createdKey); toast('Copiada!', 'success') }}
+            className="text-xs text-accent hover:underline cursor-pointer">Copiar al portapapeles</button>
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading ? <Spinner /> : keys.length === 0 ? (
+        <p className="text-xs text-text-muted py-2">No hay API keys.</p>
+      ) : (
+        <div className="space-y-2">
+          {keys.map(k => (
+            <div key={k.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-bg-primary/50">
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium">{k.name}</span>
+                <span className="text-xs text-text-muted ml-2">{k.key_prefix}...</span>
+                {!k.is_active && <span className="text-xs text-red-400 ml-2">Revocada</span>}
+                {k.scopes?.length > 0 && (
+                  <span className="text-[10px] text-text-muted ml-2">[{k.scopes.join(', ')}]</span>
+                )}
+              </div>
+              <span className="text-[10px] text-text-muted">{k.last_used_at ? `Usado: ${new Date(k.last_used_at).toLocaleDateString()}` : 'Sin uso'}</span>
+              {k.is_active && (
+                <button onClick={() => handleRevoke(k.id)} className="text-xs text-yellow-400 hover:underline cursor-pointer">Revocar</button>
+              )}
+              <button onClick={() => handleDelete(k.id)} className="text-xs text-red-400 hover:underline cursor-pointer">Eliminar</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/* ─────────────────────── Webhooks Panel ─────────────────────────── */
+
+function WebhooksPanel({ clientId }) {
+  const [endpoints, setEndpoints] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [newUrl, setNewUrl] = useState('')
+  const [newEvents, setNewEvents] = useState('')
+  const [createdSecret, setCreatedSecret] = useState(null)
+  const { toast } = useToast()
+
+  const loadEndpoints = useCallback(async () => {
+    try {
+      const data = await api.get(`/webhook-endpoints/${clientId}`)
+      setEndpoints(data)
+    } catch { /* ignore */ }
+    setLoading(false)
+  }, [clientId])
+
+  useEffect(() => { loadEndpoints() }, [loadEndpoints])
+
+  async function handleCreate() {
+    if (!newUrl.trim() || !newEvents.trim()) return
+    setCreating(true)
+    try {
+      const events = newEvents.split(',').map(s => s.trim())
+      const result = await api.post(`/webhook-endpoints/${clientId}`, { url: newUrl, events })
+      setCreatedSecret(result.secret)
+      setNewUrl('')
+      setNewEvents('')
+      toast('Webhook creado. Copia el secret para verificar las firmas.', 'success')
+      await loadEndpoints()
+    } catch (e) {
+      toast(e.message || 'Error creando webhook', 'error')
+    }
+    setCreating(false)
+  }
+
+  async function handleDelete(id) {
+    try {
+      await api.delete(`/webhook-endpoints/${clientId}/${id}`)
+      toast('Webhook eliminado', 'success')
+      await loadEndpoints()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
+  async function handleToggle(ep) {
+    try {
+      await api.patch(`/webhook-endpoints/${clientId}/${ep.id}`, { is_active: !ep.is_active })
+      await loadEndpoints()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+        <Bell size={16} className="text-accent" />
+        Webhooks
+      </h2>
+      <p className="text-xs text-text-muted">
+        Recibe notificaciones HTTP cuando ocurran eventos (call.completed, contact.created, etc.).
+        Cada entrega incluye una firma HMAC-SHA256 en el header X-Webhook-Signature.
+      </p>
+
+      {/* Crear webhook */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newUrl}
+          onChange={e => setNewUrl(e.target.value)}
+          placeholder="https://tu-servidor.com/webhook"
+          className="flex-1 bg-bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50"
+        />
+        <input
+          type="text"
+          value={newEvents}
+          onChange={e => setNewEvents(e.target.value)}
+          placeholder="Eventos (ej: call.*,contact.created)"
+          className="flex-1 bg-bg-secondary border border-border rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-accent/50"
+        />
+        <Button onClick={handleCreate} disabled={creating || !newUrl.trim() || !newEvents.trim()}>
+          {creating ? <Spinner size={14} /> : <Plus size={14} />}
+          <span className="ml-1">Crear</span>
+        </Button>
+      </div>
+
+      {/* Secret recién creado */}
+      {createdSecret && (
+        <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg space-y-1">
+          <p className="text-xs text-green-400 font-medium">Webhook secret (cópialo ahora):</p>
+          <code className="block text-xs bg-bg-primary rounded px-2 py-1 font-mono break-all select-all">{createdSecret}</code>
+          <button onClick={() => { navigator.clipboard.writeText(createdSecret); toast('Copiado!', 'success') }}
+            className="text-xs text-accent hover:underline cursor-pointer">Copiar al portapapeles</button>
+        </div>
+      )}
+
+      {/* Lista */}
+      {loading ? <Spinner /> : endpoints.length === 0 ? (
+        <p className="text-xs text-text-muted py-2">No hay webhooks configurados.</p>
+      ) : (
+        <div className="space-y-2">
+          {endpoints.map(ep => (
+            <div key={ep.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-bg-primary/50">
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium truncate block">{ep.url}</span>
+                <span className="text-[10px] text-text-muted">{(ep.events || []).join(', ')}</span>
+                {ep.description && <span className="text-[10px] text-text-muted ml-2">— {ep.description}</span>}
+              </div>
+              <button onClick={() => handleToggle(ep)}
+                className={`text-xs cursor-pointer ${ep.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                {ep.is_active ? 'Activo' : 'Inactivo'}
+              </button>
+              <button onClick={() => handleDelete(ep.id)} className="text-xs text-red-400 hover:underline cursor-pointer">Eliminar</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 /* ─────────────────────── Main Component ─────────────────────────── */
 
 export function Settings() {
@@ -577,6 +831,7 @@ export function Settings() {
     stt_api_key: '', llm_api_key: '', tts_api_key: '', realtime_api_key: '',
     realtime_voice: 'alloy', realtime_model: 'gpt-4o-realtime-preview', voice_id: '',
     role_description: '', orchestrator_enabled: true, orchestrator_priority: 0,
+    mode_config: {},
     sentiment_config: null, intent_config: null, guardrails_config: null,
     language_detection_config: null, quality_config: null, proactive_config: null,
   })
@@ -604,6 +859,7 @@ export function Settings() {
       examples: agentData.examples || '',
       after_hours_message: agentData.after_hours_message || '',
       conversation_mode: agentData.conversation_mode || 'prompt',
+      mode_config: agentData.mode_config || {},
       max_call_duration_seconds: agentData.max_call_duration_seconds || 300,
       transfer_number: agentData.transfer_number || '',
       is_active: agentData.is_active !== false,
@@ -765,6 +1021,7 @@ export function Settings() {
         orchestrator_enabled: form.orchestrator_enabled,
         orchestrator_priority: form.orchestrator_priority,
         conversation_mode: form.conversation_mode,
+        mode_config: form.mode_config || {},
         sentiment_config: form.sentiment_config,
         intent_config: form.intent_config,
         guardrails_config: form.guardrails_config,
@@ -1060,29 +1317,28 @@ export function Settings() {
                   {/* Conversation mode */}
                   <div>
                     <label className="block text-xs text-text-muted mb-2">Modo de conversacion</label>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, conversation_mode: 'prompt' }))}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm border transition-colors cursor-pointer ${
-                          form.conversation_mode === 'prompt'
-                            ? 'border-accent bg-accent/10 text-accent'
-                            : 'border-border text-text-muted hover:border-text-muted'
-                        }`}
-                      >
-                        Prompt libre
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, conversation_mode: 'flow' }))}
-                        className={`flex-1 px-3 py-2 rounded-lg text-sm border transition-colors cursor-pointer ${
-                          form.conversation_mode === 'flow'
-                            ? 'border-accent bg-accent/10 text-accent'
-                            : 'border-border text-text-muted hover:border-text-muted'
-                        }`}
-                      >
-                        Flujo visual
-                      </button>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { value: 'prompt', label: 'Prompt libre' },
+                        { value: 'flow', label: 'Flujo visual' },
+                        { value: 'survey', label: 'Encuesta' },
+                        { value: 'quiz', label: 'Quiz' },
+                        { value: 'negotiation', label: 'Negociacion' },
+                        { value: 'interview', label: 'Entrevista' },
+                      ].map(m => (
+                        <button
+                          key={m.value}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, conversation_mode: m.value }))}
+                          className={`px-3 py-2 rounded-lg text-xs border transition-colors cursor-pointer ${
+                            form.conversation_mode === m.value
+                              ? 'border-accent bg-accent/10 text-accent'
+                              : 'border-border text-text-muted hover:border-text-muted'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
                     </div>
                     {form.conversation_mode === 'flow' && (
                       <button
@@ -1099,10 +1355,137 @@ export function Settings() {
                         Editar flujo de conversacion
                       </button>
                     )}
+
+                    {/* Mode config panel for structured modes */}
+                    {['survey', 'quiz', 'negotiation', 'interview'].includes(form.conversation_mode) && (
+                      <div className="mt-3 p-3 rounded-lg border border-border bg-bg-primary/50 space-y-3">
+                        <span className="text-xs font-medium text-text-secondary">
+                          Configuracion de {
+                            { survey: 'Encuesta', quiz: 'Quiz', negotiation: 'Negociacion', interview: 'Entrevista' }[form.conversation_mode]
+                          }
+                        </span>
+
+                        {/* Questions editor (survey, quiz, interview) */}
+                        {['survey', 'quiz', 'interview'].includes(form.conversation_mode) && (
+                          <div className="space-y-2">
+                            <label className="block text-[11px] text-text-muted">
+                              Preguntas (JSON)
+                            </label>
+                            <textarea
+                              value={JSON.stringify(form.mode_config?.questions || [], null, 2)}
+                              onChange={e => {
+                                try {
+                                  const questions = JSON.parse(e.target.value)
+                                  setForm(f => ({ ...f, mode_config: { ...f.mode_config, questions } }))
+                                } catch { /* invalid JSON, ignore */ }
+                              }}
+                              rows={8}
+                              className="w-full bg-bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-accent/50 transition-colors"
+                              placeholder={form.conversation_mode === 'quiz'
+                                ? '[{"id":"q1","text":"¿Pregunta?","correct_answer":"Respuesta","points":10,"options":["A","B","C"]}]'
+                                : '[{"id":"q1","text":"¿Pregunta?","type":"text"}]'
+                              }
+                            />
+                          </div>
+                        )}
+
+                        {/* Quiz-specific: passing score */}
+                        {form.conversation_mode === 'quiz' && (
+                          <div>
+                            <label className="block text-[11px] text-text-muted mb-1">Puntaje minimo para aprobar (%)</label>
+                            <input
+                              type="number"
+                              min={0} max={100}
+                              value={form.mode_config?.passing_score ?? 70}
+                              onChange={e => setForm(f => ({ ...f, mode_config: { ...f.mode_config, passing_score: Number(e.target.value) } }))}
+                              className="w-24 bg-bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent/50"
+                            />
+                          </div>
+                        )}
+
+                        {/* Interview-specific: required score */}
+                        {form.conversation_mode === 'interview' && (
+                          <div>
+                            <label className="block text-[11px] text-text-muted mb-1">Puntaje minimo requerido (%)</label>
+                            <input
+                              type="number"
+                              min={0} max={100}
+                              value={form.mode_config?.required_score ?? 60}
+                              onChange={e => setForm(f => ({ ...f, mode_config: { ...f.mode_config, required_score: Number(e.target.value) } }))}
+                              className="w-24 bg-bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent/50"
+                            />
+                          </div>
+                        )}
+
+                        {/* Negotiation config */}
+                        {form.conversation_mode === 'negotiation' && (
+                          <div className="space-y-2">
+                            <label className="block text-[11px] text-text-muted">
+                              Catalogo de productos (JSON)
+                            </label>
+                            <textarea
+                              value={JSON.stringify(form.mode_config?.product_catalog || [], null, 2)}
+                              onChange={e => {
+                                try {
+                                  const product_catalog = JSON.parse(e.target.value)
+                                  setForm(f => ({ ...f, mode_config: { ...f.mode_config, product_catalog } }))
+                                } catch { /* invalid JSON */ }
+                              }}
+                              rows={6}
+                              className="w-full bg-bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-accent/50 transition-colors"
+                              placeholder='[{"name":"Plan Pro","base_price":500,"min_price":400,"max_discount_pct":20}]'
+                            />
+                            <div className="flex gap-3">
+                              <div className="flex-1">
+                                <label className="block text-[11px] text-text-muted mb-1">Nivel de autoridad</label>
+                                <select
+                                  value={form.mode_config?.authority_level || 'agent'}
+                                  onChange={e => setForm(f => ({ ...f, mode_config: { ...f.mode_config, authority_level: e.target.value } }))}
+                                  className="w-full bg-bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-accent/50"
+                                >
+                                  <option value="agent">Agente</option>
+                                  <option value="manager">Manager</option>
+                                  <option value="director">Director</option>
+                                </select>
+                              </div>
+                              <div className="flex-1">
+                                <label className="block text-[11px] text-text-muted mb-1">Umbral escalacion (%)</label>
+                                <input
+                                  type="number"
+                                  min={0} max={100}
+                                  value={form.mode_config?.escalation_threshold_pct ?? 25}
+                                  onChange={e => setForm(f => ({ ...f, mode_config: { ...f.mode_config, escalation_threshold_pct: Number(e.target.value) } }))}
+                                  className="w-full bg-bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-accent/50"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Survey: thank you message */}
+                        {form.conversation_mode === 'survey' && (
+                          <div>
+                            <label className="block text-[11px] text-text-muted mb-1">Mensaje de agradecimiento</label>
+                            <input
+                              type="text"
+                              value={form.mode_config?.thank_you_message || ''}
+                              onChange={e => setForm(f => ({ ...f, mode_config: { ...f.mode_config, thank_you_message: e.target.value } }))}
+                              placeholder="Gracias por tus respuestas."
+                              className="w-full bg-bg-secondary border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent/50"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <p className="text-[10px] text-text-muted mt-2">
-                      {form.conversation_mode === 'prompt'
-                        ? 'El agente usa el system prompt para improvisar la conversacion.'
-                        : 'El agente sigue un flujo predefinido con pasos y condiciones.'}
+                      {{ prompt: 'El agente usa el system prompt para improvisar la conversacion.',
+                         flow: 'El agente sigue un flujo predefinido con pasos y condiciones.',
+                         survey: 'El agente hace preguntas secuenciales y registra respuestas.',
+                         quiz: 'El agente evalua conocimiento con puntuacion y respuestas correctas.',
+                         negotiation: 'El agente negocia precios con guardrails y catalogo de productos.',
+                         interview: 'El agente conduce una entrevista estructurada con evaluacion.',
+                      }[form.conversation_mode]}
                     </p>
                   </div>
 
@@ -1496,6 +1879,14 @@ export function Settings() {
             {/* ── Inteligencia Tab ── */}
             {activeTab === 'intelligence' && (
               <IntelligenceTab form={form} setForm={setForm} />
+            )}
+
+            {/* ── API Tab ── */}
+            {activeTab === 'api' && (
+              <div className="space-y-6">
+                <ApiKeysPanel clientId={clientId} />
+                <WebhooksPanel clientId={clientId} />
+              </div>
             )}
 
             {/* ── Avanzado Tab ── */}
