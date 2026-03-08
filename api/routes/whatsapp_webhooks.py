@@ -37,10 +37,14 @@ async def _handle_ghl_webhook(request: Request) -> Response:
     except Exception:
         return Response(status_code=400)
 
+    logger.info("GHL webhook payload: %s", {k: v for k, v in payload.items() if k != "ghl_api_key"})
+
     msg = _ghl.parse_webhook(payload)
     if msg:
         logger.info("GHL webhook: mensaje de %s (canal=%s)", msg.remote_phone, msg.channel)
         asyncio.create_task(_safe_process(msg))
+    else:
+        logger.warning("GHL webhook: parse retornó None — direction=%s", payload.get("direction"))
 
     return Response(status_code=200)
 
