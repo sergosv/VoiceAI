@@ -358,6 +358,11 @@ def _smart_upsert_contact(
             metadata["last_call_id"] = call_id
         updates["metadata"] = metadata
 
+        # Asegurar canal "phone" registrado
+        channels = contact.get("channels") or []
+        if "phone" not in channels:
+            updates["channels"] = list(set(channels + ["phone"]))
+
         sb.table("contacts").update(updates).eq("id", contact["id"]).execute()
         logger.info("Contacto actualizado (call_count +1): %s", normalized)
     else:
@@ -368,6 +373,7 @@ def _smart_upsert_contact(
             "call_count": 1,
             "last_call_at": now_iso,
             "metadata": {"last_call_id": call_id} if call_id else {},
+            "channels": ["phone"],
         }
         sb.table("contacts").insert(contact_data).execute()
         logger.info("Contacto nuevo creado: %s", normalized)

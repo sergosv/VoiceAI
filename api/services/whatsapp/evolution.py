@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 
 import httpx
 
 from api.services.whatsapp.provider import InboundMessage, WhatsAppProvider
 
 logger = logging.getLogger(__name__)
+
+# Delay mínimo y máximo en segundos antes de responder (simula escritura humana)
+MIN_TYPING_DELAY = 1.0
+MAX_TYPING_DELAY = 3.0
+# Caracteres por segundo para calcular delay proporcional al largo del mensaje
+CHARS_PER_SECOND = 30
 
 
 class EvolutionProvider(WhatsAppProvider):
@@ -69,7 +77,7 @@ class EvolutionProvider(WhatsAppProvider):
         )
 
     async def send_text(self, config: dict, to_phone: str, text: str) -> str | None:
-        """Envía texto vía Evolution API POST /message/sendText/{instance}."""
+        """Envía texto vía Evolution API con typing indicator y delay humano."""
         api_url = config.get("evo_api_url", "").rstrip("/")
         api_key = config.get("evo_api_key", "")
         instance_id = config.get("evo_instance_id", "")
@@ -79,8 +87,22 @@ class EvolutionProvider(WhatsAppProvider):
             return None
 
         clean_phone = to_phone.lstrip("+").replace(" ", "").replace("-", "")
-        url = f"{api_url}/message/sendText/{instance_id}"
         headers = {"apikey": api_key, "Content-Type": "application/json"}
+
+        # 1. Enviar "composing" (los tres puntitos de "escribiendo...")
+        await self._send_presence(api_url, instance_id, headers, clean_phone, "composing")
+
+        # 2. Delay proporcional al largo del mensaje (simula escritura humana)
+        typing_delay = min(
+            max(len(text) / CHARS_PER_SECOND, MIN_TYPING_DELAY),
+            MAX_TYPING_DELAY,
+        )
+        # Agregar variación aleatoria para que no sea predecible
+        typing_delay += random.uniform(0.3, 0.8)
+        await asyncio.sleep(typing_delay)
+
+        # 3. Enviar mensaje
+        url = f"{api_url}/message/sendText/{instance_id}"
         payload = {"number": clean_phone, "text": text}
 
         try:
@@ -100,6 +122,20 @@ class EvolutionProvider(WhatsAppProvider):
         except Exception as e:
             logger.error("Evolution: error enviando — %s", e)
             return None
+
+    async def _send_presence(
+        self, api_url: str, instance_id: str, headers: dict,
+        phone: str, presence: str,
+    ) -> None:
+        """Envía estado de presencia (composing/paused) al contacto."""
+        url = f"{api_url}/chat/sendPresence/{instance_id}"
+        payload = {"number": phone, "presence": presence}
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(url, json=payload, headers=headers)
+        except Exception:
+            # No fallar si el presence no se envía — es cosmético
+            pass
 
     def validate_webhook(self, headers: dict, body: bytes) -> bool:
         """Evolution API no usa firma HMAC — validamos por instance_id en el payload."""

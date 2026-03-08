@@ -298,22 +298,26 @@ async def _resolve_contact(sb: Client, client_id: str, msg: InboundMessage) -> s
         return None
 
     normalized = normalize_phone(phone)
+    channel_name = f"ghl-{msg.channel}"
     result = (
         sb.table("contacts")
-        .select("id")
+        .select("id, channels")
         .eq("client_id", client_id)
         .eq("phone", normalized)
         .limit(1)
         .execute()
     )
     if result.data:
-        return result.data[0]["id"]
+        contact = result.data[0]
+        _ensure_channel(sb, contact["id"], contact.get("channels") or [], channel_name)
+        return contact["id"]
 
     new_contact = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
         "phone": normalized,
-        "source": f"ghl-{msg.channel}",
+        "source": channel_name,
+        "channels": [channel_name],
     }
     try:
         sb.table("contacts").insert(new_contact).execute()
@@ -401,6 +405,18 @@ async def _get_or_create_conversation(
         new_conv["message_count"] = 1
 
     return new_conv
+
+
+def _ensure_channel(sb: Client, contact_id: str, channels: list, channel: str) -> None:
+    """Agrega canal al contacto si no lo tiene."""
+    if channel not in channels:
+        try:
+            new_channels = list(set(channels + [channel]))
+            sb.table("contacts").update(
+                {"channels": new_channels}
+            ).eq("id", contact_id).execute()
+        except Exception as e:
+            logger.error("Error actualizando channels: %s", e)
 
 
 async def _save_message(
