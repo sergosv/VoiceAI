@@ -70,11 +70,14 @@ class GoHighLevelProvider(WhatsAppProvider):
         location_id = payload.get("locationId", "")
         msg_id = payload.get("messageId") or payload.get("id")
 
-        if not phone and channel not in ("webchat", "facebook", "instagram"):
+        contact_id = payload.get("contactId", "")
+        if not phone and not contact_id and channel not in ("webchat", "facebook", "instagram"):
             return None
 
-        # Limpiar phone
+        # Limpiar phone (si no hay phone, usar contactId como identificador)
         clean_phone = (phone or "").lstrip("+").replace(" ", "").replace("-", "")
+        if not clean_phone:
+            clean_phone = contact_id or "unknown"
 
         # Detectar tipo de contenido
         content_type = "text"
