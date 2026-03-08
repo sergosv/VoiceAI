@@ -292,8 +292,8 @@ class TestGoHighLevelProvider:
         monkeypatch.delenv("GHL_WEBHOOK_SECRET", raising=False)
         assert self.provider.validate_webhook({}, b"{}") is True
 
-    def test_resolve_channel_unknown(self):
-        """Canal desconocido → 'unknown'."""
+    def test_resolve_channel_unknown_defaults_whatsapp(self):
+        """Canal desconocido → default 'whatsapp'."""
         payload = {
             "direction": "inbound",
             "messageType": "SOME_NEW_TYPE",
@@ -303,7 +303,7 @@ class TestGoHighLevelProvider:
         }
         msg = self.provider.parse_webhook(payload)
         assert msg is not None
-        assert msg.channel == "unknown"
+        assert msg.channel == "whatsapp"
 
 
 # ── Router ─────────────────────────────────────────────

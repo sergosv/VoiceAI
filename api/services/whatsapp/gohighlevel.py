@@ -51,7 +51,7 @@ class GoHighLevelProvider(WhatsAppProvider):
             if key in msg_type or key in channel:
                 return value
 
-        return "unknown"
+        return "whatsapp"  # Default a whatsapp si no se puede determinar
 
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         """Parsea webhook InboundMessage de GHL.
@@ -104,17 +104,27 @@ class GoHighLevelProvider(WhatsAppProvider):
             ghl_contact_id=contact_id or None,
         )
 
+    # Mapeo de canal normalizado a tipo de mensaje GHL para enviar
+    _GHL_TYPE_MAP: dict[str, str] = {
+        "whatsapp": "WhatsApp",
+        "sms": "SMS",
+        "webchat": "Live_Chat",
+        "facebook": "FB",
+        "instagram": "IG",
+        "email": "Email",
+        "google": "GMB",
+    }
+
     async def send_text(self, config: dict, to_phone: str, text: str) -> str | None:
         """Envía mensaje vía GHL POST /conversations/messages."""
         api_key = config.get("ghl_api_key", "")
         contact_id = config.get("_ghl_contact_id")  # Debe resolverse antes
+        channel = config.get("_ghl_channel", "whatsapp")
 
         if not api_key:
             logger.error("GHL: api_key no configurada")
             return None
 
-        # GHL requiere conversationId o contactId
-        # Enviamos creando un mensaje en la conversación del contacto
         url = f"{GHL_API_BASE}/conversations/messages"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -122,10 +132,11 @@ class GoHighLevelProvider(WhatsAppProvider):
             "Version": "2021-07-28",
         }
 
+        ghl_type = self._GHL_TYPE_MAP.get(channel, "WhatsApp")
         clean_phone = to_phone.lstrip("+").replace(" ", "").replace("-", "")
 
         payload: dict = {
-            "type": "WhatsApp",
+            "type": ghl_type,
             "message": text,
         }
 
