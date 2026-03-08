@@ -52,16 +52,16 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(room)s] %(name)s — %(message)s",
+    format="%(asctime)s %(levelname)s [%(lk_room)s] %(name)s — %(message)s",
 )
-# Filter que inyecta room_name en cada log record
+# Filter que inyecta lk_room en cada log record (NO usar "room" — conflicto con livekit SDK)
 _old_factory = logging.getLogRecordFactory()
 
 
 def _record_factory(*args: object, **kwargs: object) -> logging.LogRecord:
     record = _old_factory(*args, **kwargs)
-    if not hasattr(record, "room"):
-        record.room = "-"  # type: ignore[attr-defined]
+    if not hasattr(record, "lk_room"):
+        record.lk_room = "-"  # type: ignore[attr-defined]
     return record
 
 
@@ -76,13 +76,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     """Punto de entrada para cada llamada."""
     await ctx.connect(auto_subscribe=agents.AutoSubscribe.AUDIO_ONLY)
 
-    # Setear room como correlation ID para todos los logs de esta llamada
+    # Setear lk_room como correlation ID para todos los logs de esta llamada
     _old = logging.getLogRecordFactory()
     _room = ctx.room.name
 
     def _room_factory(*a: object, **kw: object) -> logging.LogRecord:
         r = _old(*a, **kw)
-        r.room = _room  # type: ignore[attr-defined]
+        r.lk_room = _room  # type: ignore[attr-defined]
         return r
 
     logging.setLogRecordFactory(_room_factory)
