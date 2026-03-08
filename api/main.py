@@ -25,7 +25,7 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 
 from api.routes import (
     agents, ai, analytics, api_integrations, auth, billing, calls, campaigns, chat,
-    clients, contacts, appointments, costs, dashboard, documents, evolution,
+    clients, contacts, appointments, costs, dashboard, documents, evolution, ghl,
     looptalk, mcp, proactive, templates, voices, webhooks, whatsapp, whatsapp_webhooks, widget,
 )
 from api.services.chat_store import start_cleanup_loop
@@ -147,6 +147,8 @@ app.include_router(evolution.router, prefix="/api/clients", tags=["evolution"])
 app.include_router(whatsapp.inbox_router, prefix="/api/whatsapp", tags=["whatsapp-inbox"])
 app.include_router(whatsapp_webhooks.router, prefix="/api/webhooks/whatsapp", tags=["whatsapp-webhooks"])
 app.include_router(whatsapp_webhooks.ghl_router, prefix="/api/webhooks/gohighlevel", tags=["ghl-webhooks"])
+app.include_router(ghl.router, prefix="/api/clients", tags=["ghl"])
+app.include_router(ghl.inbox_router, prefix="/api/ghl", tags=["ghl-inbox"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(widget.router, prefix="/api/widget", tags=["widget"])

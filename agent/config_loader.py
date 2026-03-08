@@ -364,11 +364,11 @@ async def load_whatsapp_config_by_agent_id(agent_id: str) -> dict | None:
     return result.data[0] if result.data else None
 
 
-async def load_whatsapp_config_by_ghl_location(location_id: str) -> dict | None:
-    """Carga whatsapp_config por ghl_location_id."""
+async def load_ghl_config_by_location(location_id: str) -> dict | None:
+    """Carga ghl_config por ghl_location_id."""
     sb = _get_supabase()
     result = (
-        sb.table("whatsapp_configs")
+        sb.table("ghl_configs")
         .select("*")
         .eq("ghl_location_id", location_id)
         .eq("is_active", True)

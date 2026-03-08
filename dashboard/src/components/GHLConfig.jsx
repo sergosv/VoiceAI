@@ -29,7 +29,7 @@ export function GHLConfig({ clientId, agentId }) {
   async function loadConfig() {
     setLoading(true)
     try {
-      const data = await api.get(`/clients/${clientId}/agents/${agentId}/whatsapp`)
+      const data = await api.get(`/clients/${clientId}/agents/${agentId}/ghl`)
       if (data && data.ghl_location_id) {
         setHasConfig(true)
         setHasApiKey(!!data.has_ghl_api_key)
@@ -50,21 +50,20 @@ export function GHLConfig({ clientId, agentId }) {
     setSaving(true)
     try {
       const payload = {
-        provider: 'gohighlevel',
         ghl_location_id: form.ghl_location_id,
       }
       if (form.ghl_api_key?.trim()) payload.ghl_api_key = form.ghl_api_key.trim()
 
       // Check if config exists
       try {
-        const existing = await api.get(`/clients/${clientId}/agents/${agentId}/whatsapp`)
+        const existing = await api.get(`/clients/${clientId}/agents/${agentId}/ghl`)
         if (existing) {
-          await api.patch(`/clients/${clientId}/agents/${agentId}/whatsapp`, payload)
+          await api.patch(`/clients/${clientId}/agents/${agentId}/ghl`, payload)
         } else {
-          await api.post(`/clients/${clientId}/agents/${agentId}/whatsapp`, payload)
+          await api.post(`/clients/${clientId}/agents/${agentId}/ghl`, payload)
         }
       } catch {
-        await api.post(`/clients/${clientId}/agents/${agentId}/whatsapp`, payload)
+        await api.post(`/clients/${clientId}/agents/${agentId}/ghl`, payload)
       }
 
       toast.success('GoHighLevel configurado')
@@ -86,11 +85,7 @@ export function GHLConfig({ clientId, agentId }) {
     })
     if (!ok) return
     try {
-      await api.patch(`/clients/${clientId}/agents/${agentId}/whatsapp`, {
-        ghl_location_id: null,
-        ghl_api_key: null,
-        provider: 'evolution',
-      })
+      await api.delete(`/clients/${clientId}/agents/${agentId}/ghl`)
       setHasConfig(false)
       setHasApiKey(false)
       setForm({ ghl_location_id: '', ghl_api_key: '' })

@@ -872,9 +872,7 @@ class ApiIntegrationTestResult(BaseModel):
 # ── WhatsApp ────────────────────────────────────────
 
 class WhatsAppConfigCreateRequest(BaseModel):
-    provider: str  # "gohighlevel" | "evolution"
-    ghl_location_id: str | None = None
-    ghl_api_key: str | None = None
+    provider: str = "evolution"
     evo_instance_id: str | None = None
     evo_api_url: str | None = None
     evo_api_key: str | None = None
@@ -891,8 +889,6 @@ class WhatsAppConfigCreateRequest(BaseModel):
 
 class WhatsAppConfigUpdateRequest(BaseModel):
     provider: str | None = None
-    ghl_location_id: str | None = None
-    ghl_api_key: str | None = None
     evo_instance_id: str | None = None
     evo_api_url: str | None = None
     evo_api_key: str | None = None
@@ -912,9 +908,7 @@ class WhatsAppConfigOut(BaseModel):
     id: str
     client_id: str
     agent_id: str
-    provider: str
-    ghl_location_id: str | None = None
-    has_ghl_api_key: bool = False
+    provider: str = "evolution"
     evo_instance_id: str | None = None
     evo_api_url: str | None = None
     has_evo_api_key: bool = False
@@ -973,7 +967,8 @@ class WhatsAppStatsOut(BaseModel):
 def whatsapp_config_out_from_row(row: dict) -> WhatsAppConfigOut:
     """Convierte row a WhatsAppConfigOut, ocultando API keys."""
     data = dict(row)
-    data["has_ghl_api_key"] = bool(data.pop("ghl_api_key", None))
+    data.pop("ghl_api_key", None)
+    data.pop("ghl_location_id", None)
     data["has_evo_api_key"] = bool(data.pop("evo_api_key", None))
     return WhatsAppConfigOut(**data)
 

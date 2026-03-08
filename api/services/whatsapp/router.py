@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from api.services.whatsapp.evolution import EvolutionProvider
-from api.services.whatsapp.gohighlevel import GoHighLevelProvider
 from api.services.whatsapp.provider import WhatsAppProvider
 
 _providers: dict[str, WhatsAppProvider] = {
     "evolution": EvolutionProvider(),
-    "gohighlevel": GoHighLevelProvider(),
 }
 
 

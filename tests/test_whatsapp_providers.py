@@ -340,9 +340,10 @@ class TestRouter:
         p = get_provider("evolution")
         assert isinstance(p, EvolutionProvider)
 
-    def test_get_ghl_provider(self):
-        p = get_provider("gohighlevel")
-        assert isinstance(p, GoHighLevelProvider)
+    def test_ghl_provider_not_in_whatsapp_router(self):
+        """GHL ya no es un provider de WhatsApp — tiene su propio service."""
+        with pytest.raises(ValueError, match="desconocido"):
+            get_provider("gohighlevel")
 
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="desconocido"):

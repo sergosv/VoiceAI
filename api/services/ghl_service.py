@@ -1,4 +1,4 @@
-"""Orquestador principal del canal WhatsApp."""
+"""Orquestador de mensajes inbound de GoHighLevel (multi-canal)."""
 
 from __future__ import annotations
 
@@ -15,23 +15,21 @@ from agent.config_loader import (
     load_config_by_agent_id,
     load_api_integrations,
     load_mcp_servers,
-    load_whatsapp_config_by_evo_instance,
 )
 from api.services.chat_service import chat_turn
 from api.services.chat_store import Conversation
 from api.services.whatsapp.history import deserialize_history, serialize_history
 from api.services.whatsapp.provider import InboundMessage
-from api.services.whatsapp.router import get_provider
+from api.services.whatsapp.gohighlevel import GoHighLevelProvider
 
 logger = logging.getLogger(__name__)
 
-# Lock por (config_id, remote_phone) para evitar race conditions
 _locks: dict[str, asyncio.Lock] = {}
+_provider = GoHighLevelProvider()
 
 
 def _get_lock(config_id: str, remote_phone: str) -> asyncio.Lock:
-    """Obtiene o crea un lock por (config_id, phone)."""
-    key = f"{config_id}:{remote_phone}"
+    key = f"ghl:{config_id}:{remote_phone}"
     if key not in _locks:
         _locks[key] = asyncio.Lock()
     return _locks[key]
@@ -43,15 +41,23 @@ def _get_supabase() -> Client:
     return create_client(url, key)
 
 
-# ── Schedule check ──────────────────────────────────────
+async def load_ghl_config_by_location(location_id: str) -> dict | None:
+    """Carga ghl_config por ghl_location_id."""
+    sb = _get_supabase()
+    result = (
+        sb.table("ghl_configs")
+        .select("*")
+        .eq("ghl_location_id", location_id)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    return result.data[0] if result.data else None
 
 
-def _is_within_schedule(wa_config: dict) -> bool:
-    """Verifica si el momento actual está dentro del horario configurado.
-
-    Si no hay schedule configurado, retorna True (siempre activo).
-    """
-    schedule = wa_config.get("schedule")
+def _is_within_schedule(config: dict) -> bool:
+    """Verifica si el momento actual está dentro del horario configurado."""
+    schedule = config.get("schedule")
     if not schedule:
         return True
 
@@ -86,78 +92,77 @@ def _is_within_schedule(wa_config: dict) -> bool:
     return start_minutes <= current_minutes <= end_minutes
 
 
-# ── Orchestrator ────────────────────────────────────────
+async def _send_ghl(config: dict, msg: InboundMessage, text: str) -> str | None:
+    """Envía respuesta vía GHL con contactId y channel inyectados."""
+    send_config = dict(config)
+    if msg.ghl_contact_id:
+        send_config["_ghl_contact_id"] = msg.ghl_contact_id
+    if msg.channel:
+        send_config["_ghl_channel"] = msg.channel
+    return await _provider.send_text(send_config, msg.remote_phone, text)
 
 
-async def process_inbound_message(msg: InboundMessage) -> None:
-    """Procesa un mensaje entrante de WhatsApp end-to-end.
+async def process_ghl_inbound(msg: InboundMessage) -> None:
+    """Procesa un mensaje entrante de GHL end-to-end.
 
-    1. Resolver whatsapp_config
-    2. Verificar auto_reply activo
-    3. Buscar/crear contacto
-    4. Buscar/crear sesión (conversation)
-    5. Cargar config del agente
-    6. Ejecutar chat_turn con historial persistido
-    7. Enviar respuesta vía provider
-    8. Persistir historial + log messages
+    1. Resolver ghl_config por location_id
+    2. Verificar auto_reply, pausa, horario
+    3. Buscar/crear contacto y sesión
+    4. Ejecutar chat_turn
+    5. Enviar respuesta vía GHL API
+    6. Persistir historial + mensajes
     """
     sb = _get_supabase()
 
-    # 1. Resolver config (solo Evolution — GHL usa ghl_service)
-    wa_config: dict | None = None
-    if msg.evo_instance_id:
-        wa_config = await load_whatsapp_config_by_evo_instance(msg.evo_instance_id)
-
-    if not wa_config:
-        logger.warning("WA: no config encontrada para msg de %s", msg.remote_phone)
+    # 1. Resolver config
+    if not msg.ghl_location_id:
+        logger.warning("GHL: mensaje sin location_id de %s", msg.remote_phone)
         return
 
-    config_id = wa_config["id"]
+    config = await load_ghl_config_by_location(msg.ghl_location_id)
+    if not config:
+        logger.warning("GHL: no config encontrada para location %s", msg.ghl_location_id)
+        return
 
-    if not wa_config.get("auto_reply", True):
-        logger.info("WA: auto_reply desactivado para config %s", config_id)
+    config_id = config["id"]
+
+    # 2. Verificaciones
+    if not config.get("auto_reply", True):
+        logger.info("GHL: auto_reply desactivado para config %s", config_id)
         await _save_message(sb, None, msg, "inbound")
         return
 
-    # Verificar pausa manual
-    if wa_config.get("is_paused", False):
-        paused_msg = wa_config.get(
+    if config.get("is_paused", False):
+        paused_msg = config.get(
             "paused_message",
             "En este momento un agente humano esta atendiendo. Te responderemos pronto.",
         )
-        provider = get_provider(wa_config["provider"])
-        await provider.send_text(wa_config, msg.remote_phone, paused_msg)
-        await _save_message(sb, None, msg, "inbound")
+        await _send_ghl(config, msg, paused_msg)
         return
 
-    # Verificar horario
-    if not _is_within_schedule(wa_config):
-        away_msg = wa_config.get(
+    if not _is_within_schedule(config):
+        away_msg = config.get(
             "away_message",
             "En este momento no estamos disponibles. Te responderemos en horario de atencion.",
         )
-        provider = get_provider(wa_config["provider"])
-        await provider.send_text(wa_config, msg.remote_phone, away_msg)
-        await _save_message(sb, None, msg, "inbound")
+        await _send_ghl(config, msg, away_msg)
         return
 
-    # Manejar media no soportada
     if msg.message_type != "text":
-        media_response = wa_config.get(
+        media_response = config.get(
             "media_response",
             "Solo puedo procesar mensajes de texto por ahora.",
         )
-        provider = get_provider(wa_config["provider"])
-        await provider.send_text(wa_config, msg.remote_phone, media_response)
+        await _send_ghl(config, msg, media_response)
         return
 
     if not msg.text.strip():
         return
 
-    # Verificar human takeover por conversación
+    # Verificar human takeover
     active_conv = (
-        sb.table("whatsapp_conversations")
-        .select("id, is_human_controlled")
+        sb.table("ghl_conversations")
+        .select("id, is_human_controlled, message_count")
         .eq("config_id", config_id)
         .eq("remote_phone", msg.remote_phone)
         .eq("status", "active")
@@ -166,11 +171,9 @@ async def process_inbound_message(msg: InboundMessage) -> None:
         .execute()
     )
     if active_conv.data and active_conv.data[0].get("is_human_controlled"):
-        logger.info("WA: human takeover activo para %s, solo guardando mensaje", msg.remote_phone)
         conv_id = active_conv.data[0]["id"]
         await _save_message(sb, conv_id, msg, "inbound")
-        # Actualizar last_message_at
-        sb.table("whatsapp_conversations").update({
+        sb.table("ghl_conversations").update({
             "last_message_at": datetime.now(timezone.utc).isoformat(),
             "message_count": (active_conv.data[0].get("message_count", 0) or 0) + 1,
         }).eq("id", conv_id).execute()
@@ -179,56 +182,41 @@ async def process_inbound_message(msg: InboundMessage) -> None:
     # Lock por (config_id, phone)
     lock = _get_lock(config_id, msg.remote_phone)
     async with lock:
-        await _process_locked(sb, wa_config, msg)
+        await _process_locked(sb, config, msg)
 
 
-async def _process_locked(
-    sb: Client,
-    wa_config: dict,
-    msg: InboundMessage,
-) -> None:
+async def _process_locked(sb: Client, config: dict, msg: InboundMessage) -> None:
     """Procesa el mensaje con lock adquirido."""
-    config_id = wa_config["id"]
-    agent_id = wa_config["agent_id"]
-    client_id = wa_config["client_id"]
+    config_id = config["id"]
+    agent_id = config["agent_id"]
+    client_id = config["client_id"]
 
-    # 2. Cargar config del agente
+    # Cargar config del agente
     resolved = await load_config_by_agent_id(agent_id)
     if not resolved:
-        logger.error("WA: agente %s no encontrado", agent_id)
+        logger.error("GHL: agente %s no encontrado", agent_id)
         return
 
-    # 3. Buscar/crear contacto
-    contact_id = await _resolve_contact(sb, client_id, msg.remote_phone)
+    # Buscar/crear contacto
+    contact_id = await _resolve_contact(sb, client_id, msg)
 
-    # 4. Buscar/crear sesión
-    conv_row = await _get_or_create_conversation(
-        sb, config_id, contact_id, msg.remote_phone, wa_config
-    )
+    # Buscar/crear sesión
+    conv_row = await _get_or_create_conversation(sb, config_id, contact_id, msg, config)
+    if not conv_row:
+        return
     conv_id = conv_row["id"]
 
-    # 5. Deserializar historial
+    # Deserializar historial
     history = deserialize_history(conv_row.get("history") or [])
 
-    # Cargar integraciones y MCP servers
+    # Cargar integraciones y MCP
     api_integrations = await load_api_integrations(client_id, agent_id)
     mcp_servers = await load_mcp_servers(client_id, agent_id)
-    if mcp_servers:
-        logger.info(
-            "WA: %d MCP servers cargados para agente %s: %s",
-            len(mcp_servers),
-            agent_id,
-            [(s.get("name"), len(s.get("tools_cache") or [])) for s in mcp_servers],
-        )
-    else:
-        logger.info("WA: sin MCP servers para agente %s", agent_id)
 
-    # Construir system prompt para WhatsApp
-    system_prompt = build_whatsapp_system_prompt(
-        resolved, api_integrations=api_integrations, mcp_servers=mcp_servers or None,
-    )
+    # System prompt
+    system_prompt = _build_ghl_system_prompt(resolved, msg.channel, api_integrations, mcp_servers)
 
-    # Crear Conversation efímera para chat_turn
+    # Conversation efímera
     conversation = Conversation(
         id=conv_id,
         config=resolved,
@@ -239,10 +227,10 @@ async def _process_locked(
         client_id=client_id,
     )
 
-    # 6. Guardar mensaje inbound
+    # Guardar inbound
     await _save_message(sb, conv_id, msg, "inbound")
 
-    # 7. Ejecutar chat_turn
+    # Chat turn
     try:
         agent_text, tool_calls = await chat_turn(
             conversation, msg.text,
@@ -250,49 +238,50 @@ async def _process_locked(
             mcp_servers=mcp_servers or None,
         )
     except Exception as e:
-        logger.error("WA: error en chat_turn — %s", e, exc_info=True)
+        logger.error("GHL: error en chat_turn — %s", e, exc_info=True)
         agent_text = "Disculpa, tuve un problema procesando tu mensaje. Intenta de nuevo."
         tool_calls = []
 
-    # 8. Enviar respuesta
-    provider = get_provider(wa_config["provider"])
-    provider_msg_id = await provider.send_text(
-        wa_config, msg.remote_phone, agent_text
-    )
+    # Enviar respuesta
+    provider_msg_id = await _send_ghl(config, msg, agent_text)
 
-    # 9. Guardar mensaje outbound
+    # Guardar outbound
     out_msg = InboundMessage(
         remote_phone=msg.remote_phone,
         text=agent_text,
         message_type="text",
+        channel=msg.channel,
         provider_message_id=provider_msg_id,
     )
-    await _save_message(
-        sb, conv_id, out_msg, "outbound", tool_calls=tool_calls or None
-    )
+    await _save_message(sb, conv_id, out_msg, "outbound", tool_calls=tool_calls or None)
 
-    # 10. Persistir historial actualizado
+    # Persistir historial
     serialized = serialize_history(conversation.history)
     now = datetime.now(timezone.utc).isoformat()
     try:
-        sb.table("whatsapp_conversations").update({
+        sb.table("ghl_conversations").update({
             "history": serialized,
             "message_count": (conv_row.get("message_count", 0) or 0) + 2,
             "last_message_at": now,
         }).eq("id", conv_id).execute()
     except Exception:
-        logger.exception("WA: error actualizando conversación %s", conv_id)
+        logger.exception("GHL: error actualizando conversación %s", conv_id)
 
 
 # ── Helpers ─────────────────────────────────────────────
 
 
-async def _resolve_contact(
-    sb: Client, client_id: str, phone: str
-) -> str | None:
-    """Busca o crea contacto por teléfono. Retorna contact_id."""
+async def _resolve_contact(sb: Client, client_id: str, msg: InboundMessage) -> str | None:
+    """Busca o crea contacto. Para GHL webchat sin phone, usa contactId."""
+    phone = msg.remote_phone
+    # Si remote_phone es un contactId de GHL (no un número), no crear contacto por phone
+    if not phone or phone == "unknown":
+        return None
+    # Si parece un ID de GHL (no numérico), no buscar por phone
+    if not phone.replace("+", "").isdigit():
+        return None
+
     clean = phone.lstrip("+").replace(" ", "").replace("-", "")
-    # Buscar con formato +XX
     result = (
         sb.table("contacts")
         .select("id")
@@ -304,7 +293,6 @@ async def _resolve_contact(
     if result.data:
         return result.data[0]["id"]
 
-    # Buscar sin +
     result = (
         sb.table("contacts")
         .select("id")
@@ -316,19 +304,17 @@ async def _resolve_contact(
     if result.data:
         return result.data[0]["id"]
 
-    # Crear contacto nuevo
     new_contact = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
         "phone": f"+{clean}",
-        "source": "whatsapp",
+        "source": f"ghl-{msg.channel}",
     }
     try:
         sb.table("contacts").insert(new_contact).execute()
-        logger.info("WA: contacto creado para +%s", clean)
         return new_contact["id"]
     except Exception as e:
-        logger.error("WA: error creando contacto — %s", e)
+        logger.error("GHL: error creando contacto — %s", e)
         return None
 
 
@@ -336,21 +322,17 @@ async def _get_or_create_conversation(
     sb: Client,
     config_id: str,
     contact_id: str | None,
-    remote_phone: str,
-    wa_config: dict,
-) -> dict:
-    """Busca sesión activa o crea una nueva.
+    msg: InboundMessage,
+    config: dict,
+) -> dict | None:
+    """Busca sesión activa o crea una nueva."""
+    timeout_minutes = config.get("session_timeout_minutes", 30)
 
-    Si last_message_at > session_timeout → cierra sesión anterior y crea nueva.
-    """
-    timeout_minutes = wa_config.get("session_timeout_minutes", 30)
-
-    # Buscar sesión activa
     result = (
-        sb.table("whatsapp_conversations")
+        sb.table("ghl_conversations")
         .select("*")
         .eq("config_id", config_id)
-        .eq("remote_phone", remote_phone)
+        .eq("remote_phone", msg.remote_phone)
         .eq("status", "active")
         .order("last_message_at", desc=True)
         .limit(1)
@@ -361,56 +343,46 @@ async def _get_or_create_conversation(
         conv = result.data[0]
         last_msg = conv.get("last_message_at")
         if last_msg:
-            from datetime import datetime, timezone
-
             if isinstance(last_msg, str):
-                # Parsear ISO string
                 last_dt = datetime.fromisoformat(last_msg.replace("Z", "+00:00"))
             else:
                 last_dt = last_msg
-
             now = datetime.now(timezone.utc)
-            elapsed_minutes = (now - last_dt).total_seconds() / 60
-
-            if elapsed_minutes > timeout_minutes:
-                # Sesión expirada — cerrar y crear nueva
-                sb.table("whatsapp_conversations").update(
+            elapsed = (now - last_dt).total_seconds() / 60
+            if elapsed > timeout_minutes:
+                sb.table("ghl_conversations").update(
                     {"status": "expired"}
                 ).eq("id", conv["id"]).execute()
-                logger.info("WA: sesión %s expirada (%d min)", conv["id"], int(elapsed_minutes))
             else:
                 return conv
 
-    # Crear nueva sesión
-    greeting = wa_config.get("greeting")
     new_conv = {
         "id": str(uuid.uuid4()),
         "config_id": config_id,
         "contact_id": contact_id,
-        "remote_phone": remote_phone,
+        "remote_phone": msg.remote_phone,
+        "channel": msg.channel,
+        "ghl_contact_id": msg.ghl_contact_id,
         "history": [],
         "status": "active",
         "message_count": 0,
     }
     try:
-        sb.table("whatsapp_conversations").insert(new_conv).execute()
+        sb.table("ghl_conversations").insert(new_conv).execute()
     except Exception:
-        logger.exception("WA: error creando conversación para %s", remote_phone)
+        logger.exception("GHL: error creando conversación para %s", msg.remote_phone)
         return None
-    logger.info("WA: nueva sesión %s para %s", new_conv["id"], remote_phone)
 
-    # Enviar greeting si configurado
+    # Greeting
+    greeting = config.get("greeting")
     if greeting:
-        provider = get_provider(wa_config["provider"])
         try:
-            await provider.send_text(wa_config, remote_phone, greeting)
+            await _send_ghl(config, msg, greeting)
         except Exception:
-            logger.exception("WA: error enviando greeting a %s", remote_phone)
-        # Guardar greeting como mensaje outbound
+            logger.exception("GHL: error enviando greeting a %s", msg.remote_phone)
         await _save_message(
-            sb,
-            new_conv["id"],
-            InboundMessage(remote_phone=remote_phone, text=greeting),
+            sb, new_conv["id"],
+            InboundMessage(remote_phone=msg.remote_phone, text=greeting, channel=msg.channel),
             "outbound",
         )
         new_conv["message_count"] = 1
@@ -425,7 +397,7 @@ async def _save_message(
     direction: str,
     tool_calls: list[dict] | None = None,
 ) -> None:
-    """Guarda un mensaje en whatsapp_messages."""
+    """Guarda un mensaje en ghl_messages."""
     if not conversation_id:
         return
 
@@ -435,6 +407,7 @@ async def _save_message(
         "direction": direction,
         "content": msg.text,
         "message_type": msg.message_type,
+        "channel": msg.channel,
         "provider_message_id": msg.provider_message_id,
         "status": "sent",
     }
@@ -442,17 +415,18 @@ async def _save_message(
         record["tool_calls"] = tool_calls
 
     try:
-        sb.table("whatsapp_messages").insert(record).execute()
+        sb.table("ghl_messages").insert(record).execute()
     except Exception as e:
-        logger.error("WA: error guardando mensaje — %s", e)
+        logger.error("GHL: error guardando mensaje — %s", e)
 
 
-def build_whatsapp_system_prompt(
+def _build_ghl_system_prompt(
     config: ResolvedConfig,
+    channel: str,
     api_integrations: list[dict] | None = None,
     mcp_servers: list[dict] | None = None,
 ) -> str:
-    """Construye system prompt adaptado para WhatsApp (sin reglas de voz)."""
+    """Construye system prompt adaptado para mensajería GHL."""
     from agent.agent_factory import _build_tool_instructions, _build_api_instructions
     from api.services.chat_service import _build_mcp_prompt_section
 
@@ -463,21 +437,29 @@ def build_whatsapp_system_prompt(
 
     prompt = base + tool_instructions + api_instructions + mcp_instructions
 
-    # Ejemplos
     if config.agent.examples:
         prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
 
-    # Instrucciones específicas WhatsApp
+    channel_names = {
+        "whatsapp": "WhatsApp",
+        "sms": "SMS",
+        "webchat": "Web Chat",
+        "facebook": "Facebook Messenger",
+        "instagram": "Instagram DM",
+        "email": "Email",
+        "google": "Google Business Messages",
+    }
+    ch_name = channel_names.get(channel, channel)
+
     prompt += (
-        "\n\n## Canal: WhatsApp\n"
-        "Estás respondiendo por WhatsApp. Reglas importantes:\n"
-        "- Sé conciso. Los mensajes largos se ven mal en WhatsApp.\n"
+        f"\n\n## Canal: {ch_name}\n"
+        f"Estás respondiendo por {ch_name}. Reglas importantes:\n"
+        "- Sé conciso. Los mensajes largos se ven mal en chat.\n"
         "- Usa párrafos cortos separados por saltos de línea.\n"
         "- NO uses markdown complejo (headers, tablas). Solo *negritas* y _cursivas_.\n"
         "- Puedes usar emojis con moderación para hacer la conversación amigable.\n"
         "- No menciones que eres una IA a menos que te pregunten directamente.\n"
         "- Responde en el idioma del usuario.\n"
-        "- Si necesitas dar una lista, usa viñetas simples con - o •.\n"
     )
 
     return prompt

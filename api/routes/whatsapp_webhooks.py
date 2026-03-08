@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, Response
 from api.services.whatsapp.evolution import EvolutionProvider
 from api.services.whatsapp.gohighlevel import GoHighLevelProvider
 from api.services.whatsapp.service import process_inbound_message
+from api.services.ghl_service import process_ghl_inbound
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ async def _handle_ghl_webhook(request: Request) -> Response:
     msg = _ghl.parse_webhook(payload)
     if msg:
         logger.info("GHL webhook: mensaje de %s (canal=%s)", msg.remote_phone, msg.channel)
-        asyncio.create_task(_safe_process(msg))
+        asyncio.create_task(_safe_process_ghl(msg))
     else:
         logger.warning("GHL webhook: parse retornó None — direction=%s", payload.get("direction"))
 
@@ -83,8 +84,16 @@ async def webhook_evolution(request: Request) -> Response:
 
 
 async def _safe_process(msg) -> None:
-    """Wrapper para procesar mensaje sin que errores rompan el task."""
+    """Wrapper para procesar mensaje WhatsApp sin que errores rompan el task."""
     try:
         await process_inbound_message(msg)
     except Exception:
         logger.exception("Error procesando mensaje de %s", msg.remote_phone)
+
+
+async def _safe_process_ghl(msg) -> None:
+    """Wrapper para procesar mensaje GHL sin que errores rompan el task."""
+    try:
+        await process_ghl_inbound(msg)
+    except Exception:
+        logger.exception("Error procesando mensaje GHL de %s", msg.remote_phone)
