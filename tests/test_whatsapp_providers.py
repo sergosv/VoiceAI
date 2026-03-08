@@ -175,6 +175,32 @@ class TestGoHighLevelProvider:
         assert msg.ghl_contact_id == "ghl-contact-abc123"
         assert msg.remote_phone == "ghl-contact-abc123"  # Fallback cuando no hay phone
 
+    def test_infer_webchat_no_messagetype_no_phone(self):
+        """Custom webhook sin messageType y sin phone → webchat."""
+        payload = {
+            "direction": "inbound",
+            "body": "Hola desde widget",
+            "phone": "",
+            "contactId": "guest-123",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.channel == "webchat"
+        assert msg.ghl_contact_id == "guest-123"
+
+    def test_infer_whatsapp_no_messagetype_with_phone(self):
+        """Custom webhook sin messageType pero con phone → whatsapp."""
+        payload = {
+            "direction": "inbound",
+            "body": "Hola",
+            "phone": "+5215551234567",
+            "locationId": "loc123",
+        }
+        msg = self.provider.parse_webhook(payload)
+        assert msg is not None
+        assert msg.channel == "whatsapp"
+
     def test_filter_outbound(self):
         payload = {
             "direction": "outbound",

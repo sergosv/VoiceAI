@@ -53,6 +53,24 @@ class GoHighLevelProvider(WhatsAppProvider):
 
         return "whatsapp"  # Default a whatsapp si no se puede determinar
 
+    def _resolve_channel_with_context(self, payload: dict) -> str:
+        """Resuelve canal usando messageType + contexto del payload.
+
+        Si no hay messageType (ej. custom webhook de workflow), infiere
+        del contexto: sin phone → webchat, con phone → whatsapp.
+        """
+        channel = self._resolve_channel(payload)
+
+        # Si el channel fue inferido como default y no hay messageType,
+        # usar contexto para decidir mejor
+        msg_type = payload.get("messageType", "").strip()
+        if not msg_type:
+            phone = payload.get("phone", "") or payload.get("contactPhone", "")
+            if not phone:
+                return "webchat"
+
+        return channel
+
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         """Parsea webhook InboundMessage de GHL.
 
@@ -63,7 +81,7 @@ class GoHighLevelProvider(WhatsAppProvider):
         if direction != "inbound":
             return None
 
-        channel = self._resolve_channel(payload)
+        channel = self._resolve_channel_with_context(payload)
 
         text = payload.get("body", "") or payload.get("message", "")
         phone = payload.get("phone", "") or payload.get("contactPhone", "")
