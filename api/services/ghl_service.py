@@ -288,31 +288,21 @@ async def _process_locked(sb: Client, config: dict, msg: InboundMessage) -> None
 
 async def _resolve_contact(sb: Client, client_id: str, msg: InboundMessage) -> str | None:
     """Busca o crea contacto. Para GHL webchat sin phone, usa contactId."""
+    from agent.phone_utils import normalize_phone
+
     phone = msg.remote_phone
     # Si remote_phone es un contactId de GHL (no un número), no crear contacto por phone
     if not phone or phone == "unknown":
         return None
-    # Si parece un ID de GHL (no numérico), no buscar por phone
     if not phone.replace("+", "").isdigit():
         return None
 
-    clean = phone.lstrip("+").replace(" ", "").replace("-", "")
+    normalized = normalize_phone(phone)
     result = (
         sb.table("contacts")
         .select("id")
         .eq("client_id", client_id)
-        .eq("phone", f"+{clean}")
-        .limit(1)
-        .execute()
-    )
-    if result.data:
-        return result.data[0]["id"]
-
-    result = (
-        sb.table("contacts")
-        .select("id")
-        .eq("client_id", client_id)
-        .eq("phone", clean)
+        .eq("phone", normalized)
         .limit(1)
         .execute()
     )
@@ -322,7 +312,7 @@ async def _resolve_contact(sb: Client, client_id: str, msg: InboundMessage) -> s
     new_contact = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
-        "phone": f"+{clean}",
+        "phone": normalized,
         "source": f"ghl-{msg.channel}",
     }
     try:

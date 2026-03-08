@@ -305,37 +305,28 @@ async def _process_locked(
 async def _resolve_contact(
     sb: Client, client_id: str, phone: str
 ) -> str | None:
-    """Busca o crea contacto por teléfono. Retorna contact_id."""
-    clean = phone.lstrip("+").replace(" ", "").replace("-", "")
-    # Buscar con formato +XX
+    """Busca o crea contacto por teléfono con normalización. Retorna contact_id."""
+    from agent.phone_utils import normalize_phone
+
+    normalized = normalize_phone(phone)
+
+    # Buscar por teléfono normalizado
     result = (
         sb.table("contacts")
         .select("id")
         .eq("client_id", client_id)
-        .eq("phone", f"+{clean}")
+        .eq("phone", normalized)
         .limit(1)
         .execute()
     )
     if result.data:
         return result.data[0]["id"]
 
-    # Buscar sin +
-    result = (
-        sb.table("contacts")
-        .select("id")
-        .eq("client_id", client_id)
-        .eq("phone", clean)
-        .limit(1)
-        .execute()
-    )
-    if result.data:
-        return result.data[0]["id"]
-
-    # Crear contacto nuevo
+    # Crear contacto nuevo con teléfono normalizado
     new_contact = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
-        "phone": f"+{clean}",
+        "phone": normalized,
         "source": "whatsapp",
     }
     try:
