@@ -134,6 +134,32 @@ TOOL_SCHEMAS: dict[str, types.FunctionDeclaration] = {
             },
         ),
     ),
+    "close_conversation": types.FunctionDeclaration(
+        name="close_conversation",
+        description=(
+            "Cierra la conversación cuando el objetivo se completó o el usuario se despide. "
+            "Úsala cuando: el usuario dice adiós/gracias/hasta luego, se agendó una cita, "
+            "se calificó un lead, o se resolvió la consulta."
+        ),
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "summary": types.Schema(
+                    type="STRING",
+                    description="Resumen breve de la conversación (1-2 oraciones).",
+                ),
+                "result": types.Schema(
+                    type="STRING",
+                    description="Clasificación del resultado.",
+                    enum=[
+                        "lead_qualified", "appointment_booked", "not_interested",
+                        "resolved", "transferred", "other",
+                    ],
+                ),
+            },
+            required=["summary", "result"],
+        ),
+    ),
 }
 
 
@@ -146,8 +172,8 @@ def _build_tool_declarations(
     enabled = config.client.enabled_tools or []
     declarations: list[types.FunctionDeclaration] = []
 
-    # search_knowledge y transfer_to_human siempre disponibles
-    for tool_name in ["search_knowledge", "transfer_to_human"]:
+    # search_knowledge, transfer_to_human y close_conversation siempre disponibles
+    for tool_name in ["search_knowledge", "transfer_to_human", "close_conversation"]:
         if tool_name in TOOL_SCHEMAS:
             declarations.append(TOOL_SCHEMAS[tool_name])
 
@@ -461,6 +487,11 @@ async def _execute_tool(
     if tool_name == "save_contact_info":
         name = args.get("name", "?")
         return f"[SIMULACIÓN] Contacto guardado: {name}"
+
+    if tool_name == "close_conversation":
+        summary = args.get("summary", "")
+        result = args.get("result", "other")
+        return f"[CLOSE_CONVERSATION] summary={summary} | result={result}"
 
     return f"[SIMULACIÓN] Tool {tool_name} ejecutado"
 

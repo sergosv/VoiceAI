@@ -29,6 +29,7 @@ from api.routes import (
     looptalk, mcp, proactive, templates, voices, webhooks, whatsapp, whatsapp_webhooks, widget,
 )
 from api.services.chat_store import start_cleanup_loop
+from api.services.conversation_cleanup import start_conversation_cleanup
 from api.services.proactive_worker import start_proactive_worker
 
 # Rate limiter global
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: inicia workers background."""
     start_cleanup_loop()
     start_proactive_worker()
+    start_conversation_cleanup()
     yield
 
 

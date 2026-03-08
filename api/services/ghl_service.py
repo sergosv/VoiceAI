@@ -267,6 +267,21 @@ async def _process_locked(sb: Client, config: dict, msg: InboundMessage) -> None
     except Exception:
         logger.exception("GHL: error actualizando conversación %s", conv_id)
 
+    # Detectar cierre por IA
+    close_tool = next(
+        (tc for tc in (tool_calls or []) if tc.get("name") == "close_conversation"),
+        None,
+    )
+    if close_tool:
+        from api.services.conversation_lifecycle import close_conversation as _close
+        close_args = close_tool.get("args", {})
+        await _close(
+            sb, conv_id, "ghl_conversations",
+            summary=close_args.get("summary", ""),
+            result=close_args.get("result", "other"),
+            closed_by="ai",
+        )
+
 
 # ── Helpers ─────────────────────────────────────────────
 
@@ -326,7 +341,15 @@ async def _get_or_create_conversation(
     config: dict,
 ) -> dict | None:
     """Busca sesión activa o crea una nueva."""
-    timeout_minutes = config.get("session_timeout_minutes", 30)
+    channel = msg.channel or "whatsapp"
+    channel_timeouts = config.get("channel_timeouts") or {}
+    default_timeouts = {
+        "webchat": 10, "whatsapp": 60, "sms": 60,
+        "facebook": 30, "instagram": 30, "email": 1440,
+    }
+    timeout_minutes = channel_timeouts.get(
+        channel, default_timeouts.get(channel, config.get("session_timeout_minutes", 30))
+    )
 
     result = (
         sb.table("ghl_conversations")
@@ -460,6 +483,13 @@ def _build_ghl_system_prompt(
         "- Puedes usar emojis con moderación para hacer la conversación amigable.\n"
         "- No menciones que eres una IA a menos que te pregunten directamente.\n"
         "- Responde en el idioma del usuario.\n"
+    )
+
+    prompt += (
+        "\n## Cierre de conversación\n"
+        "Cuando el usuario se despida (adiós, gracias, hasta luego), el objetivo se complete "
+        "(cita agendada, lead calificado, consulta resuelta), o no haya más que hacer, "
+        "usa la herramienta close_conversation con un resumen breve y el resultado apropiado.\n"
     )
 
     return prompt

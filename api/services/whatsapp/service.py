@@ -283,6 +283,21 @@ async def _process_locked(
     except Exception:
         logger.exception("WA: error actualizando conversación %s", conv_id)
 
+    # 11. Detectar cierre por IA
+    close_tool = next(
+        (tc for tc in (tool_calls or []) if tc.get("name") == "close_conversation"),
+        None,
+    )
+    if close_tool:
+        from api.services.conversation_lifecycle import close_conversation as _close
+        close_args = close_tool.get("args", {})
+        await _close(
+            sb, conv_id, "whatsapp_conversations",
+            summary=close_args.get("summary", ""),
+            result=close_args.get("result", "other"),
+            closed_by="ai",
+        )
+
 
 # ── Helpers ─────────────────────────────────────────────
 
@@ -478,6 +493,13 @@ def build_whatsapp_system_prompt(
         "- No menciones que eres una IA a menos que te pregunten directamente.\n"
         "- Responde en el idioma del usuario.\n"
         "- Si necesitas dar una lista, usa viñetas simples con - o •.\n"
+    )
+
+    prompt += (
+        "\n## Cierre de conversación\n"
+        "Cuando el usuario se despida (adiós, gracias, hasta luego), el objetivo se complete "
+        "(cita agendada, lead calificado, consulta resuelta), o no haya más que hacer, "
+        "usa la herramienta close_conversation con un resumen breve y el resultado apropiado.\n"
     )
 
     return prompt
