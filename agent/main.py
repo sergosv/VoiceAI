@@ -378,6 +378,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             min_interruption_words=1,
         )
 
+    # Log detallado del pipeline para debugging de BYOK keys
+    logger.info(
+        "Pipeline config: stt=%s (byok=%s), llm=%s (byok=%s), tts=%s (byok=%s)",
+        config.agent.stt_provider, bool(config.agent.stt_api_key),
+        config.agent.llm_provider, bool(config.agent.llm_api_key),
+        config.agent.tts_provider, bool(config.agent.tts_api_key),
+    )
+
     # Para outbound, los números van al revés:
     # - caller_number = nuestro número (el que llama)
     # - callee_number = el número destino (sip.phoneNumber del participante SIP)

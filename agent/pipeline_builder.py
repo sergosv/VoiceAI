@@ -10,11 +10,65 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Prefijos válidos por provider para validación de API keys
+_KEY_PREFIXES: dict[str, tuple[str, ...]] = {
+    "cartesia": ("sk_car_",),
+    "elevenlabs": ("sk_",),
+    "openai": ("sk-",),
+}
+# Prefijos que NO son de ElevenLabs aunque empiecen con "sk_"
+_ELEVENLABS_EXCLUDED = ("sk_car_", "sk-proj-", "sk-")
+
+
+def _validate_api_key(provider: str, api_key: str | None) -> str | None:
+    """Valida que el formato de la API key corresponda al provider.
+
+    Retorna la key si es válida, None si es inválida (fallback a env var).
+    """
+    if api_key is None:
+        return None
+
+    prefixes = _KEY_PREFIXES.get(provider)
+    if prefixes is None:
+        # Provider sin validación conocida (google, deepgram, anthropic, etc.)
+        return api_key
+
+    if provider == "elevenlabs":
+        # ElevenLabs: empieza con "sk_" pero NO con prefijos de otros providers
+        if api_key.startswith("sk_") and not any(
+            api_key.startswith(ex) for ex in ("sk_car_",)
+        ):
+            return api_key
+        if api_key.startswith("sk-"):
+            # Esto es una key de OpenAI, no ElevenLabs
+            logger.warning(
+                "API key para %s tiene formato incorrecto (parece OpenAI). "
+                "Usando env var como fallback.",
+                provider,
+            )
+            return None
+        logger.warning(
+            "API key para %s no inicia con 'sk_'. Usando env var como fallback.",
+            provider,
+        )
+        return None
+
+    # Validación genérica por prefijo (cartesia, openai)
+    if any(api_key.startswith(p) for p in prefixes):
+        return api_key
+
+    logger.warning(
+        "API key para %s no inicia con %s. Usando env var como fallback.",
+        provider,
+        "/".join(prefixes),
+    )
+    return None
+
 
 def build_stt(config: AgentConfig, language: str):
     """Construye el STT según el provider del cliente."""
     provider = config.stt_provider
-    api_key = config.stt_api_key  # None = env var fallback
+    api_key = _validate_api_key(provider, config.stt_api_key)
 
     if provider == "deepgram":
         from livekit.plugins import deepgram
@@ -52,7 +106,7 @@ def build_stt(config: AgentConfig, language: str):
 def build_llm(config: AgentConfig):
     """Construye el LLM según el provider del cliente."""
     provider = config.llm_provider
-    api_key = config.llm_api_key
+    api_key = _validate_api_key(provider, config.llm_api_key)
 
     if provider == "google":
         from livekit.plugins import google
@@ -83,7 +137,7 @@ def build_llm(config: AgentConfig):
 def build_tts(config: AgentConfig, language: str):
     """Construye el TTS según el provider del cliente."""
     provider = config.tts_provider
-    api_key = config.tts_api_key
+    api_key = _validate_api_key(provider, config.tts_api_key)
     voice_id = config.voice_id if config.voice_id != "default" else None
 
     if provider == "cartesia":

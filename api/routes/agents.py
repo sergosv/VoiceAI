@@ -29,6 +29,37 @@ from api.services.phone_service import (
 
 router = APIRouter()
 
+# Prefijos válidos por provider para validación de API keys
+_PROVIDER_KEY_HINTS: dict[str, tuple[str, str]] = {
+    "cartesia": ("sk_car_", "Cartesia inician con 'sk_car_'"),
+    "elevenlabs": ("sk_", "ElevenLabs inician con 'sk_'"),
+    "openai": ("sk-", "OpenAI inician con 'sk-'"),
+}
+
+
+def _validate_provider_key(provider: str, api_key: str | None) -> None:
+    """Valida formato de API key vs provider. Lanza HTTPException si no coincide."""
+    if not api_key or provider not in _PROVIDER_KEY_HINTS:
+        return
+    prefix, hint = _PROVIDER_KEY_HINTS[provider]
+    if not api_key.startswith(prefix):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"La API key no corresponde al provider {provider}. "
+                f"Keys de {hint}."
+            ),
+        )
+    # Extra: descartar keys de Cartesia pasadas como ElevenLabs
+    if provider == "elevenlabs" and api_key.startswith("sk_car_"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "La API key parece ser de Cartesia, no de ElevenLabs. "
+                "Keys de ElevenLabs inician con 'sk_' (sin 'sk_car_')."
+            ),
+        )
+
 
 def _check_client_access(user: CurrentUser, client_id: str) -> None:
     """Verifica que el usuario tenga acceso al cliente."""
@@ -95,6 +126,11 @@ async def create_agent(
     system_prompt = req.system_prompt or build_system_prompt(
         c.get("business_type", "generic"), req.name, c["name"], c.get("language", "es"),
     )
+
+    # Validar formato de API keys vs provider
+    _validate_provider_key(req.tts_provider, req.tts_api_key)
+    _validate_provider_key(req.llm_provider, req.llm_api_key)
+    _validate_provider_key(req.stt_provider, req.stt_api_key)
 
     # Construir JSONB configs
     voice_config = {
@@ -254,6 +290,14 @@ async def update_agent(
         stt_changed = True
     if stt_changed:
         updates["stt_config"] = stt_config
+
+    # Validar formato de API keys vs provider en configs actualizados
+    if voice_changed and voice_config.get("api_key"):
+        _validate_provider_key(voice_config.get("provider", ""), voice_config["api_key"])
+    if llm_changed and llm_config.get("api_key"):
+        _validate_provider_key(llm_config.get("provider", ""), llm_config["api_key"])
+    if stt_changed and stt_config.get("api_key"):
+        _validate_provider_key(stt_config.get("provider", ""), stt_config["api_key"])
 
     if not updates:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sin cambios")
