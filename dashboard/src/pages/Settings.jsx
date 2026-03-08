@@ -18,6 +18,7 @@ import { PromptAssistant } from '../components/PromptAssistant'
 import { ChatTesterButton } from '../components/ChatTester'
 import { WhatsAppConfig } from '../components/WhatsAppConfig'
 import { GHLConfig } from '../components/GHLConfig'
+import { VoiceCloning } from '../components/VoiceCloning'
 
 /* ─────────────────────────── Constants ─────────────────────────── */
 
@@ -556,6 +557,7 @@ export function Settings() {
   const [agents, setAgents] = useState([])
   const [selectedAgent, setSelectedAgent] = useState(null)
   const [voices, setVoices] = useState([])
+  const [clonedVoices, setClonedVoices] = useState([])
   const [templates, setTemplates] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingVoices, setLoadingVoices] = useState(false)
@@ -632,9 +634,9 @@ export function Settings() {
   }
 
   /* ── Voice loading ── */
-  async function loadVoicesForAgent(agentData, cid) {
+  async function loadVoicesForAgent(agentData, cid, providerOverride) {
     const vc = agentData?.voice_config || {}
-    const provider = vc.provider || 'cartesia'
+    const provider = providerOverride || vc.provider || 'cartesia'
     const mode = agentData?.agent_mode || 'pipeline'
 
     if (mode === 'realtime') {
@@ -645,7 +647,7 @@ export function Settings() {
     setLoadingVoices(true)
     try {
       if (provider === 'elevenlabs' || provider === 'openai') {
-        const v = await api.get(`/voices/provider/${cid}?agent_id=${agentData.id}`)
+        const v = await api.get(`/voices/provider/${cid}?agent_id=${agentData.id}&provider=${provider}`)
         setVoices(v)
       } else {
         const v = await api.get('/voices')
@@ -662,11 +664,19 @@ export function Settings() {
     }
   }
 
+  /* Recargar voces cuando cambia el TTS provider en el form */
+  useEffect(() => {
+    if (!selectedAgent || !clientId) return
+    loadVoicesForAgent(selectedAgent, clientId, form.tts_provider)
+  }, [form.tts_provider]) // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ── Select an agent ── */
   function selectAgent(agent, cid) {
     setSelectedAgent(agent)
     populateForm(agent)
     loadVoicesForAgent(agent, cid)
+    // Cargar voces clonadas del cliente
+    api.get(`/voices/cloned/${cid}`).then(setClonedVoices).catch(() => setClonedVoices([]))
   }
 
   /* ── Initial data load ── */
@@ -845,6 +855,19 @@ export function Settings() {
 
   const groupedVoices = useMemo(() => {
     const groups = {}
+
+    // Voces clonadas primero (solo para Cartesia)
+    if (form.tts_provider === 'cartesia' && clonedVoices.length > 0) {
+      groups['Mis voces clonadas'] = clonedVoices.map(cv => ({
+        key: cv.external_voice_id,
+        id: cv.external_voice_id,
+        name: `${cv.name} (clonada)`,
+        language: cv.language,
+        gender: 'cloned',
+        description: cv.description || 'Voz clonada',
+      }))
+    }
+
     for (const v of filteredVoices) {
       let key
       if (form.tts_provider === 'cartesia') {
@@ -859,7 +882,7 @@ export function Settings() {
       groups[key].push(v)
     }
     return groups
-  }, [filteredVoices, form.tts_provider, client?.language])
+  }, [filteredVoices, clonedVoices, form.tts_provider, client?.language])
 
   const currentVoice = voices?.find(v => v.id === form.voice_id)
 
@@ -1360,6 +1383,19 @@ export function Settings() {
                           </>
                         )}
                       </div>
+
+                      {/* Voice Cloning */}
+                      {form.tts_provider === 'cartesia' && (
+                        <div className="p-4 rounded-lg border border-border bg-bg-primary/50">
+                          <VoiceCloning
+                            clientId={clientId}
+                            agentId={selectedAgent?.id}
+                            currentVoiceId={form.voice_id}
+                            onVoiceAssigned={(voiceId) => setForm(f => ({ ...f, voice_id: voiceId }))}
+                            onClonedVoicesChange={setClonedVoices}
+                          />
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* Realtime config */

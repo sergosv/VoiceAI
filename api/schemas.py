@@ -89,6 +89,20 @@ class VoiceOut(BaseModel):
     description: str
 
 
+class ClonedVoiceOut(BaseModel):
+    id: str
+    client_id: str
+    agent_id: str | None = None
+    provider: str = "cartesia"
+    external_voice_id: str
+    name: str
+    language: str = "es"
+    description: str = ""
+    duration_seconds: float | None = None
+    status: str = "ready"
+    created_at: datetime | None = None
+
+
 # ── Agents ───────────────────────────────────────────
 
 class AgentOut(BaseModel):

@@ -1,4 +1,4 @@
-"""Rutas para catálogo de voces."""
+"""Rutas para catálogo de voces y clonación."""
 
 from __future__ import annotations
 
@@ -7,11 +7,19 @@ import logging
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
-from api.schemas import VoiceOut
+from api.schemas import ClonedVoiceOut, VoiceOut
+from api.services.voice_cloning import (
+    clone_voice_cartesia,
+    clone_voice_elevenlabs,
+    delete_voice_cartesia,
+    delete_voice_elevenlabs,
+    preview_voice_cartesia,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -52,6 +60,7 @@ async def list_voices() -> list[VoiceOut]:
 async def list_provider_voices(
     client_id: str,
     agent_id: str | None = None,
+    provider: str | None = Query(None, description="Override del provider TTS"),
     user: CurrentUser = Depends(get_current_user),
 ) -> list[VoiceOut]:
     """Retorna voces según el TTS provider del agente o cliente."""
@@ -60,30 +69,43 @@ async def list_provider_voices(
 
     sb = get_supabase()
 
-    # Intentar leer de agents si hay agent_id
-    provider = "cartesia"
+    # Si el frontend manda provider explícito, usarlo directamente
     api_key = None
-    if agent_id:
-        agent_result = sb.table("agents").select("voice_config").eq("id", agent_id).limit(1).execute()
-        if agent_result.data:
-            vc = agent_result.data[0].get("voice_config") or {}
-            provider = vc.get("provider", "cartesia")
-            api_key = vc.get("api_key")
+    if not provider:
+        provider = "cartesia"
+        if agent_id:
+            agent_result = (
+                sb.table("agents").select("voice_config").eq("id", agent_id).limit(1).execute()
+            )
+            if agent_result.data:
+                vc = agent_result.data[0].get("voice_config") or {}
+                provider = vc.get("provider", "cartesia")
+                api_key = vc.get("api_key")
 
-    if not agent_id or not provider:
-        # Fallback a clients
-        result = (
-            sb.table("clients")
-            .select("tts_provider, tts_api_key")
-            .eq("id", client_id)
-            .limit(1)
-            .execute()
-        )
-        if not result.data:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-        client = result.data[0]
-        provider = client.get("tts_provider", "cartesia")
-        api_key = client.get("tts_api_key")
+        if not agent_id or not provider:
+            result = (
+                sb.table("clients")
+                .select("tts_provider, tts_api_key")
+                .eq("id", client_id)
+                .limit(1)
+                .execute()
+            )
+            if not result.data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado"
+                )
+                client = result.data[0]
+                provider = client.get("tts_provider", "cartesia")
+                api_key = client.get("tts_api_key")
+    else:
+        # Con provider override, aún necesitamos la API key del agente
+        if agent_id:
+            agent_result = (
+                sb.table("agents").select("voice_config").eq("id", agent_id).limit(1).execute()
+            )
+            if agent_result.data:
+                vc = agent_result.data[0].get("voice_config") or {}
+                api_key = vc.get("api_key")
 
     if provider == "elevenlabs":
         if not api_key:
@@ -145,3 +167,288 @@ async def _fetch_elevenlabs_voices(api_key: str) -> list[VoiceOut]:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error consultando ElevenLabs: {e}",
         )
+
+
+# ── Clonación de voces ────────────────────────────────────
+
+# Límites de audio
+MAX_AUDIO_SIZE = 10 * 1024 * 1024  # 10 MB
+ALLOWED_CONTENT_TYPES = {
+    "audio/wav", "audio/x-wav", "audio/wave",
+    "audio/mpeg", "audio/mp3", "audio/mp4",
+    "audio/ogg", "audio/webm", "audio/flac",
+}
+
+
+@router.post("/clone", response_model=ClonedVoiceOut, status_code=status.HTTP_201_CREATED)
+async def clone_voice(
+    audio: UploadFile = File(..., description="Audio para clonar (WAV/MP3, 5-30s)"),
+    name: str = Form(..., min_length=1, max_length=100),
+    client_id: str = Form(...),
+    agent_id: str | None = Form(None),
+    language: str = Form("es"),
+    description: str = Form(""),
+    provider: str = Form("cartesia"),
+    user: CurrentUser = Depends(get_current_user),
+) -> ClonedVoiceOut:
+    """Clona una voz a partir de un audio subido por el cliente."""
+    # Verificar permisos
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    # Validar content type
+    content_type = audio.content_type or ""
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Formato de audio no soportado: {content_type}. Usa WAV, MP3, OGG o FLAC.",
+        )
+
+    # Leer audio con límite de tamaño
+    audio_data = await audio.read()
+    if len(audio_data) > MAX_AUDIO_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Audio demasiado grande ({len(audio_data) // 1024}KB). Máximo: 10MB.",
+        )
+
+    if len(audio_data) < 1000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Audio demasiado corto. Se necesitan al menos 3 segundos.",
+        )
+
+    # La clonación siempre usa las keys de la plataforma (env vars).
+    # Las keys BYOK del agente son para TTS en llamadas, no para clonar.
+    api_key = None
+    sb = get_supabase()
+
+    # Clonar según provider
+    try:
+        if provider == "elevenlabs":
+            result = await clone_voice_elevenlabs(
+                audio_data=audio_data,
+                name=name,
+                description=description,
+                api_key=api_key,
+            )
+            external_id = result.get("voice_id", "")
+        else:
+            result = await clone_voice_cartesia(
+                audio_data=audio_data,
+                name=name,
+                language=language,
+                description=description,
+                api_key=api_key,
+            )
+            external_id = result.get("id", "")
+
+        if not external_id:
+            raise RuntimeError("No se recibió ID de voz del provider")
+
+    except Exception as e:
+        logger.error("Error en clonación de voz: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error clonando voz: {e}",
+        )
+
+    # Guardar en DB
+    insert_data = {
+        "client_id": client_id,
+        "agent_id": agent_id,
+        "provider": provider,
+        "external_voice_id": external_id,
+        "name": name,
+        "language": language,
+        "description": description,
+        "status": "ready",
+        "metadata": result,
+    }
+
+    res = sb.table("cloned_voices").insert(insert_data).execute()
+    if not res.data:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error guardando voz clonada en DB",
+        )
+
+    row = res.data[0]
+    return ClonedVoiceOut(
+        id=row["id"],
+        client_id=row["client_id"],
+        agent_id=row.get("agent_id"),
+        provider=row["provider"],
+        external_voice_id=row["external_voice_id"],
+        name=row["name"],
+        language=row["language"],
+        description=row.get("description", ""),
+        duration_seconds=row.get("duration_seconds"),
+        status=row["status"],
+        created_at=row.get("created_at"),
+    )
+
+
+@router.get("/cloned/{client_id}", response_model=list[ClonedVoiceOut])
+async def list_cloned_voices(
+    client_id: str,
+    provider: str | None = Query(None),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[ClonedVoiceOut]:
+    """Lista las voces clonadas de un cliente."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    sb = get_supabase()
+    query = sb.table("cloned_voices").select("*").eq("client_id", client_id)
+    if provider:
+        query = query.eq("provider", provider)
+    query = query.order("created_at", desc=True)
+
+    result = query.execute()
+    return [
+        ClonedVoiceOut(
+            id=r["id"],
+            client_id=r["client_id"],
+            agent_id=r.get("agent_id"),
+            provider=r["provider"],
+            external_voice_id=r["external_voice_id"],
+            name=r["name"],
+            language=r["language"],
+            description=r.get("description", ""),
+            duration_seconds=r.get("duration_seconds"),
+            status=r["status"],
+            created_at=r.get("created_at"),
+        )
+        for r in result.data
+    ]
+
+
+@router.delete("/cloned/{voice_id}")
+async def delete_cloned_voice(
+    voice_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, str]:
+    """Elimina una voz clonada del provider y de la DB."""
+    sb = get_supabase()
+
+    # Buscar la voz
+    res = sb.table("cloned_voices").select("*").eq("id", voice_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voz clonada no encontrada")
+
+    voice = res.data[0]
+
+    # Verificar permisos
+    if user.role == "client" and user.client_id != voice["client_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    # Eliminar del provider (usa keys de plataforma, no BYOK)
+    external_id = voice["external_voice_id"]
+    provider = voice["provider"]
+    try:
+        if provider == "elevenlabs":
+            await delete_voice_elevenlabs(external_id)
+        else:
+            await delete_voice_cartesia(external_id)
+    except Exception as e:
+        logger.warning("No se pudo eliminar voz %s del provider: %s", external_id, e)
+
+    # Eliminar de DB
+    sb.table("cloned_voices").delete().eq("id", voice_id).execute()
+
+    return {"status": "deleted", "voice_id": voice_id}
+
+
+@router.post("/cloned/{voice_id}/preview")
+async def preview_cloned_voice(
+    voice_id: str,
+    text: str = Query("Hola, esta es mi voz clonada. ¿Cómo suena?", max_length=200),
+    user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    """Genera un audio de preview con la voz clonada."""
+    sb = get_supabase()
+
+    res = sb.table("cloned_voices").select("*").eq("id", voice_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voz no encontrada")
+
+    voice = res.data[0]
+
+    if user.role == "client" and user.client_id != voice["client_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    if voice["provider"] != "cartesia":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Preview solo disponible para voces Cartesia",
+        )
+
+    try:
+        audio_bytes = await preview_voice_cartesia(
+            voice_id=voice["external_voice_id"],
+            text=text,
+            language=voice.get("language", "es"),
+        )
+    except Exception as e:
+        logger.error("Error generando preview: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error generando preview: {e}",
+        )
+
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
+@router.post("/cloned/{voice_id}/assign")
+async def assign_cloned_voice_to_agent(
+    voice_id: str,
+    agent_id: str = Query(...),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, str]:
+    """Asigna una voz clonada a un agente (actualiza voice_config del agente)."""
+    sb = get_supabase()
+
+    # Buscar voz clonada
+    res = sb.table("cloned_voices").select("*").eq("id", voice_id).limit(1).execute()
+    if not res.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voz no encontrada")
+
+    voice = res.data[0]
+
+    if user.role == "client" and user.client_id != voice["client_id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    # Leer voice_config actual del agente
+    agent_res = (
+        sb.table("agents").select("voice_config, client_id").eq("id", agent_id).limit(1).execute()
+    )
+    if not agent_res.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
+
+    agent = agent_res.data[0]
+
+    # Verificar que el agente pertenece al mismo cliente
+    if agent["client_id"] != voice["client_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="La voz y el agente deben pertenecer al mismo cliente",
+        )
+
+    # Actualizar voice_config del agente con el voice_id clonado
+    vc = agent.get("voice_config") or {}
+    vc["voice_id"] = voice["external_voice_id"]
+    vc["provider"] = voice["provider"]
+    vc["cloned_voice_id"] = voice["id"]  # Referencia interna
+
+    sb.table("agents").update({"voice_config": vc}).eq("id", agent_id).execute()
+
+    # Vincular la voz clonada al agente
+    sb.table("cloned_voices").update({"agent_id": agent_id}).eq("id", voice_id).execute()
+
+    return {
+        "status": "assigned",
+        "agent_id": agent_id,
+        "voice_id": voice_id,
+        "external_voice_id": voice["external_voice_id"],
+    }
