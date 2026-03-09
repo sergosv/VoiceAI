@@ -134,6 +134,8 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
             VideoGrants(
                 room_join=True,
                 room=room_name,
+                can_publish=True,
+                can_subscribe=True,
             )
         )
         .with_metadata(room_metadata)

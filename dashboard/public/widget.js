@@ -195,8 +195,13 @@
 
       room.on(lk.RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === 'audio') {
+          // Remove previous audio element if any
+          const prev = document.getElementById('vai-audio');
+          if (prev) prev.remove();
           const el = track.attach();
           el.id = 'vai-audio';
+          el.autoplay = true;
+          el.style.display = 'none';
           document.body.appendChild(el);
         }
       });
