@@ -13,11 +13,9 @@ logger = logging.getLogger(__name__)
 # Prefijos válidos por provider para validación de API keys
 _KEY_PREFIXES: dict[str, tuple[str, ...]] = {
     "cartesia": ("sk_car_",),
-    "elevenlabs": ("sk_",),
     "openai": ("sk-",),
 }
-# Prefijos que NO son de ElevenLabs aunque empiecen con "sk_"
-_ELEVENLABS_EXCLUDED = ("sk_car_", "sk-proj-", "sk-")
+# ElevenLabs NO tiene prefijo fijo — sus keys son alfanuméricas sin patrón
 
 
 def _validate_api_key(provider: str, api_key: str | None) -> str | None:
@@ -34,24 +32,21 @@ def _validate_api_key(provider: str, api_key: str | None) -> str | None:
         return api_key
 
     if provider == "elevenlabs":
-        # ElevenLabs: empieza con "sk_" pero NO con prefijos de otros providers
-        if api_key.startswith("sk_") and not any(
-            api_key.startswith(ex) for ex in ("sk_car_",)
-        ):
-            return api_key
-        if api_key.startswith("sk-"):
-            # Esto es una key de OpenAI, no ElevenLabs
+        # ElevenLabs keys son alfanuméricas sin prefijo fijo.
+        # Solo rechazar si claramente es de otro provider.
+        if api_key.startswith("sk_car_"):
             logger.warning(
-                "API key para %s tiene formato incorrecto (parece OpenAI). "
-                "Usando env var como fallback.",
+                "API key para %s parece ser de Cartesia. Usando env var como fallback.",
                 provider,
             )
             return None
-        logger.warning(
-            "API key para %s no inicia con 'sk_'. Usando env var como fallback.",
-            provider,
-        )
-        return None
+        if api_key.startswith("sk-"):
+            logger.warning(
+                "API key para %s parece ser de OpenAI. Usando env var como fallback.",
+                provider,
+            )
+            return None
+        return api_key
 
     # Validación genérica por prefijo (cartesia, openai)
     if any(api_key.startswith(p) for p in prefixes):

@@ -32,7 +32,6 @@ router = APIRouter()
 # Prefijos válidos por provider para validación de API keys
 _PROVIDER_KEY_HINTS: dict[str, tuple[str, str]] = {
     "cartesia": ("sk_car_", "Cartesia inician con 'sk_car_'"),
-    "elevenlabs": ("sk_", "ElevenLabs inician con 'sk_'"),
     "openai": ("sk-", "OpenAI inician con 'sk-'"),
 }
 
@@ -54,10 +53,7 @@ def _validate_provider_key(provider: str, api_key: str | None) -> None:
     if provider == "elevenlabs" and api_key.startswith("sk_car_"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "La API key parece ser de Cartesia, no de ElevenLabs. "
-                "Keys de ElevenLabs inician con 'sk_' (sin 'sk_car_')."
-            ),
+            detail="La API key parece ser de Cartesia, no de ElevenLabs.",
         )
 
 

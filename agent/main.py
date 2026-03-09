@@ -372,6 +372,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             language_detector=language_detector,
         )
 
+    # Inyectar datos de la llamada al agente para que los tools accedan vía self
+    if hasattr(voice_agent, "_caller_phone"):
+        voice_agent._caller_phone = caller_number or ""
+        voice_agent._memory_contact_id = memory.contact_id if memory else None
+        logger.info(
+            "Context inyectado al agente: phone=%s, contact_id=%s",
+            voice_agent._caller_phone,
+            voice_agent._memory_contact_id,
+        )
+
+    # Filtrar tools deshabilitados del schema visible al LLM
+    if hasattr(voice_agent, "filter_disabled_tools"):
+        voice_agent.filter_disabled_tools()
+
     # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.client.language in ("es", "es-en") else "en"
     # Multi-idioma: pasar idiomas soportados al STT si detección está habilitada
@@ -664,7 +678,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if quality_cfg.enabled and len(handler._transcript) >= 2:
             asyncio.create_task(
                 _async_quality_score(
-                    call_id=handler._transcript,
                     transcript=list(handler._transcript),
                     business_type=config.client.business_type,
                     room_name=ctx.room.name,
@@ -696,7 +709,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 logger.exception("Error almacenando memoria de largo plazo")
 
     async def _async_quality_score(
-        call_id: list,
         transcript: list[dict],
         business_type: str | None,
         room_name: str,

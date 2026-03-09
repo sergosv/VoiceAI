@@ -19,6 +19,8 @@ const COMMANDS = [
   { id: 'mcp', label: 'MCP Servers', desc: 'Servidores MCP configurados', icon: Plug, path: '/integrations/mcp', keywords: 'mcp servers brave search' },
   { id: 'api-integrations', label: 'API Integrations', desc: 'Endpoints HTTP externos', icon: Plug, path: '/integrations/api', keywords: 'api integrations http endpoints' },
   { id: 'billing', label: 'Creditos', desc: 'Balance y transacciones', icon: CreditCard, path: '/billing', keywords: 'creditos billing pagos balance' },
+  { id: 'analytics', label: 'Analytics', desc: 'Dashboard de metricas', icon: LayoutDashboard, path: '/analytics', keywords: 'analytics metricas datos graficas' },
+  { id: 'create-agent', label: 'Crear Agente', desc: 'Wizard para nuevo agente', icon: Bot, path: '/create-agent', keywords: 'crear agente wizard nuevo' },
 ]
 
 const ADMIN_COMMANDS = [

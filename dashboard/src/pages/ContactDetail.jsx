@@ -15,6 +15,7 @@ import { ArrowLeft, Save, Phone, Mail, Clock, Trash2, PhoneCall, TrendingUp, Cal
 const TABS = [
   { key: 'timeline', label: 'Timeline' },
   { key: 'calls', label: 'Llamadas' },
+  { key: 'conversations', label: 'Conversaciones' },
   { key: 'appointments', label: 'Citas' },
   { key: 'memoria', label: 'Memoria' },
 ]
@@ -58,6 +59,10 @@ export function ContactDetail() {
   const [activeTab, setActiveTab] = useState('timeline')
   const [form, setForm] = useState({ name: '', email: '', notes: '', tags: '' })
 
+  // Conversaciones (WhatsApp + GHL)
+  const [conversations, setConversations] = useState([])
+  const [conversationsLoading, setConversationsLoading] = useState(false)
+
   // Memoria
   const [memories, setMemories] = useState([])
   const [memoriesLoading, setMemoriesLoading] = useState(false)
@@ -90,6 +95,16 @@ export function ContactDetail() {
       })
       .finally(() => setLoading(false))
   }, [id])
+
+  // Cargar conversaciones cuando se activa la tab
+  useEffect(() => {
+    if (activeTab !== 'conversations') return
+    setConversationsLoading(true)
+    api.get(`/contacts/${id}/conversations?limit=50`)
+      .then(setConversations)
+      .catch(e => toast.error(e.message))
+      .finally(() => setConversationsLoading(false))
+  }, [activeTab, id])
 
   // Cargar memorias cuando se activa la tab o cambia el filtro
   useEffect(() => {
@@ -453,6 +468,71 @@ export function ContactDetail() {
                   ))}
                 </tbody>
               </Table>
+            )
+          )}
+
+          {activeTab === 'conversations' && (
+            conversationsLoading ? (
+              <p className="text-text-muted text-center py-8">Cargando conversaciones...</p>
+            ) : conversations.length === 0 ? (
+              <div className="text-center py-12">
+                <MessageSquare size={32} className="mx-auto text-text-muted/30 mb-3" />
+                <p className="text-text-muted">Sin conversaciones registradas</p>
+                <p className="text-xs text-text-muted/60 mt-1">Las conversaciones de WhatsApp y otros canales aparecerán aquí</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {conversations.map(conv => {
+                  const ch = CHANNEL_ICONS[conv.channel] || CHANNEL_ICONS.web_chat
+                  const ChIcon = ch.icon
+                  const statusColors = {
+                    active: 'bg-green-500/20 text-green-400',
+                    closed: 'bg-gray-500/20 text-gray-400',
+                    expired: 'bg-red-500/20 text-red-400',
+                  }
+                  return (
+                    <div key={conv.id} className="border border-border rounded-lg p-3 hover:bg-bg-hover/30 transition-colors">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <ChIcon size={14} className={ch.color} />
+                          <span className="text-xs font-medium">{ch.label}</span>
+                          {conv.remote_phone && (
+                            <span className="text-[10px] text-text-muted">{conv.remote_phone}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColors[conv.status] || statusColors.active}`}>
+                            {conv.status || 'active'}
+                          </span>
+                          <span className="text-[10px] text-text-muted">
+                            {conv.message_count || 0} msgs
+                          </span>
+                        </div>
+                      </div>
+                      {conv.summary && (
+                        <p className="text-xs text-text-secondary mt-1 line-clamp-2">{conv.summary}</p>
+                      )}
+                      {conv.result && (
+                        <span className="inline-block text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded mt-1">
+                          {conv.result}
+                        </span>
+                      )}
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-[10px] text-text-muted">
+                          {conv.last_message_at
+                            ? new Date(conv.last_message_at).toLocaleString('es-MX')
+                            : conv.created_at
+                            ? new Date(conv.created_at).toLocaleString('es-MX')
+                            : '—'}
+                        </span>
+                        {conv.closed_by && (
+                          <span className="text-[10px] text-text-muted">Cerrada por: {conv.closed_by}</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )
           )}
 

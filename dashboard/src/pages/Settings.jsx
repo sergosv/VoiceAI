@@ -833,6 +833,7 @@ export function Settings() {
     realtime_voice: 'alloy', realtime_model: 'gpt-4o-realtime-preview', voice_id: '',
     role_description: '', orchestrator_enabled: true, orchestrator_priority: 0,
     mode_config: {},
+    conversation_flow: null,
     sentiment_config: null, intent_config: null, guardrails_config: null,
     language_detection_config: null, quality_config: null, proactive_config: null,
   })
@@ -860,6 +861,7 @@ export function Settings() {
       examples: agentData.examples || '',
       after_hours_message: agentData.after_hours_message || '',
       conversation_mode: agentData.conversation_mode || 'prompt',
+      conversation_flow: agentData.conversation_flow || null,
       mode_config: agentData.mode_config || {},
       max_call_duration_seconds: agentData.max_call_duration_seconds || 300,
       transfer_number: agentData.transfer_number || '',
@@ -1022,6 +1024,7 @@ export function Settings() {
         orchestrator_enabled: form.orchestrator_enabled,
         orchestrator_priority: form.orchestrator_priority,
         conversation_mode: form.conversation_mode,
+        conversation_flow: form.conversation_flow || null,
         mode_config: form.mode_config || {},
         sentiment_config: form.sentiment_config,
         intent_config: form.intent_config,

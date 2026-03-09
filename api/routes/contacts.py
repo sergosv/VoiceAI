@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.deps import get_supabase
@@ -16,6 +18,7 @@ from api.schemas import (
     MessageResponse,
 )
 from agent.phone_utils import normalize_phone
+from api.services.webhook_service import dispatch_event
 
 router = APIRouter()
 
@@ -121,7 +124,10 @@ async def create_contact(
     result = sb.table("contacts").insert(data).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creando contacto")
-    return ContactOut(**result.data[0])
+    contact_out = ContactOut(**result.data[0])
+    # Webhook: contact.created
+    asyncio.create_task(dispatch_event(effective_client_id, "contact.created", result.data[0]))
+    return contact_out
 
 
 @router.patch("/{contact_id}", response_model=ContactOut)
@@ -147,7 +153,12 @@ async def update_contact(
     result = sb.table("contacts").update(updates).eq("id", contact_id).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
-    return ContactOut(**result.data[0])
+    contact_out = ContactOut(**result.data[0])
+    # Webhook: contact.updated
+    client_id_for_webhook = result.data[0].get("client_id") or existing.data[0].get("client_id")
+    if client_id_for_webhook:
+        asyncio.create_task(dispatch_event(client_id_for_webhook, "contact.updated", result.data[0]))
+    return contact_out
 
 
 @router.delete("/{contact_id}", response_model=MessageResponse)
@@ -184,6 +195,8 @@ async def delete_contact(
 
     # contact_identifiers y memories se borran por CASCADE
     sb.table("contacts").delete().eq("id", contact_id).execute()
+    # Webhook: contact.deleted
+    asyncio.create_task(dispatch_event(client_id, "contact.deleted", {"id": contact_id, "phone": phone}))
     return MessageResponse(message="Contacto y su historial eliminados")
 
 
@@ -310,6 +323,55 @@ async def get_contact_timeline(
             "next_appointment": next_appointment,
         },
     }
+
+
+@router.get("/{contact_id}/conversations")
+async def get_contact_conversations(
+    contact_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict]:
+    """Conversaciones (WhatsApp + GHL) de un contacto."""
+    sb = get_supabase()
+
+    contact = sb.table("contacts").select("client_id").eq("id", contact_id).limit(1).execute()
+    if not contact.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contacto no encontrado")
+    if user.role == "client" and contact.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    conversations: list[dict] = []
+
+    # WhatsApp conversations
+    wa = (
+        sb.table("whatsapp_conversations")
+        .select("id, agent_id, remote_phone, status, message_count, last_message_at, created_at, summary, result, closed_by")
+        .eq("contact_id", contact_id)
+        .order("last_message_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    for row in wa.data or []:
+        row["channel"] = "whatsapp"
+        conversations.append(row)
+
+    # GHL conversations
+    ghl = (
+        sb.table("ghl_conversations")
+        .select("id, agent_id, channel_type, status, message_count, last_message_at, created_at, summary, result, closed_by")
+        .eq("contact_id", contact_id)
+        .order("last_message_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    for row in ghl.data or []:
+        row["channel"] = row.get("channel_type") or "ghl"
+        conversations.append(row)
+
+    # Ordenar por fecha más reciente
+    conversations.sort(key=lambda c: c.get("last_message_at") or c.get("created_at") or "", reverse=True)
+
+    return conversations[:limit]
 
 
 @router.get("/{contact_id}/memories", response_model=list[MemoryOut])

@@ -49,6 +49,9 @@ class VoiceAgent(Agent):
         self._api_integrations = {
             integ["name"]: integ for integ in (api_integrations or [])
         }
+        # Datos de la llamada — se inyectan desde main.py antes de session.start()
+        self._caller_phone: str = ""
+        self._memory_contact_id: str | None = None
         # Soporte de cambio de idioma en vivo
         self._language_detector = language_detector
         self._current_language: str = config.client.language
@@ -156,6 +159,23 @@ class VoiceAgent(Agent):
         """Verifica si una herramienta está habilitada para este cliente."""
         return tool_name in self._config.client.enabled_tools
 
+    # Herramientas que siempre están disponibles (no requieren enabled_tools)
+    _ALWAYS_AVAILABLE = {"transfer_to_human", "recall_memory", "call_api"}
+
+    def filter_disabled_tools(self) -> None:
+        """Elimina tools deshabilitados del schema visible al LLM."""
+        enabled = self._config.client.enabled_tools or []
+        filtered = [
+            t for t in self.tools
+            if t.id in self._ALWAYS_AVAILABLE or t.id in enabled
+        ]
+        self.update_tools(filtered)
+        logger.info(
+            "Tools activos para '%s': %s",
+            self._config.agent.slug,
+            [t.id for t in filtered],
+        )
+
     # ── Herramientas del agente ─────────────────────────────
 
     @function_tool()
@@ -235,7 +255,7 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("schedule_appointment"):
             return "La función de agendar citas no está habilitada."
 
-        caller_phone = getattr(context, "_caller_phone", None) or ""
+        caller_phone = self._caller_phone
 
         return await schedule_appointment(
             client_id=self._config.client.id,
@@ -315,7 +335,7 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("save_contact"):
             return "La captura de contactos no está habilitada."
 
-        contact_phone = phone or getattr(context, "_caller_phone", None) or ""
+        contact_phone = phone or self._caller_phone
         if not contact_phone:
             return "No tengo un número de teléfono para guardar el contacto."
 
@@ -344,7 +364,7 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("save_contact"):
             return "La función de notas no está habilitada."
 
-        caller_phone = getattr(context, "_caller_phone", None) or ""
+        caller_phone = self._caller_phone
         if not caller_phone:
             return "No puedo identificar el contacto para actualizar notas."
 
@@ -368,7 +388,7 @@ class VoiceAgent(Agent):
         Args:
             query: Pregunta o tema a buscar en el historial (ej: "cita anterior", "último pedido").
         """
-        contact_id = getattr(context, "_memory_contact_id", None) or ""
+        contact_id = self._memory_contact_id or ""
         if not contact_id:
             return "No tengo historial previo de este contacto."
 
@@ -399,11 +419,11 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("schedule_reminder"):
             return "La función de recordatorios no está habilitada."
 
-        caller_phone = getattr(context, "_caller_phone", None) or ""
+        caller_phone = self._caller_phone
         if not caller_phone:
             return "No tengo un número de teléfono para programar el recordatorio."
 
-        contact_id = getattr(context, "_memory_contact_id", None)
+        contact_id = self._memory_contact_id
 
         return await schedule_reminder_action(
             description=description,

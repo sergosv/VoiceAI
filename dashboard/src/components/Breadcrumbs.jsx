@@ -22,6 +22,7 @@ const ROUTE_LABELS = {
   'pricing': 'Precios',
   'flow': 'Flow Builder',
   'looptalk': 'LoopTalk',
+  'create-agent': 'Crear Agente',
 }
 
 export function Breadcrumbs() {
