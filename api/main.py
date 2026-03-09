@@ -96,6 +96,27 @@ app.add_middleware(
 app.add_middleware(RequestIdMiddleware)
 
 
+# CORS abierto para endpoints del widget (públicos, protegidos por rate limit)
+@app.middleware("http")
+async def widget_cors_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """Permite CORS abierto solo para /api/widget/* (embeddable en cualquier dominio)."""
+    if request.url.path.startswith("/api/widget"):
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+    return await call_next(request)
+
+
 # Inyectar versión en todas las respuestas
 @app.middleware("http")
 async def add_version_header(request: Request, call_next):  # type: ignore[no-untyped-def]

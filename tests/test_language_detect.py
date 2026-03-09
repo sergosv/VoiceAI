@@ -339,53 +339,59 @@ class TestVoiceAgentLanguageSwitching:
 class TestMultiLangSTTBuilder:
     """Tests para build_stt con soporte multi-idioma."""
 
-    @patch("livekit.plugins.deepgram.STT")
-    def test_single_language_stt(self, mock_stt_cls):
+    def _run_build_stt(self, language, multi_lang=None):
+        """Helper: mockea deepgram y ejecuta build_stt."""
+        import sys
+        mock_deepgram = MagicMock()
+        mock_plugins = MagicMock()
+        mock_plugins.deepgram = mock_deepgram
+        saved = sys.modules.get("livekit.plugins"), sys.modules.get("livekit.plugins.deepgram")
+        sys.modules["livekit.plugins"] = mock_plugins
+        sys.modules["livekit.plugins.deepgram"] = mock_deepgram
+        try:
+            from importlib import reload
+            import agent.pipeline_builder as pb
+            reload(pb)
+            config = _make_resolved_config().agent
+            pb.build_stt(config, language, multi_lang=multi_lang)
+            return mock_deepgram.STT
+        finally:
+            if saved[0] is not None:
+                sys.modules["livekit.plugins"] = saved[0]
+            else:
+                sys.modules.pop("livekit.plugins", None)
+            if saved[1] is not None:
+                sys.modules["livekit.plugins.deepgram"] = saved[1]
+            else:
+                sys.modules.pop("livekit.plugins.deepgram", None)
+
+    def test_single_language_stt(self):
         """Sin multi_lang, STT debe usar un solo idioma fijo."""
-        from agent.pipeline_builder import build_stt
-
-        config = _make_resolved_config().agent
-        build_stt(config, "es")
-
-        mock_stt_cls.assert_called_once()
-        kwargs = mock_stt_cls.call_args[1]
+        mock_stt = self._run_build_stt("es")
+        mock_stt.assert_called_once()
+        kwargs = mock_stt.call_args[1]
         assert kwargs["language"] == "es"
         assert "detect_language" not in kwargs
 
-    @patch("livekit.plugins.deepgram.STT")
-    def test_multi_lang_stt_enables_detection(self, mock_stt_cls):
+    def test_multi_lang_stt_enables_detection(self):
         """Con multi_lang > 1 idioma, debe habilitar detect_language."""
-        from agent.pipeline_builder import build_stt
-
-        config = _make_resolved_config().agent
-        build_stt(config, "es", multi_lang=["es", "en"])
-
-        mock_stt_cls.assert_called_once()
-        kwargs = mock_stt_cls.call_args[1]
+        mock_stt = self._run_build_stt("es", multi_lang=["es", "en"])
+        mock_stt.assert_called_once()
+        kwargs = mock_stt.call_args[1]
         assert kwargs["detect_language"] is True
         assert "language" not in kwargs
 
-    @patch("livekit.plugins.deepgram.STT")
-    def test_multi_lang_single_language_no_detection(self, mock_stt_cls):
+    def test_multi_lang_single_language_no_detection(self):
         """Con multi_lang de 1 solo idioma, no habilitar detect_language."""
-        from agent.pipeline_builder import build_stt
-
-        config = _make_resolved_config().agent
-        build_stt(config, "es", multi_lang=["es"])
-
-        kwargs = mock_stt_cls.call_args[1]
+        mock_stt = self._run_build_stt("es", multi_lang=["es"])
+        kwargs = mock_stt.call_args[1]
         assert kwargs["language"] == "es"
         assert "detect_language" not in kwargs
 
-    @patch("livekit.plugins.deepgram.STT")
-    def test_multi_lang_none_no_detection(self, mock_stt_cls):
+    def test_multi_lang_none_no_detection(self):
         """Con multi_lang=None, comportamiento normal."""
-        from agent.pipeline_builder import build_stt
-
-        config = _make_resolved_config().agent
-        build_stt(config, "en", multi_lang=None)
-
-        kwargs = mock_stt_cls.call_args[1]
+        mock_stt = self._run_build_stt("en", multi_lang=None)
+        kwargs = mock_stt.call_args[1]
         assert kwargs["language"] == "en"
         assert "detect_language" not in kwargs
 
