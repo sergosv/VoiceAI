@@ -72,6 +72,7 @@ const TABS = [
   { key: 'ghl', label: 'GoHighLevel', icon: Zap },
   { key: 'intelligence', label: 'Inteligencia', icon: Brain },
   { key: 'api', label: 'API', icon: Key },
+  { key: 'widget', label: 'Widget', icon: Globe },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
 
@@ -1895,6 +1896,83 @@ export function Settings() {
               <div className="space-y-6">
                 <ApiKeysPanel clientId={clientId} />
                 <WebhooksPanel clientId={clientId} />
+              </div>
+            )}
+
+            {/* ── Widget Tab ── */}
+            {activeTab === 'widget' && selectedAgent && (
+              <div className="space-y-6">
+                <Card className="space-y-4">
+                  <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                    <Globe size={16} className="text-cyan-400" />
+                    Widget de Voz Embebible
+                  </h2>
+                  <p className="text-xs text-text-muted">
+                    Agrega un boton de asistente de voz en cualquier sitio web. Los visitantes podran hablar con tu agente directamente desde la pagina.
+                  </p>
+
+                  <div className="space-y-3">
+                    <label className="text-xs font-medium text-text-secondary">Codigo de instalacion</label>
+                    <div className="relative">
+                      <pre className="bg-bg-primary border border-border rounded-lg p-4 text-xs text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
+{`<script src="${window.location.origin.replace('agentes.innotecnia.app', 'voiceai-production-f4e4.up.railway.app')}/widget.js"
+  data-agent="${selectedAgent?.slug || 'tu-agente'}"
+  data-api="${window.location.origin.replace('agentes.innotecnia.app', 'voiceai-production-f4e4.up.railway.app')}/api">
+</script>`}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const apiBase = window.location.origin.replace('agentes.innotecnia.app', 'voiceai-production-f4e4.up.railway.app')
+                          const code = `<script src="${apiBase}/widget.js"\n  data-agent="${selectedAgent?.slug || 'tu-agente'}"\n  data-api="${apiBase}/api">\n</script>`
+                          navigator.clipboard.writeText(code)
+                          toast.success('Codigo copiado al portapapeles')
+                        }}
+                        className="absolute top-2 right-2 p-1.5 rounded bg-bg-hover hover:bg-border transition-colors"
+                        title="Copiar"
+                      >
+                        <Check size={14} className="text-text-muted" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4 space-y-3">
+                    <h3 className="text-xs font-semibold text-text-secondary">Opciones de personalizacion</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      <div className="space-y-1">
+                        <span className="text-text-muted">Posicion</span>
+                        <code className="block text-cyan-400 bg-bg-primary px-2 py-1 rounded">data-position="bottom-right"</code>
+                        <span className="text-text-muted/60">bottom-right o bottom-left</span>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-text-muted">Color</span>
+                        <code className="block text-cyan-400 bg-bg-primary px-2 py-1 rounded">data-color="#00f0ff"</code>
+                        <span className="text-text-muted/60">Color hexadecimal del boton</span>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-text-muted">Titulo</span>
+                        <code className="block text-cyan-400 bg-bg-primary px-2 py-1 rounded">data-title="Hablar con asistente"</code>
+                        <span className="text-text-muted/60">Tooltip al pasar el mouse</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4 space-y-2">
+                    <h3 className="text-xs font-semibold text-text-secondary">Instrucciones</h3>
+                    <ol className="text-xs text-text-muted space-y-1.5 list-decimal list-inside">
+                      <li>Copia el codigo de arriba</li>
+                      <li>Pegalo antes del cierre <code className="text-cyan-400">&lt;/body&gt;</code> en tu pagina HTML</li>
+                      <li>El boton aparecera automaticamente en la esquina de tu sitio</li>
+                      <li>Los visitantes hacen clic para hablar con tu agente por voz</li>
+                    </ol>
+                  </div>
+
+                  <div className="border border-yellow-500/20 bg-yellow-500/5 rounded-lg p-3">
+                    <p className="text-xs text-yellow-400/80">
+                      <strong>Nota:</strong> El widget requiere que el navegador del visitante tenga acceso al microfono. Funciona en Chrome, Firefox, Safari y Edge modernos. HTTPS es requerido en produccion.
+                    </p>
+                  </div>
+                </Card>
               </div>
             )}
 

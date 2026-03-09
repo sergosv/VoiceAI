@@ -96,7 +96,9 @@
       "WebFetch(domain:www.eesel.ai)",
       "WebFetch(domain:smallest.ai)",
       "WebFetch(domain:elevenlabs.io)",
-      "Bash(timeout 10 bash:*)"
+      "Bash(timeout 10 bash:*)",
+      "Bash(npm list:*)",
+      "WebFetch(domain:livekit.io)"
     ]
   }
 }
