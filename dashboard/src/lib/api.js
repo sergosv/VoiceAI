@@ -32,10 +32,29 @@ async function request(path, options = {}) {
   return res.json()
 }
 
+async function downloadFile(path) {
+  const token = await getToken()
+  const headers = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await fetch(`${BASE}${path}`, { headers })
+  if (!res.ok) throw new Error(`Error ${res.status}`)
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename=(.+)/)
+  const filename = match ? match[1] : 'export.csv'
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: (path, { signal } = {}) => request(path, { signal }),
   post: (path, data, { signal } = {}) => request(path, { method: 'POST', body: JSON.stringify(data), signal }),
   patch: (path, data, { signal } = {}) => request(path, { method: 'PATCH', body: JSON.stringify(data), signal }),
   delete: (path, { signal } = {}) => request(path, { method: 'DELETE', signal }),
   upload: (path, formData, { signal } = {}) => request(path, { method: 'POST', body: formData, signal }),
+  download: (path) => downloadFile(path),
 }

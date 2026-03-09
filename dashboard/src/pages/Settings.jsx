@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Save, Volume2, Zap, RefreshCw, Eye, FileText, Bot, Plus, Trash2, Mic,
   Brain, Key, ChevronDown, ChevronUp, Check, Phone, MessageCircle, Settings2,
-  Shield, Globe, Star, Bell,
+  Shield, Globe, Star, Bell, Clock,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
@@ -226,6 +226,101 @@ const SUPPORTED_LANGUAGES = [
   { code: 'pt', label: 'Portugues' },
   { code: 'fr', label: 'Francais' },
 ]
+
+const DAYS_OF_WEEK = [
+  { key: 'monday', label: 'Lunes' },
+  { key: 'tuesday', label: 'Martes' },
+  { key: 'wednesday', label: 'Miercoles' },
+  { key: 'thursday', label: 'Jueves' },
+  { key: 'friday', label: 'Viernes' },
+  { key: 'saturday', label: 'Sabado' },
+  { key: 'sunday', label: 'Domingo' },
+]
+
+const DEFAULT_HOURS = { open: '09:00', close: '18:00' }
+
+function BusinessHoursEditor({ value, onChange }) {
+  const enabled = !!value
+  const hours = value || {}
+
+  function toggleEnabled() {
+    onChange(enabled ? null : {
+      monday: { ...DEFAULT_HOURS },
+      tuesday: { ...DEFAULT_HOURS },
+      wednesday: { ...DEFAULT_HOURS },
+      thursday: { ...DEFAULT_HOURS },
+      friday: { ...DEFAULT_HOURS },
+      saturday: null,
+      sunday: null,
+    })
+  }
+
+  function toggleDay(dayKey) {
+    const updated = { ...hours }
+    updated[dayKey] = updated[dayKey] ? null : { ...DEFAULT_HOURS }
+    onChange(updated)
+  }
+
+  function updateTime(dayKey, field, val) {
+    const updated = { ...hours }
+    updated[dayKey] = { ...updated[dayKey], [field]: val }
+    onChange(updated)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Clock size={16} className="text-accent" />
+          <span className="text-sm font-medium">Horario de atencion</span>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox" className="sr-only peer" checked={enabled} onChange={toggleEnabled} />
+          <div className="w-9 h-5 bg-bg-hover rounded-full peer peer-checked:bg-accent/80 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
+        </label>
+      </div>
+      {enabled && (
+        <div className="space-y-2">
+          <p className="text-xs text-text-muted">
+            Define los horarios en que el agente esta disponible. Fuera de horario se reproduce el mensaje configurado.
+          </p>
+          {DAYS_OF_WEEK.map(({ key, label }) => {
+            const dayHours = hours[key]
+            const isOpen = !!dayHours
+            return (
+              <div key={key} className="flex items-center gap-3 py-1.5">
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input type="checkbox" className="sr-only peer" checked={isOpen} onChange={() => toggleDay(key)} />
+                  <div className="w-8 h-4 bg-bg-hover rounded-full peer peer-checked:bg-accent/80 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-4" />
+                </label>
+                <span className={`text-sm w-24 ${isOpen ? 'text-text-primary' : 'text-text-muted'}`}>{label}</span>
+                {isOpen ? (
+                  <div className="flex items-center gap-2 text-xs">
+                    <input
+                      type="time"
+                      value={dayHours.open}
+                      onChange={e => updateTime(key, 'open', e.target.value)}
+                      className="bg-bg-primary border border-border rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-accent"
+                    />
+                    <span className="text-text-muted">a</span>
+                    <input
+                      type="time"
+                      value={dayHours.close}
+                      onChange={e => updateTime(key, 'close', e.target.value)}
+                      className="bg-bg-primary border border-border rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-accent"
+                    />
+                  </div>
+                ) : (
+                  <span className="text-xs text-text-muted">Cerrado</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function ToggleSwitch({ checked, onChange }) {
   return (
@@ -826,7 +921,7 @@ export function Settings() {
   // Comprehensive form state
   const [form, setForm] = useState({
     name: '', agent_type: 'inbound', greeting: '', system_prompt: '', examples: '',
-    after_hours_message: '', conversation_mode: 'prompt', max_call_duration_seconds: 300,
+    after_hours_message: '', business_hours: null, conversation_mode: 'prompt', max_call_duration_seconds: 300,
     transfer_number: '', is_active: true,
     agent_mode: 'pipeline', stt_provider: 'deepgram', llm_provider: 'google', tts_provider: 'cartesia',
     stt_api_key: '', llm_api_key: '', tts_api_key: '', realtime_api_key: '',
@@ -860,6 +955,7 @@ export function Settings() {
       system_prompt: agentData.system_prompt || '',
       examples: agentData.examples || '',
       after_hours_message: agentData.after_hours_message || '',
+      business_hours: agentData.business_hours || null,
       conversation_mode: agentData.conversation_mode || 'prompt',
       conversation_flow: agentData.conversation_flow || null,
       mode_config: agentData.mode_config || {},
@@ -1012,6 +1108,7 @@ export function Settings() {
         agent_type: form.agent_type,
         transfer_number: form.transfer_number || null,
         after_hours_message: form.after_hours_message || null,
+        business_hours: form.business_hours,
         max_call_duration_seconds: form.max_call_duration_seconds,
         is_active: form.is_active,
         voice_id: form.voice_id || null,
@@ -1849,6 +1946,13 @@ export function Settings() {
                   onChange={e => setForm(f => ({ ...f, transfer_number: e.target.value }))}
                   placeholder="+52..."
                 />
+
+                <div className="border-t border-border pt-4">
+                  <BusinessHoursEditor
+                    value={form.business_hours}
+                    onChange={bh => setForm(f => ({ ...f, business_hours: bh }))}
+                  />
+                </div>
 
                 {/* Phone number (readonly) */}
                 <div className="flex flex-col gap-1.5">

@@ -99,8 +99,7 @@ export function Contacts() {
             onClick={() => {
               const params = new URLSearchParams()
               if (clientId) params.set('client_id', clientId)
-              const url = `${import.meta.env.VITE_API_URL || '/api'}/contacts/export/csv?${params}`
-              window.open(url, '_blank')
+              api.download(`/contacts/export/csv?${params}`).catch(e => toast.error(e.message))
             }}
             className="text-xs"
             title="Exportar a CSV"

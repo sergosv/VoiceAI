@@ -62,8 +62,7 @@ export function Calls() {
               if (statusFilter) params.set('status', statusFilter)
               if (dateFrom) params.set('date_from', dateFrom)
               if (dateTo) params.set('date_to', dateTo)
-              const url = `${import.meta.env.VITE_API_URL || '/api'}/calls/export/csv?${params}`
-              window.open(url, '_blank')
+              api.download(`/calls/export/csv?${params}`).catch(e => toast.error(e.message))
             }}
             className="text-xs"
             title="Exportar a CSV"
