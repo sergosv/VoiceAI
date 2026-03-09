@@ -113,18 +113,28 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
     if not api_key or not api_secret:
         raise HTTPException(500, "LiveKit not configured")
 
-    # Crear room con metadata del agente para que el dispatch rule lo capte
+    # Crear room + despachar agente explícitamente
     room_metadata = f'{{"agent_id": "{agent["id"]}", "type": "widget"}}'
     try:
+        from livekit.api import CreateAgentDispatchRequest
+
         async with LiveKitAPI(
             url=livekit_url, api_key=api_key, api_secret=api_secret,
         ) as lk_api:
             await lk_api.room.create_room(
                 CreateRoomRequest(name=room_name, metadata=room_metadata)
             )
-            logger.info("Widget room created: %s (agent_id=%s)", room_name, agent["id"])
+            # Dispatch explícito — la dispatch rule por prefix no basta
+            await lk_api.agent_dispatch.create_dispatch(
+                CreateAgentDispatchRequest(
+                    room=room_name,
+                    agent_name="voice-ai-platform",
+                    metadata=room_metadata,
+                )
+            )
+            logger.info("Widget room + dispatch created: %s (agent_id=%s)", room_name, agent["id"])
     except Exception as e:
-        logger.warning("Could not pre-create room: %s", e)
+        logger.warning("Could not create room/dispatch: %s", e)
 
     token = (
         AccessToken(api_key, api_secret)
