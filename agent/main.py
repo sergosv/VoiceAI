@@ -269,11 +269,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         return
 
     # Registrar llamada activa
-    sb.table("active_calls").insert({
-        "client_id": config.client.id,
-        "agent_id": config.agent.id,
-        "room_name": ctx.room.name,
-    }).execute()
+    try:
+        sb.table("active_calls").insert({
+            "client_id": config.client.id,
+            "agent_id": config.agent.id,
+            "room_name": ctx.room.name,
+        }).execute()
+    except Exception:
+        logger.exception("Error registering active call — continuing anyway")
 
     # ========= BILLING: Check ANTES de atender =========
     billing = CallBilling(config.client.id)
@@ -624,10 +627,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     )
             # Analizar sentimiento, intent y idioma en background
             if sentiment_analyzer or intent_extractor or language_detector:
-                asyncio.ensure_future(_analyze_user_turn(ev.transcript))
+                task = asyncio.ensure_future(_analyze_user_turn(ev.transcript))
+                task.add_done_callback(
+                    lambda t: t.exception() and logger.error("_analyze_user_turn failed: %s", t.exception())
+                    if not t.cancelled() and t.exception() else None
+                )
 
     async def _analyze_user_turn(text: str) -> None:
         """Analiza sentimiento, intent e idioma del turno del usuario."""
+        try:
+            await _analyze_user_turn_inner(text)
+        except Exception:
+            logger.exception("Error in _analyze_user_turn")
+
+    async def _analyze_user_turn_inner(text: str) -> None:
+        """Lógica interna de análisis — envuelta en try/except por el caller."""
         # Ejecutar análisis en paralelo
         tasks = []
         task_names = []
@@ -832,8 +846,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         await session.generate_reply(
             instructions=f"Saluda al usuario con: {flow_greeting}"
         )
-    elif memory and memory.contact_id and not memory._is_new_contact and memory.contact and memory.contact.get("name"):
-        contact_name = memory.contact["name"].split()[0]  # Primer nombre
+    elif memory and memory.contact_id and not memory._is_new_contact and memory.contact and (memory.contact.get("name") or "").strip():
+        contact_name = memory.contact["name"].strip().split()[0]  # Primer nombre
         await session.generate_reply(
             instructions=(
                 f"Este es un cliente que ya conoces. Se llama {memory.contact['name']}. "

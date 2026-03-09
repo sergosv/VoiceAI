@@ -29,7 +29,8 @@ def _decrypt_key(value: str | None) -> str | None:
             return value
         encryption_key = os.getenv("ENCRYPTION_KEY", "")
         if not encryption_key:
-            return value
+            logger.error("ENCRYPTION_KEY not set — cannot decrypt BYOK key")
+            return None
         try:
             import base64
             from cryptography.fernet import Fernet
@@ -37,7 +38,8 @@ def _decrypt_key(value: str | None) -> str | None:
             encrypted = base64.urlsafe_b64decode(value[4:])
             return f.decrypt(encrypted).decode()
         except Exception:
-            return value
+            logger.error("Failed to decrypt BYOK key — returning None")
+            return None
 
 
 # ── Nuevos dataclasses (multi-agent) ────────────────────
@@ -443,10 +445,10 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
     client_row = agent_row.get("clients") or {}
 
     agent = AgentConfig(
-        id=str(agent_row["id"]),
-        client_id=str(agent_row["client_id"]),
-        name=agent_row["name"],
-        slug=agent_row["slug"],
+        id=str(agent_row.get("id", "")),
+        client_id=str(agent_row.get("client_id", "")),
+        name=agent_row.get("name", ""),
+        slug=agent_row.get("slug", ""),
         phone_number=agent_row.get("phone_number"),
         phone_sid=agent_row.get("phone_sid"),
         livekit_sip_trunk_id=agent_row.get("livekit_sip_trunk_id"),
