@@ -1973,6 +1973,67 @@ export function Settings() {
                     </p>
                   </div>
                 </Card>
+
+                {/* Preview del widget */}
+                <Card className="space-y-4">
+                  <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                    <Eye size={16} className="text-green-400" />
+                    Previsualizar Widget
+                  </h2>
+                  <p className="text-xs text-text-muted">
+                    Prueba el widget en vivo con la voz real de tu agente. El boton aparecera en la esquina inferior derecha de esta pagina.
+                  </p>
+
+                  {!window.__voiceAIWidget ? (
+                    <Button
+                      onClick={() => {
+                        const apiBase = (import.meta.env.VITE_API_URL || window.location.origin + '/api').replace(/\/api$/, '')
+                        const s = document.createElement('script')
+                        s.src = apiBase + '/widget.js'
+                        s.setAttribute('data-agent', selectedAgent?.slug || '')
+                        s.setAttribute('data-api', apiBase + '/api')
+                        s.setAttribute('data-color', '#00f0ff')
+                        s.setAttribute('data-title', `Hablar con ${selectedAgent?.name || 'agente'}`)
+                        s.id = 'vai-preview-script'
+                        document.body.appendChild(s)
+                        // Forzar re-render para mostrar boton de cerrar
+                        setTimeout(() => setForm(f => ({ ...f, _widgetPreview: true })), 500)
+                      }}
+                      className="gap-2"
+                    >
+                      <Mic size={16} />
+                      Activar Preview del Widget
+                    </Button>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-xs text-green-400">
+                        <Check size={14} />
+                        <span>Widget activo — busca el boton en la esquina inferior derecha</span>
+                      </div>
+                      <p className="text-xs text-text-muted">
+                        Haz clic en el boton circular para iniciar una llamada de prueba con tu agente. Podras escuchar la voz configurada y probar la conversacion.
+                      </p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          // Limpiar widget
+                          const script = document.getElementById('vai-preview-script')
+                          if (script) script.remove()
+                          document.querySelectorAll('.vai-fab, .vai-tooltip, .vai-status, #vai-audio').forEach(el => el.remove())
+                          const style = document.querySelector('style')
+                          document.querySelectorAll('style').forEach(s => {
+                            if (s.textContent?.includes('vai-fab')) s.remove()
+                          })
+                          window.__voiceAIWidget = false
+                          setForm(f => ({ ...f, _widgetPreview: false }))
+                        }}
+                      >
+                        Cerrar Preview
+                      </Button>
+                    </div>
+                  )}
+                </Card>
               </div>
             )}
 
