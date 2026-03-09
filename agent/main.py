@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import signal
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -69,6 +70,19 @@ logging.setLogRecordFactory(_record_factory)
 logger = logging.getLogger("voice-ai")
 
 server = AgentServer()
+
+# ── Graceful SIGTERM handler ────────────────────────────
+_shutting_down = False
+
+
+def _handle_sigterm(signum: int, frame: object) -> None:
+    """Maneja SIGTERM para drain graceful de llamadas activas."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info("SIGTERM received — draining active calls...")
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 
 @server.rtc_session(agent_name="voice-ai-platform")
@@ -217,6 +231,49 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 file_search_store_id=None,
             ),
         )
+
+    # ========= SIGTERM: rechazar llamadas si estamos en shutdown =========
+    if _shutting_down:
+        logger.info("Rejecting call — worker shutting down")
+        return
+
+    # ========= CONCURRENT CALL LIMIT =========
+    from agent.db import get_supabase
+    sb = get_supabase()
+    active = (
+        sb.table("active_calls")
+        .select("id", count="exact")
+        .eq("client_id", config.client.id)
+        .execute()
+    )
+    active_count = active.count or 0
+    max_concurrent = config.client.max_concurrent_calls
+
+    if active_count >= max_concurrent:
+        logger.warning(
+            "Client %s exceeded concurrent call limit (%d/%d)",
+            config.client.slug, active_count, max_concurrent,
+        )
+        # Reproducir mensaje de capacidad antes de colgar
+        try:
+            session_reject = AgentSession(vad=silero.VAD.load())
+            await session_reject.start(room=ctx.room)
+            await session_reject.say(
+                "Lo sentimos, en este momento todas nuestras líneas están ocupadas. "
+                "Por favor intente de nuevo en unos minutos. Gracias.",
+                allow_interruptions=False,
+            )
+            await asyncio.sleep(3)
+        except Exception:
+            logger.exception("Error playing capacity limit message")
+        return
+
+    # Registrar llamada activa
+    sb.table("active_calls").insert({
+        "client_id": config.client.id,
+        "agent_id": config.agent.id,
+        "room_name": ctx.room.name,
+    }).execute()
 
     # ========= BILLING: Check ANTES de atender =========
     billing = CallBilling(config.client.id)
@@ -683,6 +740,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     room_name=ctx.room.name,
                 )
             )
+
+        # Limpiar registro de llamada activa
+        try:
+            sb.table("active_calls").delete().eq("room_name", ctx.room.name).execute()
+        except Exception:
+            logger.exception("Error cleaning up active_calls record")
 
         # Billing: consumir créditos por la llamada
         duration = int(

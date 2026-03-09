@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from agent.circuit_breaker import get_circuit, resolve_provider
+
 if TYPE_CHECKING:
     from agent.config_loader import AgentConfig
 
@@ -73,8 +75,10 @@ def build_stt(
         multi_lang: Lista de idiomas soportados para auto-detección.
                     Si tiene más de 1 idioma, habilita detect_language en Deepgram.
     """
-    provider = config.stt_provider
-    api_key = _validate_api_key(provider, config.stt_api_key)
+    provider = resolve_provider("stt", config.stt_provider)
+    if provider != config.stt_provider:
+        logger.warning("STT fallback: %s → %s", config.stt_provider, provider)
+    api_key = _validate_api_key(provider, config.stt_api_key if provider == config.stt_provider else None)
 
     if provider == "deepgram":
         from livekit.plugins import deepgram
@@ -119,8 +123,10 @@ def build_stt(
 
 def build_llm(config: AgentConfig):
     """Construye el LLM según el provider del cliente."""
-    provider = config.llm_provider
-    api_key = _validate_api_key(provider, config.llm_api_key)
+    provider = resolve_provider("llm", config.llm_provider)
+    if provider != config.llm_provider:
+        logger.warning("LLM fallback: %s → %s", config.llm_provider, provider)
+    api_key = _validate_api_key(provider, config.llm_api_key if provider == config.llm_provider else None)
 
     if provider == "google":
         from livekit.plugins import google
@@ -150,8 +156,10 @@ def build_llm(config: AgentConfig):
 
 def build_tts(config: AgentConfig, language: str):
     """Construye el TTS según el provider del cliente."""
-    provider = config.tts_provider
-    api_key = _validate_api_key(provider, config.tts_api_key)
+    provider = resolve_provider("tts", config.tts_provider)
+    if provider != config.tts_provider:
+        logger.warning("TTS fallback: %s → %s", config.tts_provider, provider)
+    api_key = _validate_api_key(provider, config.tts_api_key if provider == config.tts_provider else None)
     voice_id = config.voice_id if config.voice_id != "default" else None
 
     if provider == "cartesia":

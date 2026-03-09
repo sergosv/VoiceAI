@@ -16,6 +16,30 @@ DB_QUERY_TIMEOUT_S = 8.0
 logger = logging.getLogger(__name__)
 
 
+def _decrypt_key(value: str | None) -> str | None:
+    """Decrypt API key, handling both encrypted ('enc:' prefix) and legacy plaintext."""
+    if not value:
+        return value
+    try:
+        from api.crypto import decrypt_value
+        return decrypt_value(value)
+    except ImportError:
+        # Running in agent context without api module — try direct decrypt
+        if not value.startswith("enc:"):
+            return value
+        encryption_key = os.getenv("ENCRYPTION_KEY", "")
+        if not encryption_key:
+            return value
+        try:
+            import base64
+            from cryptography.fernet import Fernet
+            f = Fernet(encryption_key.encode())
+            encrypted = base64.urlsafe_b64decode(value[4:])
+            return f.decrypt(encrypted).decode()
+        except Exception:
+            return value
+
+
 # ── Nuevos dataclasses (multi-agent) ────────────────────
 
 
@@ -74,7 +98,7 @@ class AgentConfig:
 
     @property
     def tts_api_key(self) -> str | None:
-        return self.voice_config.get("api_key")
+        return _decrypt_key(self.voice_config.get("api_key"))
 
     @property
     def llm_provider(self) -> str:
@@ -82,7 +106,7 @@ class AgentConfig:
 
     @property
     def llm_api_key(self) -> str | None:
-        return self.llm_config.get("api_key")
+        return _decrypt_key(self.llm_config.get("api_key"))
 
     @property
     def stt_provider(self) -> str:
@@ -90,7 +114,7 @@ class AgentConfig:
 
     @property
     def stt_api_key(self) -> str | None:
-        return self.stt_config.get("api_key")
+        return _decrypt_key(self.stt_config.get("api_key"))
 
     @property
     def realtime_voice(self) -> str:
@@ -102,7 +126,7 @@ class AgentConfig:
 
     @property
     def realtime_api_key(self) -> str | None:
-        return self.voice_config.get("realtime_api_key")
+        return _decrypt_key(self.voice_config.get("realtime_api_key"))
 
     @property
     def voice_mode(self) -> str:
@@ -132,6 +156,7 @@ class SlimClientConfig:
     orchestration_mode: str = "simple"
     orchestrator_model: str = "gemini-2.0-flash"
     orchestrator_prompt: str | None = None
+    max_concurrent_calls: int = 5
 
 
 @dataclass(frozen=True)
@@ -469,6 +494,7 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         orchestration_mode=client_row.get("orchestration_mode", "simple"),
         orchestrator_model=client_row.get("orchestrator_model", "gemini-2.0-flash"),
         orchestrator_prompt=client_row.get("orchestrator_prompt"),
+        max_concurrent_calls=client_row.get("max_concurrent_calls", 5),
     )
 
     return ResolvedConfig(agent=agent, client=client)
@@ -583,10 +609,10 @@ def _row_to_config(row: dict) -> ClientConfig:
         stt_provider=row.get("stt_provider", "deepgram"),
         llm_provider=row.get("llm_provider", "google"),
         tts_provider=row.get("tts_provider", "cartesia"),
-        stt_api_key=row.get("stt_api_key"),
-        llm_api_key=row.get("llm_api_key"),
-        tts_api_key=row.get("tts_api_key"),
-        realtime_api_key=row.get("realtime_api_key"),
+        stt_api_key=_decrypt_key(row.get("stt_api_key")),
+        llm_api_key=_decrypt_key(row.get("llm_api_key")),
+        tts_api_key=_decrypt_key(row.get("tts_api_key")),
+        realtime_api_key=_decrypt_key(row.get("realtime_api_key")),
         realtime_voice=row.get("realtime_voice", "alloy"),
         realtime_model=row.get("realtime_model", "gpt-4o-realtime-preview"),
     )

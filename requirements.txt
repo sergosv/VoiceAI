@@ -24,8 +24,9 @@ uvicorn>=0.32
 # Twilio
 twilio>=9.0
 
-# Auth
+# Auth & Encryption
 pyjwt[crypto]>=2.8
+cryptography>=42.0
 
 # Google Calendar
 google-api-python-client>=2.100

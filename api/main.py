@@ -129,8 +129,18 @@ async def add_version_header(request: Request, call_next):  # type: ignore[no-un
 
 # Health check
 @app.get("/api/health")
-async def health_check() -> dict[str, str]:
-    return {"status": "ok", "service": "voice-ai-platform", "version": app.version}
+async def health_check() -> dict:
+    try:
+        from agent.circuit_breaker import get_all_circuits
+        circuits = get_all_circuits()
+    except Exception:
+        circuits = {}
+    return {
+        "status": "ok",
+        "service": "voice-ai-platform",
+        "version": app.version,
+        "circuits": circuits,
+    }
 
 
 # Widget JS — servido con CORS abierto para embeber en sitios externos

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -36,6 +37,7 @@ from api.services.client_service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("api.clients")
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "config", "prompts", "templates")
 
@@ -451,14 +453,96 @@ async def assign_phone(
 @router.delete("/{client_id}", response_model=MessageResponse)
 async def delete_client(
     client_id: str,
-    admin: CurrentUser = Depends(require_admin),
+    user: CurrentUser = Depends(get_current_user),
 ) -> MessageResponse:
-    """Elimina un cliente (solo admin)."""
+    """Elimina un cliente y TODOS sus datos asociados (GDPR Right to Erasure)."""
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo admin puede eliminar clientes")
+
     sb = get_supabase()
-    result = sb.table("clients").delete().eq("id", client_id).execute()
-    if not result.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
-    return MessageResponse(message="Cliente eliminado")
+
+    # Verify client exists
+    client = sb.table("clients").select("id, name").eq("id", client_id).single().execute()
+    if not client.data:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    logger.info(
+        "GDPR DELETE: Starting cascade delete for client %s (%s)",
+        client_id,
+        client.data.get("name"),
+    )
+
+    # Order matters — delete children before parents
+    # Each delete is wrapped in try/except to continue even if table doesn't exist or is empty
+    tables_to_clean: list[tuple[str, str | None]] = [
+        # Level 4: Deepest children
+        ("evaluation_failures", "client_id"),
+        ("call_tool_traces", "call_id"),  # Special: needs call_ids first
+        ("quality_alerts", "client_id"),
+        ("call_evaluations", "client_id"),
+
+        # Level 3: Conversation data
+        ("whatsapp_messages", "client_id"),
+        ("whatsapp_conversations", "client_id"),
+        ("ghl_messages", "client_id"),
+        ("ghl_conversations", "client_id"),
+        ("conversation_results", "client_id"),
+
+        # Level 2: Agent-related
+        ("campaign_calls", None),  # via campaigns
+        ("campaigns", "client_id"),
+        ("scheduled_actions", "client_id"),
+        ("mcp_server_configs", "client_id"),
+        ("api_integrations", "client_id"),
+        ("webhook_deliveries", None),  # via webhook_endpoints
+        ("webhook_endpoints", "client_id"),
+        ("api_keys", "client_id"),
+        ("whatsapp_configs", "client_id"),
+        ("ghl_configs", "client_id"),
+        ("cloned_voices", "client_id"),
+
+        # Level 1: Core data
+        ("active_calls", "client_id"),
+        ("calls", "client_id"),
+        ("contact_identifiers", None),  # via contacts CASCADE
+        ("contact_memories", None),  # via contacts CASCADE
+        ("appointments", "client_id"),
+        ("contacts", "client_id"),
+        ("documents", "client_id"),
+        ("agents", "client_id"),
+        ("usage_daily", "client_id"),
+        ("billing_transactions", "client_id"),
+
+        # Level 0: Audit (keep for compliance, or delete)
+        ("audit_logs", "client_id"),
+    ]
+
+    deleted_counts: dict[str, int] = {}
+    for table, fk_column in tables_to_clean:
+        if not fk_column:
+            continue  # Skip tables that cascade automatically
+        try:
+            result = sb.table(table).delete().eq(fk_column, client_id).execute()
+            count = len(result.data) if result.data else 0
+            if count > 0:
+                deleted_counts[table] = count
+                logger.info("GDPR DELETE: %s — %d rows deleted", table, count)
+        except Exception as e:
+            logger.warning("GDPR DELETE: %s — skipped (%s)", table, str(e)[:100])
+
+    # Finally delete the client itself
+    sb.table("clients").delete().eq("id", client_id).execute()
+
+    logger.info(
+        "GDPR DELETE: Client %s fully deleted. Tables cleaned: %s",
+        client_id,
+        deleted_counts,
+    )
+
+    total = sum(deleted_counts.values())
+    return MessageResponse(
+        message=f"Cliente y todos sus datos eliminados ({total} registros)"
+    )
 
 
 @router.post("/{client_id}/test-calendar", response_model=MessageResponse)

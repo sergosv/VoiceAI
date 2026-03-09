@@ -7,6 +7,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from api.crypto import encrypt_value
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user, require_admin
 from api.schemas import (
@@ -136,17 +137,17 @@ async def create_agent(
         "realtime_model": req.realtime_model,
     }
     if req.tts_api_key:
-        voice_config["api_key"] = req.tts_api_key
+        voice_config["api_key"] = encrypt_value(req.tts_api_key)
     if req.realtime_api_key:
-        voice_config["realtime_api_key"] = req.realtime_api_key
+        voice_config["realtime_api_key"] = encrypt_value(req.realtime_api_key)
 
     llm_config: dict = {"provider": req.llm_provider}
     if req.llm_api_key:
-        llm_config["api_key"] = req.llm_api_key
+        llm_config["api_key"] = encrypt_value(req.llm_api_key)
 
     stt_config: dict = {"provider": req.stt_provider}
     if req.stt_api_key:
-        stt_config["api_key"] = req.stt_api_key
+        stt_config["api_key"] = encrypt_value(req.stt_api_key)
 
     data = {
         "client_id": client_id,
@@ -304,6 +305,22 @@ async def update_agent(
         _validate_provider_key(llm_config.get("provider", ""), llm_config["api_key"])
     if stt_changed and stt_config.get("api_key"):
         _validate_provider_key(stt_config.get("provider", ""), stt_config["api_key"])
+
+    # Encrypt API keys before persisting
+    if "voice_config" in updates:
+        vc = updates["voice_config"]
+        if vc.get("api_key"):
+            vc["api_key"] = encrypt_value(vc["api_key"])
+        if vc.get("realtime_api_key"):
+            vc["realtime_api_key"] = encrypt_value(vc["realtime_api_key"])
+    if "llm_config" in updates:
+        lc = updates["llm_config"]
+        if lc.get("api_key"):
+            lc["api_key"] = encrypt_value(lc["api_key"])
+    if "stt_config" in updates:
+        sc = updates["stt_config"]
+        if sc.get("api_key"):
+            sc["api_key"] = encrypt_value(sc["api_key"])
 
     if not updates:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sin cambios")
