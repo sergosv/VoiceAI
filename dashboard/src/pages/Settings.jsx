@@ -1915,16 +1915,17 @@ export function Settings() {
                     <label className="text-xs font-medium text-text-secondary">Codigo de instalacion</label>
                     <div className="relative">
                       <pre className="bg-bg-primary border border-border rounded-lg p-4 text-xs text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
-{`<script src="${window.location.origin.replace('agentes.innotecnia.app', 'voiceai-production-f4e4.up.railway.app')}/widget.js"
+{`<script src="${(import.meta.env.VITE_API_URL || '/api').replace(/\/api$/, '')}/widget.js"
   data-agent="${selectedAgent?.slug || 'tu-agente'}"
-  data-api="${window.location.origin.replace('agentes.innotecnia.app', 'voiceai-production-f4e4.up.railway.app')}/api">
+  data-api="${import.meta.env.VITE_API_URL || '/api'}">
 </script>`}
                       </pre>
                       <button
                         type="button"
                         onClick={() => {
-                          const apiBase = window.location.origin.replace('agentes.innotecnia.app', 'voiceai-production-f4e4.up.railway.app')
-                          const code = `<script src="${apiBase}/widget.js"\n  data-agent="${selectedAgent?.slug || 'tu-agente'}"\n  data-api="${apiBase}/api">\n</script>`
+                          const apiUrl = import.meta.env.VITE_API_URL || '/api'
+                          const base = apiUrl.replace(/\/api$/, '')
+                          const code = `<script src="${base}/widget.js"\n  data-agent="${selectedAgent?.slug || 'tu-agente'}"\n  data-api="${apiUrl}">\n</script>`
                           navigator.clipboard.writeText(code)
                           toast.success('Codigo copiado al portapapeles')
                         }}
@@ -1987,11 +1988,12 @@ export function Settings() {
                   {!window.__voiceAIWidget ? (
                     <Button
                       onClick={() => {
-                        const apiBase = (import.meta.env.VITE_API_URL || window.location.origin + '/api').replace(/\/api$/, '')
+                        const apiUrl = import.meta.env.VITE_API_URL || '/api'
+                        const apiBase = apiUrl.replace(/\/api$/, '')
                         const s = document.createElement('script')
                         s.src = apiBase + '/widget.js'
                         s.setAttribute('data-agent', selectedAgent?.slug || '')
-                        s.setAttribute('data-api', apiBase + '/api')
+                        s.setAttribute('data-api', apiUrl)
                         s.setAttribute('data-color', '#00f0ff')
                         s.setAttribute('data-title', `Hablar con ${selectedAgent?.name || 'agente'}`)
                         s.id = 'vai-preview-script'
