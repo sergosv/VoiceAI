@@ -7,7 +7,9 @@ import csv
 import io
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from api.deps import get_supabase
@@ -113,6 +115,113 @@ async def export_contacts_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=contactos_{today_str}.csv"},
     )
+
+
+@router.post("/import/csv")
+async def import_contacts_csv(
+    file: UploadFile,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Importa contactos desde un archivo CSV."""
+    logger = logging.getLogger("api.contacts.import")
+
+    effective_client_id = user.client_id
+    if not effective_client_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="client_id requerido")
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El archivo debe ser CSV")
+
+    # Leer y decodificar el archivo
+    try:
+        raw = await file.read()
+        content = raw.decode("utf-8-sig")  # utf-8-sig maneja BOM de Excel
+    except UnicodeDecodeError:
+        try:
+            content = raw.decode("latin-1")
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo leer el archivo CSV")
+
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV vacío o sin encabezados")
+
+    # Normalizar nombres de columnas (minúsculas, sin espacios)
+    field_map: dict[str, str] = {}
+    for f in reader.fieldnames:
+        normalized = f.strip().lower()
+        if normalized in ("nombre", "name"):
+            field_map[f] = "name"
+        elif normalized in ("telefono", "teléfono", "phone"):
+            field_map[f] = "phone"
+        elif normalized in ("email", "correo"):
+            field_map[f] = "email"
+        elif normalized in ("notas", "notes"):
+            field_map[f] = "notes"
+        elif normalized in ("tags", "etiquetas"):
+            field_map[f] = "tags"
+
+    sb = get_supabase()
+    imported = 0
+    skipped = 0
+    errors: list[str] = []
+    max_rows = 1000
+
+    for i, raw_row in enumerate(reader):
+        if i >= max_rows:
+            errors.append(f"Se alcanzó el límite de {max_rows} filas. Filas restantes ignoradas.")
+            break
+
+        # Mapear columnas
+        row: dict[str, str] = {}
+        for original_key, mapped_key in field_map.items():
+            val = raw_row.get(original_key, "").strip()
+            if val:
+                row[mapped_key] = val
+
+        phone = row.get("phone", "")
+        if not phone:
+            skipped += 1
+            continue
+
+        try:
+            normalized = normalize_phone(phone)
+        except Exception:
+            normalized = phone
+
+        # Parsear tags
+        tags: list[str] = []
+        if row.get("tags"):
+            tags = [t.strip() for t in row["tags"].split(",") if t.strip()]
+
+        data = {
+            "client_id": effective_client_id,
+            "phone": normalized,
+            "name": row.get("name", ""),
+            "email": row.get("email", ""),
+            "notes": row.get("notes", ""),
+            "tags": tags,
+            "source": "csv_import",
+            "call_count": 0,
+        }
+
+        try:
+            sb.table("contacts").insert(data).execute()
+            imported += 1
+        except Exception as exc:
+            exc_str = str(exc)
+            if "duplicate" in exc_str.lower() or "unique" in exc_str.lower() or "23505" in exc_str:
+                skipped += 1
+            else:
+                row_num = i + 2  # +2: header + 0-index
+                errors.append(f"Fila {row_num} ({phone}): {exc_str[:100]}")
+                logger.warning("Error importando fila %d: %s", row_num, exc_str)
+
+    logger.info(
+        "CSV import: client=%s imported=%d skipped=%d errors=%d",
+        effective_client_id, imported, skipped, len(errors),
+    )
+    return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
 @router.get("/{contact_id}", response_model=ContactOut)

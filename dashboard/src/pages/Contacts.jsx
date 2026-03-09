@@ -12,7 +12,7 @@ import { ClientSelector } from '../components/ClientSelector'
 import { FilterBar } from '../components/FilterBar'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
-import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil, Users, Download } from 'lucide-react'
+import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil, Users, Download, Upload } from 'lucide-react'
 import { EmptyState } from '../components/EmptyState'
 
 const SOURCE_OPTIONS = [
@@ -40,6 +40,7 @@ export function Contacts() {
   const [page, setPage] = useState(1)
   const [clientId, setClientId] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [editingContact, setEditingContact] = useState(null)
   const navigate = useNavigate()
   const toast = useToast()
@@ -105,6 +106,14 @@ export function Contacts() {
             title="Exportar a CSV"
           >
             <Download size={14} className="mr-1" /> CSV
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setShowImport(true)}
+            className="text-xs"
+            title="Importar CSV"
+          >
+            <Upload size={14} className="mr-1" /> Importar
           </Button>
           <ClientSelector value={clientId} onChange={v => { setClientId(v); setPage(1) }} />
           <Button onClick={() => setShowCreate(true)}>
@@ -267,6 +276,17 @@ export function Contacts() {
         />
       )}
 
+      {/* Modal importar CSV */}
+      {showImport && (
+        <ImportContactsModal
+          onClose={() => setShowImport(false)}
+          onImported={() => {
+            setShowImport(false)
+            loadContacts()
+          }}
+        />
+      )}
+
       {/* Modal editar contacto */}
       {editingContact && (
         <EditContactModal
@@ -318,6 +338,106 @@ function CreateContactModal({ onClose, onCreated }) {
           <Button type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Crear'}</Button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+function ImportContactsModal({ onClose, onImported }) {
+  const [file, setFile] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
+  const toast = useToast()
+
+  function downloadTemplate() {
+    const csv = 'nombre,telefono,email,notas,tags\nJuan Pérez,+5215551234567,juan@email.com,Cliente VIP,"vip, frecuente"\nMaría López,5219994567890,,,nuevo\n'
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'plantilla_contactos.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleUpload() {
+    if (!file) return toast.error('Selecciona un archivo CSV')
+    setUploading(true)
+    setResult(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await api.upload('/contacts/import/csv', formData)
+      setResult(res)
+      if (res.imported > 0) {
+        toast.success(`${res.imported} contactos importados`)
+      }
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <Modal open={true} title="Importar contactos desde CSV" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-text-muted">
+          Sube un archivo CSV con las columnas: <span className="font-mono text-xs">nombre, telefono, email, notas, tags</span>.
+          Máximo 1,000 filas. Los contactos duplicados (mismo teléfono) se omiten.
+        </p>
+
+        <button
+          type="button"
+          onClick={downloadTemplate}
+          className="text-xs text-accent hover:underline cursor-pointer"
+        >
+          <Download size={12} className="inline mr-1" />
+          Descargar plantilla CSV
+        </button>
+
+        <div>
+          <label className="block text-xs text-text-muted mb-1">Archivo CSV</label>
+          <input
+            type="file"
+            accept=".csv"
+            onChange={e => setFile(e.target.files?.[0] || null)}
+            className="w-full text-sm text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-accent/10 file:text-accent file:cursor-pointer hover:file:bg-accent/20"
+          />
+        </div>
+
+        {result && (
+          <div className="bg-bg-primary border border-border rounded-lg p-3 space-y-1">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-green-400 font-medium">Importados: {result.imported}</span>
+              <span className="text-yellow-400">Omitidos: {result.skipped}</span>
+              {result.errors?.length > 0 && (
+                <span className="text-red-400">Errores: {result.errors.length}</span>
+              )}
+            </div>
+            {result.errors?.length > 0 && (
+              <div className="mt-2 max-h-32 overflow-y-auto">
+                {result.errors.map((err, i) => (
+                  <p key={i} className="text-xs text-red-400">{err}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          {result ? (
+            <Button onClick={onImported}>Cerrar</Button>
+          ) : (
+            <>
+              <Button variant="secondary" type="button" onClick={onClose}>Cancelar</Button>
+              <Button onClick={handleUpload} disabled={uploading || !file}>
+                <Upload size={14} className="mr-1" />
+                {uploading ? 'Importando...' : 'Importar'}
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
     </Modal>
   )
 }

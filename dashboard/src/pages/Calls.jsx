@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Phone, Download } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { CallsTable } from '../components/CallsTable'
 import { Card } from '../components/ui/Card'
@@ -15,21 +16,41 @@ const STATUS_OPTIONS = [
   { value: 'transferred', label: 'Transferida' },
 ]
 
+const DIRECTION_OPTIONS = [
+  { value: 'inbound', label: 'Entrante' },
+  { value: 'outbound', label: 'Saliente' },
+]
+
 export function Calls() {
+  const { user } = useAuth()
   const toast = useToast()
   const [calls, setCalls] = useState([])
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
+  const [directionFilter, setDirectionFilter] = useState('')
+  const [agentFilter, setAgentFilter] = useState('')
+  const [agents, setAgents] = useState([])
   const [clientId, setClientId] = useState(null)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+
+  // Cargar lista de agentes
+  useEffect(() => {
+    const cid = user?.role === 'admin' ? clientId : user?.client_id
+    if (!cid) { setAgents([]); setAgentFilter(''); return }
+    api.get(`/clients/${cid}/agents`)
+      .then(data => setAgents(data || []))
+      .catch(() => setAgents([]))
+  }, [clientId, user]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     const params = new URLSearchParams({ page, per_page: 20 })
     if (statusFilter) params.set('status', statusFilter)
+    if (directionFilter) params.set('direction', directionFilter)
+    if (agentFilter) params.set('agent_id', agentFilter)
     if (clientId) params.set('client_id', clientId)
     if (dateFrom) params.set('date_from', dateFrom)
     if (dateTo) params.set('date_to', dateTo)
@@ -38,10 +59,12 @@ export function Calls() {
       .catch(err => { if (!cancelled) toast.error(err.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [page, statusFilter, clientId, dateFrom, dateTo]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, statusFilter, directionFilter, agentFilter, clientId, dateFrom, dateTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleClear() {
     setStatusFilter('')
+    setDirectionFilter('')
+    setAgentFilter('')
     setDateFrom('')
     setDateTo('')
     setPage(1)
@@ -76,15 +99,35 @@ export function Calls() {
       <FilterBar
         filters={[
           { key: 'status', label: 'Estado', options: STATUS_OPTIONS },
+          { key: 'direction', label: 'Dirección', options: DIRECTION_OPTIONS },
         ]}
-        values={{ status: statusFilter }}
-        onChange={(key, value) => { setStatusFilter(value); setPage(1) }}
+        values={{ status: statusFilter, direction: directionFilter }}
+        onChange={(key, value) => {
+          if (key === 'status') { setStatusFilter(value); setPage(1) }
+          if (key === 'direction') { setDirectionFilter(value); setPage(1) }
+        }}
         dateRange
         dateFrom={dateFrom}
         dateTo={dateTo}
         onDateChange={(from, to) => { setDateFrom(from); setDateTo(to); setPage(1) }}
         onClear={handleClear}
       />
+
+      {agents.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-text-muted uppercase tracking-wide">Agente:</span>
+          <select
+            value={agentFilter}
+            onChange={e => { setAgentFilter(e.target.value); setPage(1) }}
+            className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs text-text-primary focus:border-accent outline-none"
+          >
+            <option value="">Todos los agentes</option>
+            {agents.map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <Card>
         {loading ? <PageLoader /> : <CallsTable calls={calls} />}

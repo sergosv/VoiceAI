@@ -24,6 +24,7 @@ async def list_calls(
     per_page: int = Query(20, ge=1, le=100),
     status_filter: str | None = Query(None, alias="status"),
     direction: str | None = None,
+    agent_id: str | None = Query(None, alias="agent_id"),
     date_from: date | None = None,
     date_to: date | None = None,
     client_id: str | None = None,
@@ -48,6 +49,8 @@ async def list_calls(
         query = query.eq("status", status_filter)
     if direction:
         query = query.eq("direction", direction)
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
     if date_from:
         query = query.gte("started_at", date_from.isoformat())
     if date_to:

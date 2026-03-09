@@ -24,6 +24,8 @@ const ROUTE_LABELS = {
   'looptalk': 'LoopTalk',
   'create-agent': 'Crear Agente',
   'ghl': 'GHL Inbox',
+  'proactive': 'Acciones Proactivas',
+  'conversation-results': 'Resultados',
 }
 
 export function Breadcrumbs() {
