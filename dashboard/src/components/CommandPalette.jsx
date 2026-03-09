@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Search, LayoutDashboard, Phone, UserRound, Calendar, Megaphone,
   MessageCircle, FileText, Plug, CreditCard, Bot, Settings, Users,
-  DollarSign, ArrowRight, Bell, ClipboardList,
+  DollarSign, ArrowRight, Bell, ClipboardList, Shield,
 } from 'lucide-react'
 
 const COMMANDS = [
@@ -24,6 +24,7 @@ const COMMANDS = [
   { id: 'create-agent', label: 'Crear Agente', desc: 'Wizard para nuevo agente', icon: Bot, path: '/create-agent', keywords: 'crear agente wizard nuevo' },
   { id: 'proactive', label: 'Acciones Proactivas', desc: 'Acciones programadas automaticas', icon: Bell, path: '/proactive', keywords: 'proactivo acciones programadas callback seguimiento' },
   { id: 'conversation-results', label: 'Resultados', desc: 'Resultados de encuestas, quizzes y negociaciones', icon: ClipboardList, path: '/conversation-results', keywords: 'resultados encuesta quiz negociacion entrevista survey' },
+  { id: 'quality', label: 'Monitor de Calidad', desc: 'Deteccion de fallos silenciosos', icon: Shield, path: '/quality', keywords: 'calidad quality fallos errores alucinaciones monitor evaluacion' },
 ]
 
 const ADMIN_COMMANDS = [

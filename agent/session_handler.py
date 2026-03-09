@@ -58,6 +58,7 @@ class SessionHandler:
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
         self._agent_turns: list[dict] = []
+        self._tool_traces: list[dict] = []
         self._sentiment_summary: dict | None = None
         self._intent_summary: dict | None = None
         self._mode_results: dict | None = None
@@ -77,6 +78,26 @@ class SessionHandler:
     def set_mode_results(self, results: dict) -> None:
         """Establece los resultados del modo de conversación (survey/quiz/negotiation/interview)."""
         self._mode_results = results
+
+    def add_tool_trace(
+        self,
+        tool_name: str,
+        params: dict | None = None,
+        result: dict | None = None,
+        duration_ms: int | None = None,
+        success: bool = True,
+        error_message: str | None = None,
+    ) -> None:
+        """Registra la ejecución de un tool call para trazabilidad."""
+        self._tool_traces.append({
+            "tool_name": tool_name,
+            "params": params or {},
+            "result": result or {},
+            "duration_ms": duration_ms,
+            "success": success,
+            "error_message": error_message,
+            "turn_index": len(self._transcript),
+        })
 
     def add_transcript_entry(self, role: str, text: str) -> None:
         """Agrega una entrada a la transcripción."""
@@ -318,6 +339,21 @@ class SessionHandler:
                     client_id=self._client_id,
                     business_type=self._config.client.business_type,
                     phone_for_contact=phone_for_contact,
+                )
+            )
+
+        # Lanzar detección de fallos silenciosos (fire-and-forget)
+        if call_id and len(self._transcript) >= 2:
+            asyncio.create_task(
+                _async_failure_detection(
+                    call_id=call_id,
+                    client_id=self._client_id,
+                    agent_id=self._agent_id,
+                    transcript=list(self._transcript),
+                    system_prompt=self._config.agent.system_prompt,
+                    tool_traces=list(self._tool_traces),
+                    agent_name=self._config.agent.name,
+                    agent_type=self._config.agent.agent_type,
                 )
             )
 
@@ -686,3 +722,130 @@ def _update_campaign_counters(sb: Client, campaign_id: str) -> None:
         "completed_contacts": completed.count or 0,
         "successful_contacts": successful.count or 0,
     }).eq("id", campaign_id).execute()
+
+
+async def _async_failure_detection(
+    call_id: str,
+    client_id: str,
+    agent_id: str,
+    transcript: list[dict],
+    system_prompt: str,
+    tool_traces: list[dict],
+    agent_name: str,
+    agent_type: str,
+) -> None:
+    """Ejecuta detección de fallos silenciosos post-llamada y guarda resultados."""
+    try:
+        from agent.failure_detector import detect_failures
+
+        # Construir transcript como texto
+        transcript_text = "\n".join(
+            f"{t['role']}: {t['text']}" for t in transcript if t.get("text")
+        )
+        if len(transcript_text) < 50:
+            return
+
+        # Convertir tool traces al formato que espera el detector
+        tool_calls = [
+            {"name": t["tool_name"], "params": t.get("params", {}), "result": t.get("result", {})}
+            for t in tool_traces
+        ] if tool_traces else None
+
+        analysis = await detect_failures(
+            transcript=transcript_text,
+            system_prompt=system_prompt,
+            tool_calls=tool_calls,
+            agent_name=agent_name,
+            agent_type=agent_type,
+        )
+
+        if analysis.overall_score < 0:
+            logger.warning("Failure detection returned error for call %s: %s", call_id, analysis.summary)
+            return
+
+        sb = _get_supabase()
+
+        # Guardar tool traces en DB
+        if tool_traces:
+            trace_rows = [
+                {
+                    "call_id": call_id,
+                    "tool_name": t["tool_name"],
+                    "tool_params": t.get("params", {}),
+                    "tool_result": t.get("result", {}),
+                    "duration_ms": t.get("duration_ms"),
+                    "success": t.get("success", True),
+                    "error_message": t.get("error_message"),
+                    "turn_index": t.get("turn_index"),
+                }
+                for t in tool_traces
+            ]
+            try:
+                sb.table("call_tool_traces").insert(trace_rows).execute()
+            except Exception:
+                logger.exception("Error guardando tool traces para call %s", call_id)
+
+        # Guardar evaluación
+        eval_data = {
+            "call_id": call_id,
+            "client_id": client_id,
+            "agent_id": agent_id,
+            "overall_score": analysis.overall_score,
+            "failures_found": len(analysis.failures),
+            "critical_failures": analysis.critical_count,
+            "evaluation_data": analysis.to_dict(),
+            "status": "completed",
+        }
+        result = sb.table("call_evaluations").insert(eval_data).execute()
+        evaluation_id = result.data[0]["id"] if result.data else None
+
+        # Guardar fallos individuales
+        if evaluation_id and analysis.failures:
+            failure_rows = [
+                {
+                    "evaluation_id": evaluation_id,
+                    "call_id": call_id,
+                    "client_id": client_id,
+                    "failure_type": f.failure_type.value,
+                    "severity": f.severity.value,
+                    "description": f.description,
+                    "evidence": f.evidence,
+                    "turn_index": f.turn_index,
+                    "recommendation": f.recommendation,
+                }
+                for f in analysis.failures
+            ]
+            sb.table("evaluation_failures").insert(failure_rows).execute()
+
+        # Generar alerta si hay fallos críticos o altos
+        if evaluation_id and (analysis.critical_count > 0 or analysis.high_count > 0):
+            severity = "critical" if analysis.critical_count > 0 else "high"
+            alert = {
+                "client_id": client_id,
+                "agent_id": agent_id,
+                "call_id": call_id,
+                "evaluation_id": evaluation_id,
+                "alert_type": "critical_failure" if severity == "critical" else "high_failure",
+                "severity": severity,
+                "title": f"Fallo {'crítico' if severity == 'critical' else 'importante'} detectado en {agent_name}",
+                "description": analysis.summary,
+                "metadata": {
+                    "score": analysis.overall_score,
+                    "critical": analysis.critical_count,
+                    "high": analysis.high_count,
+                    "failure_types": list(set(f.failure_type.value for f in analysis.failures)),
+                },
+            }
+            sb.table("quality_alerts").insert(alert).execute()
+            logger.warning(
+                "QUALITY ALERT [%s]: call=%s score=%d critical=%d — %s",
+                severity.upper(), call_id, analysis.overall_score,
+                analysis.critical_count, analysis.summary,
+            )
+
+        logger.info(
+            "Failure detection completada: call=%s score=%d failures=%d",
+            call_id, analysis.overall_score, len(analysis.failures),
+        )
+    except Exception:
+        logger.exception("Error en failure detection para call %s", call_id)

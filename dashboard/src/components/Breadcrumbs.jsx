@@ -26,6 +26,7 @@ const ROUTE_LABELS = {
   'ghl': 'GHL Inbox',
   'proactive': 'Acciones Proactivas',
   'conversation-results': 'Resultados',
+  'quality': 'Monitor de Calidad',
 }
 
 export function Breadcrumbs() {

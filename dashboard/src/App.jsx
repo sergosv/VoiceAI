@@ -37,6 +37,7 @@ const WhatsAppInbox = lazy(() => import('./pages/WhatsAppInbox').then(m => ({ de
 const GHLInbox = lazy(() => import('./pages/GHLInbox').then(m => ({ default: m.GHLInbox })))
 const LoopTalk = lazy(() => import('./pages/LoopTalk').then(m => ({ default: m.LoopTalk })))
 const ProactiveActions = lazy(() => import('./pages/ProactiveActions').then(m => ({ default: m.ProactiveActions })))
+const QualityMonitor = lazy(() => import('./pages/QualityMonitor').then(m => ({ default: m.QualityMonitor })))
 const ConversationResults = lazy(() => import('./pages/ConversationResults').then(m => ({ default: m.ConversationResults })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
@@ -77,6 +78,7 @@ export default function App() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/looptalk" element={<LoopTalk />} />
                 <Route path="/proactive" element={<ProactiveActions />} />
+                <Route path="/quality" element={<QualityMonitor />} />
                 <Route path="/conversation-results" element={<ConversationResults />} />
 
                 {/* Admin — protegido */}

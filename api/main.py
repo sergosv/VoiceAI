@@ -26,12 +26,13 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 from api.routes import (
     agents, ai, analytics, api_integrations, api_keys, auth, billing, calls, campaigns,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
-    documents, evolution, ghl, looptalk, mcp, proactive, templates, v1, voices,
-    webhook_management, webhooks, whatsapp, whatsapp_webhooks, widget,
+    documents, evaluations, evolution, ghl, looptalk, mcp, proactive, templates, v1,
+    voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks, widget,
 )
 from api.services.chat_store import start_cleanup_loop
 from api.services.conversation_cleanup import start_conversation_cleanup
 from api.services.proactive_worker import start_proactive_worker
+from api.services.call_evaluator import start_evaluation_worker
 
 # Rate limiter global
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_cleanup_loop()
     start_proactive_worker()
     start_conversation_cleanup()
+    start_evaluation_worker()
     yield
 
 
@@ -178,6 +180,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(widget.router, prefix="/api/widget", tags=["widget"])
 app.include_router(looptalk.router, prefix="/api/looptalk", tags=["looptalk"])
 app.include_router(proactive.router, prefix="/api/proactive", tags=["proactive"])
+app.include_router(evaluations.router, prefix="/api/evaluations", tags=["evaluations"])
 app.include_router(conversation_results.router, prefix="/api", tags=["conversation-results"])
 app.include_router(api_keys.router, prefix="/api", tags=["api-keys"])
 app.include_router(webhook_management.router, prefix="/api", tags=["webhook-management"])
