@@ -20,6 +20,7 @@ const navGroups = [
     items: [
       { to: '/calls', icon: Phone, label: 'Llamadas' },
       { to: '/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
+      { to: '/ghl', icon: Plug, label: 'GHL Inbox' },
       { to: '/campaigns', icon: Megaphone, label: 'Campanas' },
     ],
   },

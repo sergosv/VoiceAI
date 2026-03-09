@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 
 from api.cost_rates import build_cost_breakdown
 from api.deps import get_supabase
@@ -105,6 +108,69 @@ async def get_call_stats(
         avg_duration_seconds=round(total_seconds / len(rows), 1) if rows else 0,
         calls_today=len(today_rows),
         minutes_today=round(today_seconds / 60, 2),
+    )
+
+
+@router.get("/export/csv")
+async def export_calls_csv(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    status_filter: str | None = Query(None, alias="status"),
+) -> Response:
+    """Exporta llamadas a CSV."""
+    sb = get_supabase()
+    query = sb.table("calls").select(
+        "id, direction, caller_number, callee_number, duration_seconds, "
+        "cost_total, status, summary, sentimiento, resumen_ia, started_at, metadata"
+    ).order("started_at", desc=True)
+
+    if user.role == "client":
+        if not user.client_id:
+            return StreamingResponse(io.StringIO(""), media_type="text/csv")
+        query = query.eq("client_id", user.client_id)
+    elif client_id:
+        query = query.eq("client_id", client_id)
+
+    if status_filter:
+        query = query.eq("status", status_filter)
+    if date_from:
+        query = query.gte("started_at", date_from.isoformat())
+    if date_to:
+        end = datetime.combine(date_to, datetime.max.time()).isoformat()
+        query = query.lte("started_at", end)
+
+    query = query.limit(5000)
+    result = query.execute()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Fecha", "Dirección", "Número origen", "Número destino",
+        "Duración (s)", "Costo", "Estado", "Sentimiento", "Resumen", "Agente",
+    ])
+    for row in result.data:
+        meta = row.get("metadata") or {}
+        writer.writerow([
+            row.get("started_at", ""),
+            row.get("direction", ""),
+            row.get("caller_number", ""),
+            row.get("callee_number", ""),
+            row.get("duration_seconds", 0),
+            row.get("cost_total", 0),
+            row.get("status", ""),
+            row.get("sentimiento", ""),
+            row.get("resumen_ia") or row.get("summary") or "",
+            meta.get("agent_name", ""),
+        ])
+
+    output.seek(0)
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=llamadas_{today_str}.csv"},
     )
 
 

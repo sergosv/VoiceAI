@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Phone } from 'lucide-react'
+import { Phone, Download } from 'lucide-react'
 import { api } from '../lib/api'
 import { useToast } from '../context/ToastContext'
 import { CallsTable } from '../components/CallsTable'
@@ -53,7 +53,25 @@ export function Calls() {
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Phone size={24} /> Llamadas
         </h1>
-        <ClientSelector value={clientId} onChange={v => { setClientId(v); setPage(1) }} />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const params = new URLSearchParams()
+              if (clientId) params.set('client_id', clientId)
+              if (statusFilter) params.set('status', statusFilter)
+              if (dateFrom) params.set('date_from', dateFrom)
+              if (dateTo) params.set('date_to', dateTo)
+              const url = `${import.meta.env.VITE_API_URL || '/api'}/calls/export/csv?${params}`
+              window.open(url, '_blank')
+            }}
+            className="text-xs"
+            title="Exportar a CSV"
+          >
+            <Download size={14} className="mr-1" /> CSV
+          </Button>
+          <ClientSelector value={clientId} onChange={v => { setClientId(v); setPage(1) }} />
+        </div>
       </div>
 
       <FilterBar

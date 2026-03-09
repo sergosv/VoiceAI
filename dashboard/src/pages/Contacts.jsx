@@ -12,7 +12,7 @@ import { ClientSelector } from '../components/ClientSelector'
 import { FilterBar } from '../components/FilterBar'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
-import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil, Users } from 'lucide-react'
+import { UserPlus, Search, Phone, Mail, PhoneCall, Clock, Trash2, Pencil, Users, Download } from 'lucide-react'
 import { EmptyState } from '../components/EmptyState'
 
 const SOURCE_OPTIONS = [
@@ -94,6 +94,19 @@ export function Contacts() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Contactos</h1>
         <div className="flex items-center gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => {
+              const params = new URLSearchParams()
+              if (clientId) params.set('client_id', clientId)
+              const url = `${import.meta.env.VITE_API_URL || '/api'}/contacts/export/csv?${params}`
+              window.open(url, '_blank')
+            }}
+            className="text-xs"
+            title="Exportar a CSV"
+          >
+            <Download size={14} className="mr-1" /> CSV
+          </Button>
           <ClientSelector value={clientId} onChange={v => { setClientId(v); setPage(1) }} />
           <Button onClick={() => setShowCreate(true)}>
             <UserPlus size={16} className="mr-1" /> Nuevo

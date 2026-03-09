@@ -23,6 +23,7 @@ const ROUTE_LABELS = {
   'flow': 'Flow Builder',
   'looptalk': 'LoopTalk',
   'create-agent': 'Crear Agente',
+  'ghl': 'GHL Inbox',
 }
 
 export function Breadcrumbs() {

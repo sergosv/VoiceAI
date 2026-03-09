@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones } from 'lucide-react'
 import { api } from '../lib/api'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
@@ -171,6 +171,18 @@ export function CallDetail() {
             <>
               <h2 className="text-sm font-semibold text-text-secondary pt-2">Resumen</h2>
               <p className="text-sm text-text-secondary">{call.summary}</p>
+            </>
+          )}
+
+          {/* Grabación */}
+          {call.recording_url && (
+            <>
+              <h2 className="text-sm font-semibold text-text-secondary pt-2 flex items-center gap-2">
+                <Headphones size={14} className="text-accent" /> Grabacion
+              </h2>
+              <audio controls className="w-full mt-1" preload="metadata">
+                <source src={call.recording_url} />
+              </audio>
             </>
           )}
         </Card>

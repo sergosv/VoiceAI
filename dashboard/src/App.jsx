@@ -34,6 +34,7 @@ const Billing = lazy(() => import('./pages/Billing').then(m => ({ default: m.Bil
 const PricingConfig = lazy(() => import('./pages/admin/PricingConfig').then(m => ({ default: m.PricingConfig })))
 const FlowBuilder = lazy(() => import('./pages/FlowBuilder').then(m => ({ default: m.FlowBuilder })))
 const WhatsAppInbox = lazy(() => import('./pages/WhatsAppInbox').then(m => ({ default: m.WhatsAppInbox })))
+const GHLInbox = lazy(() => import('./pages/GHLInbox').then(m => ({ default: m.GHLInbox })))
 const LoopTalk = lazy(() => import('./pages/LoopTalk').then(m => ({ default: m.LoopTalk })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
@@ -67,6 +68,7 @@ export default function App() {
                 <Route path="/integrations/mcp" element={<McpServers />} />
                 <Route path="/integrations/api" element={<ApiIntegrations />} />
                 <Route path="/whatsapp" element={<WhatsAppInbox />} />
+                <Route path="/ghl" element={<GHLInbox />} />
                 <Route path="/agents/:agentId" element={<Settings />} />
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/create-agent" element={<AgentWizard />} />

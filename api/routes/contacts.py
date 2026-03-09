@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
@@ -62,6 +66,53 @@ async def list_contacts(
 
     result = query.execute()
     return [ContactOut(**row) for row in result.data]
+
+
+@router.get("/export/csv")
+async def export_contacts_csv(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+) -> Response:
+    """Exporta contactos a CSV."""
+    sb = get_supabase()
+    query = sb.table("contacts").select("*").order("created_at", desc=True)
+
+    if user.role == "client":
+        if not user.client_id:
+            return StreamingResponse(io.StringIO(""), media_type="text/csv")
+        query = query.eq("client_id", user.client_id)
+    elif client_id:
+        query = query.eq("client_id", client_id)
+
+    query = query.limit(10000)
+    result = query.execute()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Nombre", "Teléfono", "Email", "Fuente",
+        "Llamadas", "Tags", "Notas", "Creado",
+    ])
+    for row in result.data:
+        tags = ", ".join(row.get("tags") or [])
+        writer.writerow([
+            row.get("name", ""),
+            row.get("phone", ""),
+            row.get("email", ""),
+            row.get("source", ""),
+            row.get("call_count", 0),
+            tags,
+            row.get("notes", ""),
+            row.get("created_at", ""),
+        ])
+
+    output.seek(0)
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=contactos_{today_str}.csv"},
+    )
 
 
 @router.get("/{contact_id}", response_model=ContactOut)

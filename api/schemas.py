@@ -413,6 +413,10 @@ class CallDetailOut(CallOut):
     siguiente_accion: str | None = None
     preguntas_sin_respuesta: list[str] | None = None
     cost_breakdown: CostBreakdown | None = None
+    recording_url: str | None = None
+    sentiment_realtime: dict | None = None
+    intent_realtime: dict | None = None
+    quality_score: int | None = None
 
 
 class CallStatsOut(BaseModel):
