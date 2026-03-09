@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 
 from supabase import Client
 
@@ -40,6 +42,39 @@ async def close_conversation(
             "Conversación %s cerrada (%s, by=%s, result=%s)",
             conversation_id[:8], table, closed_by, result or "n/a",
         )
+
+        # Dispatch webhook: conversation.closed (fire-and-forget)
+        try:
+            from api.services.webhook_service import dispatch_event as _wh_dispatch
+
+            # Obtener client_id de la conversación via config
+            config_table = "whatsapp_configs" if "whatsapp" in table else "ghl_configs"
+            conv_row = (
+                sb.table(table).select("config_id")
+                .eq("id", conversation_id).limit(1).execute()
+            )
+            if conv_row.data:
+                cfg_row = (
+                    sb.table(config_table).select("client_id")
+                    .eq("id", conv_row.data[0]["config_id"]).limit(1).execute()
+                )
+                if cfg_row.data:
+                    client_id = cfg_row.data[0]["client_id"]
+                    asyncio.create_task(_wh_dispatch(
+                        client_id,
+                        "conversation.closed",
+                        {
+                            "client_id": client_id,
+                            "conversation_id": conversation_id,
+                            "table": table,
+                            "closed_by": closed_by,
+                            "result": result,
+                            "summary": summary,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    ))
+        except Exception:
+            logger.exception("Error dispatching conversation.closed webhook")
     except Exception:
         logger.exception("Error cerrando conversación %s", conversation_id)
 

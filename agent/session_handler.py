@@ -153,6 +153,30 @@ class SessionHandler:
         call_result = sb.table("calls").insert(call_data).execute()
         call_id = call_result.data[0]["id"] if call_result.data else None
 
+        # Dispatch webhook: call.completed (fire-and-forget)
+        try:
+            from agent.webhook_dispatch import dispatch_event as _dispatch
+
+            asyncio.create_task(_dispatch(
+                self._client_id,
+                "call.completed",
+                {
+                    "client_id": self._client_id,
+                    "call_id": call_id,
+                    "agent_id": self._agent_id,
+                    "room_name": self._room_name,
+                    "direction": self._direction,
+                    "caller_number": self._caller_number,
+                    "callee_number": self._callee_number,
+                    "duration_seconds": duration_seconds,
+                    "cost_total": float(total_cost),
+                    "status": status,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            ))
+        except Exception:
+            logger.exception("Error dispatching call.completed webhook")
+
         # Guardar resultados de modo estructurado si aplica
         if self._mode_results and call_id:
             try:

@@ -242,6 +242,25 @@ async def _process_locked(
     # 6. Guardar mensaje inbound
     await _save_message(sb, conv_id, msg, "inbound")
 
+    # Dispatch webhook: message.received (fire-and-forget)
+    try:
+        from api.services.webhook_service import dispatch_event as _wh_dispatch
+
+        asyncio.create_task(_wh_dispatch(
+            client_id,
+            "message.received",
+            {
+                "client_id": client_id,
+                "conversation_id": conv_id,
+                "channel": "whatsapp",
+                "remote_phone": msg.remote_phone,
+                "content": msg.text[:500],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        ))
+    except Exception:
+        logger.exception("Error dispatching message.received webhook")
+
     # 7. Ejecutar chat_turn
     try:
         agent_text, tool_calls = await chat_turn(
@@ -270,6 +289,26 @@ async def _process_locked(
     await _save_message(
         sb, conv_id, out_msg, "outbound", tool_calls=tool_calls or None
     )
+
+    # Dispatch webhook: message.sent (fire-and-forget)
+    try:
+        from api.services.webhook_service import dispatch_event as _wh_dispatch
+
+        asyncio.create_task(_wh_dispatch(
+            client_id,
+            "message.sent",
+            {
+                "client_id": client_id,
+                "conversation_id": conv_id,
+                "channel": "whatsapp",
+                "remote_phone": msg.remote_phone,
+                "content": agent_text[:500],
+                "tool_calls": [tc["name"] for tc in (tool_calls or [])],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        ))
+    except Exception:
+        logger.exception("Error dispatching message.sent webhook")
 
     # 10. Persistir historial actualizado
     serialized = serialize_history(conversation.history)

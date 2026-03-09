@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -28,6 +30,10 @@ def _get_gemini() -> genai.Client:
     if _gemini is None:
         _gemini = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
     return _gemini
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ── Tool declarations ─────────────────────────────────────
@@ -649,6 +655,24 @@ async def chat_turn(
         types.Content(role="user", parts=[types.Part.from_text(text=user_message)])
     )
 
+    # Dispatch webhook: message.received (fire-and-forget)
+    try:
+        from api.services.webhook_service import dispatch_event as _wh_dispatch
+
+        asyncio.create_task(_wh_dispatch(
+            conversation.client_id,
+            "message.received",
+            {
+                "client_id": conversation.client_id,
+                "conversation_id": conversation.id,
+                "channel": "chat",
+                "content": user_message,
+                "timestamp": _now_iso(),
+            },
+        ))
+    except Exception:
+        logger.exception("Error dispatching message.received webhook")
+
     tool_declarations = _build_tool_declarations(
         config, api_integrations=api_integrations, mcp_servers=mcp_servers,
     )
@@ -686,6 +710,25 @@ async def chat_turn(
             if is_action_node and last_tool_result is not None:
                 extracted = "_error_" if last_tool_is_error else last_tool_result
                 _advance_flow(conversation, "", extracted_value=extracted)
+
+            # Dispatch webhook: message.sent (fire-and-forget)
+            try:
+                from api.services.webhook_service import dispatch_event as _wh_dispatch
+
+                asyncio.create_task(_wh_dispatch(
+                    conversation.client_id,
+                    "message.sent",
+                    {
+                        "client_id": conversation.client_id,
+                        "conversation_id": conversation.id,
+                        "channel": "chat",
+                        "content": text[:500],
+                        "tool_calls": [tc["name"] for tc in tool_calls_log],
+                        "timestamp": _now_iso(),
+                    },
+                ))
+            except Exception:
+                logger.exception("Error dispatching message.sent webhook")
 
             return text, tool_calls_log
 

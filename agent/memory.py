@@ -6,6 +6,7 @@ a través de todos los canales (voz, WhatsApp, web chat).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -156,6 +157,25 @@ class AgentMemory:
                 self.memories = []
                 self.identifiers = []
                 logger.info("Contacto nuevo creado: %s (%s)", contact_id, identifier_value)
+
+                # Dispatch webhook: contact.created (fire-and-forget)
+                try:
+                    from agent.webhook_dispatch import dispatch_event as _dispatch
+
+                    asyncio.create_task(_dispatch(
+                        self._client_id,
+                        "contact.created",
+                        {
+                            "client_id": self._client_id,
+                            "contact_id": contact_id,
+                            "identifier_type": identifier_type,
+                            "identifier_value": identifier_value,
+                            "channel": self._channel,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    ))
+                except Exception:
+                    logger.exception("Error dispatching contact.created webhook")
 
         return self.contact_id
 
@@ -482,6 +502,26 @@ class AgentMemory:
         # 5. Actualizar perfil del contacto
         try:
             await self._update_contact_profile(analysis, embedding)
+
+            # Dispatch webhook: contact.updated (fire-and-forget)
+            try:
+                updated_fields = []
+                if analysis.get("contact_name") and not (self.contact or {}).get("name"):
+                    updated_fields.append("name")
+                if analysis.get("sentiment"):
+                    updated_fields.append("average_sentiment")
+                if analysis.get("summary"):
+                    updated_fields.append("summary")
+                if analysis.get("preferences"):
+                    updated_fields.append("preferences")
+                if analysis.get("key_facts"):
+                    updated_fields.append("key_facts")
+
+                asyncio.create_task(_dispatch_contact_updated(
+                    self._client_id, self.contact_id, updated_fields, self._channel,
+                ))
+            except Exception:
+                logger.exception("Error dispatching contact.updated webhook")
         except Exception:
             logger.exception("Error actualizando perfil de contacto")
 
@@ -703,3 +743,30 @@ Si no hay contradicciones, responde: {{"contradictions": []}}"""
         except (json.JSONDecodeError, Exception) as e:
             logger.error("Error detectando contradicciones: %s", e)
             return []
+
+
+async def _dispatch_contact_updated(
+    client_id: str,
+    contact_id: str | None,
+    updated_fields: list[str],
+    channel: str,
+) -> None:
+    """Fire-and-forget dispatch de contact.updated."""
+    if not contact_id:
+        return
+    try:
+        from agent.webhook_dispatch import dispatch_event
+
+        await dispatch_event(
+            client_id,
+            "contact.updated",
+            {
+                "client_id": client_id,
+                "contact_id": contact_id,
+                "updated_fields": updated_fields,
+                "channel": channel,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception:
+        logger.exception("Error in _dispatch_contact_updated")
