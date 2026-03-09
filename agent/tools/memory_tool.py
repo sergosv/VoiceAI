@@ -63,8 +63,14 @@ async def recall_memory_search(
             channel = mem.get("channel", "")
             created = mem.get("created_at", "")[:10]
             similarity = mem.get("similarity", 0)
+            recency_score = mem.get("recency_score", similarity)
+            relevance_label = (
+                "alta" if recency_score >= 0.7
+                else "media" if recency_score >= 0.4
+                else "baja"
+            )
             lines.append(
-                f"- [{created}] ({channel}): {summary}"
+                f"- [{created}] ({channel}, relevancia: {relevance_label}): {summary}"
             )
             # Incluir action_items si hay
             action_items = mem.get("action_items") or []

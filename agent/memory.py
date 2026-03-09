@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import datetime, timezone
 
@@ -222,8 +223,17 @@ class AgentMemory:
             logger.exception("Error cargando identificadores")
             self.identifiers = []
 
-    def build_memory_context(self) -> str:
+    def build_memory_context(
+        self, system_prompt: str | None = None
+    ) -> str:
         """Construye el bloque de contexto de memoria para el prompt.
+
+        Si se proporciona system_prompt, usa búsqueda semántica con temporal decay
+        para obtener memorias relevantes al contexto del agente en vez de solo
+        las más recientes.
+
+        Args:
+            system_prompt: Prompt del sistema del agente para re-ranking contextual.
 
         Returns:
             String con el contexto de memoria, vacío si el contacto es nuevo.
@@ -271,10 +281,12 @@ class AgentMemory:
         if summary:
             lines.append(f"- Resumen: {summary}")
 
-        # Memorias recientes (últimas 3)
-        if self.memories:
+        # Memorias: usar las pre-cargadas, re-rankear si hay system_prompt
+        memories_to_show = self._rerank_memories(self.memories, system_prompt)
+
+        if memories_to_show:
             lines.append("\n### Interacciones recientes")
-            for mem in self.memories[:3]:
+            for mem in memories_to_show[:3]:
                 created = mem.get("created_at", "")
                 if created:
                     try:
@@ -292,8 +304,8 @@ class AgentMemory:
 
                 lines.append(f"- {date_str} {icon}: {mem.get('summary', '')}{sentiment_str}")
 
-                # Action items pendientes (solo de la última memoria)
-                if mem == self.memories[0]:
+                # Action items pendientes (solo de la primera memoria mostrada)
+                if mem == memories_to_show[0]:
                     action_items = mem.get("action_items") or []
                     if action_items:
                         items_str = "; ".join(str(a) for a in action_items[:3])
@@ -306,6 +318,69 @@ class AgentMemory:
         )
 
         return "\n".join(lines)
+
+    def _rerank_memories(
+        self, memories: list[dict], system_prompt: str | None = None
+    ) -> list[dict]:
+        """Re-rankea memorias combinando recencia y relevancia temática.
+
+        Usa keyword overlap entre los topics de cada memoria y las palabras
+        clave del system_prompt del agente para calcular un score de relevancia.
+
+        Args:
+            memories: Lista de memorias cargadas.
+            system_prompt: Prompt del sistema para extraer keywords.
+
+        Returns:
+            Lista re-rankeada (top 5).
+        """
+        if not memories or len(memories) <= 5:
+            return memories
+
+        # Extraer keywords del system_prompt (palabras de 4+ chars, únicas, lowercase)
+        prompt_keywords: set[str] = set()
+        if system_prompt:
+            prompt_keywords = {
+                w.lower()
+                for w in system_prompt.split()
+                if len(w) >= 4 and w.isalpha()
+            }
+
+        scored: list[tuple[float, dict]] = []
+        now = datetime.now(timezone.utc)
+
+        for mem in memories:
+            # Score de recencia: exp(-age_days / 180) — mismo decay que el RPC
+            created = mem.get("created_at", "")
+            age_days = 0.0
+            if created:
+                try:
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    age_days = (now - dt).total_seconds() / 86400
+                except (ValueError, TypeError):
+                    pass
+            recency = math.exp(-age_days / 180)
+
+            # Score de relevancia: overlap de topics con keywords del prompt
+            relevance = 0.0
+            if prompt_keywords:
+                topics = mem.get("topics") or []
+                topic_words: set[str] = set()
+                for topic in topics:
+                    if isinstance(topic, str):
+                        topic_words.update(
+                            w.lower() for w in topic.split() if len(w) >= 4
+                        )
+                if topic_words:
+                    overlap = len(prompt_keywords & topic_words)
+                    relevance = overlap / max(len(prompt_keywords), 1)
+
+            # Score combinado: 60% recencia + 40% relevancia
+            combined = 0.6 * recency + 0.4 * relevance
+            scored.append((combined, mem))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [mem for _, mem in scored[:5]]
 
     async def store(
         self,
@@ -385,13 +460,32 @@ class AgentMemory:
             logger.exception("Error insertando memoria en DB: %s", e)
             return
 
-        # 4. Actualizar perfil del contacto
+        # 4. Detección de contradicciones
+        try:
+            if self.contact and (self.contact.get("key_facts") or self.contact.get("preferences")):
+                contradictions = await self._detect_contradictions(analysis, self.contact)
+                if contradictions:
+                    # Guardar contradicciones en la memoria recién creada
+                    memory_id = result.data[0]["id"] if result.data else None
+                    if memory_id:
+                        self._sb.table("memories").update(
+                            {"contradiction_flags": contradictions}
+                        ).eq("id", memory_id).execute()
+                        logger.info(
+                            "Contradicciones guardadas en memoria %s: %d",
+                            memory_id,
+                            len(contradictions),
+                        )
+        except Exception:
+            logger.exception("Error en detección de contradicciones")
+
+        # 5. Actualizar perfil del contacto
         try:
             await self._update_contact_profile(analysis, embedding)
         except Exception:
             logger.exception("Error actualizando perfil de contacto")
 
-        # 5. Vincular identificadores detectados
+        # 6. Vincular identificadores detectados
         try:
             await self._link_detected_identifiers(analysis)
         except Exception:
@@ -533,3 +627,79 @@ Responde SOLO con JSON válido, sin markdown:
                 )
             except Exception:
                 logger.exception("Error vinculando identificador %s=%s", id_type, id_value)
+
+    async def _detect_contradictions(
+        self, new_memory_data: dict, contact: dict
+    ) -> list[dict]:
+        """Detecta contradicciones entre datos nuevos y el perfil existente.
+
+        Compara key_facts y preferences del contacto con los datos extraídos
+        de la nueva conversación usando Gemini Flash.
+
+        Args:
+            new_memory_data: Datos analizados de la conversación nueva.
+            contact: Perfil actual del contacto.
+
+        Returns:
+            Lista de contradicciones detectadas: [{old_fact, new_fact, field}]
+        """
+        old_facts = contact.get("key_facts") or []
+        old_prefs = contact.get("preferences") or {}
+        new_facts = new_memory_data.get("key_facts") or []
+        new_prefs = new_memory_data.get("preferences") or {}
+        new_extracted = new_memory_data.get("extracted_data") or {}
+
+        # Si no hay datos previos, no hay contradicción posible
+        if not old_facts and not old_prefs:
+            return []
+
+        # Si no hay datos nuevos, nada que comparar
+        if not new_facts and not new_prefs and not new_extracted:
+            return []
+
+        old_data_str = json.dumps(
+            {"key_facts": old_facts, "preferences": old_prefs}, ensure_ascii=False
+        )
+        new_data_str = json.dumps(
+            {"key_facts": new_facts, "preferences": new_prefs, "extracted_data": new_extracted},
+            ensure_ascii=False,
+        )
+
+        prompt = f"""Compara los datos previos del contacto con los datos nuevos.
+Identifica SOLO contradicciones claras (datos que se contradicen directamente).
+NO reportes información nueva que no existía antes.
+
+DATOS PREVIOS DEL CONTACTO:
+{old_data_str}
+
+DATOS NUEVOS DE ESTA CONVERSACIÓN:
+{new_data_str}
+
+Responde SOLO con JSON válido, sin markdown:
+{{"contradictions": [{{"old_fact": "dato anterior", "new_fact": "dato nuevo", "field": "campo afectado"}}]}}
+
+Si no hay contradicciones, responde: {{"contradictions": []}}"""
+
+        try:
+            client = _get_gemini()
+            response = await client.aio.models.generate_content(
+                model=ANALYSIS_MODEL,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                ),
+            )
+            text = response.text or ""
+            result = json.loads(text)
+            contradictions = result.get("contradictions", [])
+            if contradictions:
+                logger.info(
+                    "Contradicciones detectadas para contacto %s: %d",
+                    self.contact_id,
+                    len(contradictions),
+                )
+            return contradictions
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error("Error detectando contradicciones: %s", e)
+            return []
