@@ -102,12 +102,29 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
     # Generar room name y token
     import uuid
 
+    from livekit.api import LiveKitAPI
+    from livekit.api.room_service import CreateRoomRequest
+
     room_name = f"widget-{uuid.uuid4().hex[:8]}"
 
     api_key = os.environ.get("LIVEKIT_API_KEY")
     api_secret = os.environ.get("LIVEKIT_API_SECRET")
+    livekit_url = os.environ.get("LIVEKIT_URL", "")
     if not api_key or not api_secret:
         raise HTTPException(500, "LiveKit not configured")
+
+    # Crear room con metadata del agente para que el dispatch rule lo capte
+    room_metadata = f'{{"agent_id": "{agent["id"]}", "type": "widget"}}'
+    try:
+        async with LiveKitAPI(
+            url=livekit_url, api_key=api_key, api_secret=api_secret,
+        ) as lk_api:
+            await lk_api.room.create_room(
+                CreateRoomRequest(name=room_name, metadata=room_metadata)
+            )
+            logger.info("Widget room created: %s (agent_id=%s)", room_name, agent["id"])
+    except Exception as e:
+        logger.warning("Could not pre-create room: %s", e)
 
     token = (
         AccessToken(api_key, api_secret)
@@ -119,12 +136,12 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
                 room=room_name,
             )
         )
-        .with_metadata(f'{{"agent_id": "{agent["id"]}", "type": "widget"}}')
+        .with_metadata(room_metadata)
         .to_jwt()
     )
 
     return {
         "token": token,
         "room": room_name,
-        "url": os.environ.get("LIVEKIT_URL", ""),
+        "url": livekit_url,
     }

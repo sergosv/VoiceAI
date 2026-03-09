@@ -145,6 +145,35 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         except (json.JSONDecodeError, AttributeError):
             pass
 
+    # Detectar modo widget desde metadata del room o participante
+    widget_mode = False
+    widget_agent_id: str | None = None
+    if not outbound_mode and not called_number:
+        # Intentar leer agent_id del room metadata (widget pre-creates room)
+        if room_metadata:
+            try:
+                meta = json.loads(room_metadata)
+                if meta.get("type") == "widget" and meta.get("agent_id"):
+                    widget_mode = True
+                    widget_agent_id = meta["agent_id"]
+                    logger.info("Modo widget detectado, agent_id: %s", widget_agent_id)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        # Fallback: leer del metadata del participante
+        if not widget_mode:
+            for p in ctx.room.remote_participants.values():
+                p_meta = p.metadata or ""
+                if p_meta:
+                    try:
+                        pm = json.loads(p_meta)
+                        if pm.get("type") == "widget" and pm.get("agent_id"):
+                            widget_mode = True
+                            widget_agent_id = pm["agent_id"]
+                            logger.info("Modo widget (participant meta), agent_id: %s", widget_agent_id)
+                            break
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+
     # Cargar config del agente + cliente
     config: ResolvedConfig | None = None
     if outbound_mode:
@@ -153,6 +182,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             config = await load_config_by_agent_id(outbound_agent_id)
         if not config and outbound_client_id:
             config = await load_config_by_client_id(outbound_client_id)
+    elif widget_mode and widget_agent_id:
+        config = await load_config_by_agent_id(widget_agent_id)
+        if config:
+            logger.info("Widget: agente '%s' cargado", config.agent.name)
     elif called_number:
         config = await load_config_by_phone(called_number)
 
