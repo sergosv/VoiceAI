@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator
+from typing import Any, Coroutine
 
-from livekit.agents import Agent, RunContext, llm
+from livekit import rtc
+from livekit.agents import Agent, RunContext, llm, tts
 from livekit.agents.llm import FunctionCallOutput, function_tool
 
 from agent.config_loader import ResolvedConfig
 from agent.flow_engine import FlowEngine, FlowState
+from agent.language_detect import LanguageDetectionConfig, LanguageDetector, LANGUAGE_CONFIGS
 from agent.mode_engine import ModeEngine, ModeState
 from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
@@ -36,6 +39,7 @@ class VoiceAgent(Agent):
         config: ResolvedConfig,
         mcp_servers: list | None = None,
         api_integrations: list[dict] | None = None,
+        language_detector: LanguageDetector | None = None,
     ) -> None:
         kwargs: dict = {"instructions": config.agent.system_prompt}
         if mcp_servers:
@@ -45,10 +49,108 @@ class VoiceAgent(Agent):
         self._api_integrations = {
             integ["name"]: integ for integ in (api_integrations or [])
         }
+        # Soporte de cambio de idioma en vivo
+        self._language_detector = language_detector
+        self._current_language: str = config.client.language
+        self._dynamic_tts: tts.TTS | None = None
+        self._tts_cache: dict[str, tts.TTS] = {}  # Cache TTS por idioma
 
     @property
     def config(self) -> ResolvedConfig:
         return self._config
+
+    @property
+    def current_language(self) -> str:
+        return self._current_language
+
+    def switch_language(self, new_lang: str) -> None:
+        """Cambia el idioma del pipeline TTS en vivo.
+
+        Reconstruye la instancia TTS para el nuevo idioma y opcionalmente
+        aplica un prompt override si está configurado.
+        """
+        if new_lang == self._current_language:
+            return
+
+        from agent.pipeline_builder import build_tts
+
+        old_lang = self._current_language
+        self._current_language = new_lang
+
+        # Obtener idioma TTS del mapeo
+        lang_config = LANGUAGE_CONFIGS.get(new_lang, {})
+        tts_lang = lang_config.get("tts_lang", new_lang)
+
+        # Usar cache para no reconstruir TTS si ya se usó este idioma
+        if tts_lang not in self._tts_cache:
+            self._tts_cache[tts_lang] = build_tts(self._config.agent, tts_lang)
+
+        self._dynamic_tts = self._tts_cache[tts_lang]
+
+        # Aplicar prompt override si está configurado
+        if self._language_detector:
+            override = self._language_detector.get_language_prompt_override()
+            if override:
+                self._instructions = override
+                logger.info(
+                    "System prompt actualizado por cambio de idioma: %s → %s",
+                    old_lang, new_lang,
+                )
+
+        logger.info(
+            "Idioma del pipeline cambiado: %s → %s (tts_lang=%s)",
+            old_lang, new_lang, tts_lang,
+        )
+
+    def tts_node(
+        self,
+        text: AsyncIterable[str],
+        model_settings: Any,
+    ) -> (
+        AsyncIterable[rtc.AudioFrame]
+        | Coroutine[Any, Any, AsyncIterable[rtc.AudioFrame]]
+        | Coroutine[Any, Any, None]
+    ):
+        """Override del nodo TTS para usar TTS dinámico cuando hay cambio de idioma."""
+        if self._dynamic_tts is not None:
+            return self._dynamic_tts_node(text, model_settings)
+        return Agent.default.tts_node(self, text, model_settings)
+
+    async def _dynamic_tts_node(
+        self,
+        text: AsyncIterable[str],
+        model_settings: Any,
+    ) -> AsyncIterator[rtc.AudioFrame]:
+        """Nodo TTS que usa la instancia dinámica por idioma."""
+        from livekit.agents import tokenize, tts as tts_module, utils
+
+        current_tts = self._dynamic_tts
+        assert current_tts is not None
+
+        wrapped = current_tts
+        if not current_tts.capabilities.streaming:
+            wrapped = tts_module.StreamAdapter(
+                tts=wrapped,
+                sentence_tokenizer=tokenize.blingfire.SentenceTokenizer(
+                    retain_format=True
+                ),
+            )
+
+        activity = self._get_activity_or_raise()
+        conn_options = activity.session.conn_options.tts_conn_options
+        async with wrapped.stream(conn_options=conn_options) as stream:
+
+            async def _forward_input() -> None:
+                async for chunk in text:
+                    stream.push_text(chunk)
+                stream.end_input()
+
+            forward_task = asyncio.create_task(_forward_input())
+            try:
+                async for ev in stream:
+                    yield ev.frame
+            finally:
+                await utils.aio.cancel_and_wait(forward_task)
 
     def _tool_enabled(self, tool_name: str) -> bool:
         """Verifica si una herramienta está habilitada para este cliente."""
@@ -854,6 +956,7 @@ def build_agent(
     mcp_servers: list | None = None,
     api_integrations: list[dict] | None = None,
     caller_number: str | None = None,
+    language_detector: LanguageDetector | None = None,
 ) -> VoiceAgent:
     """Construye un VoiceAgent configurado para un cliente + agente específico."""
     from dataclasses import replace
@@ -887,14 +990,20 @@ def build_agent(
     updated_agent = replace(config.agent, system_prompt=augmented_prompt)
     config = ResolvedConfig(agent=updated_agent, client=config.client)
 
-    agent = VoiceAgent(config, mcp_servers=mcp_servers, api_integrations=api_integrations)
+    agent = VoiceAgent(
+        config,
+        mcp_servers=mcp_servers,
+        api_integrations=api_integrations,
+        language_detector=language_detector,
+    )
     logger.info(
-        "Agente creado para '%s' / '%s' — voz: %s, tools: %s, apis: %d",
+        "Agente creado para '%s' / '%s' — voz: %s, tools: %s, apis: %d, lang_detect: %s",
         config.client.name,
         config.agent.name,
         config.agent.voice_id,
         config.client.enabled_tools,
         len(api_integrations or []),
+        language_detector is not None,
     )
     return agent
 

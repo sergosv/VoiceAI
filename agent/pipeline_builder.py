@@ -65,8 +65,19 @@ def _validate_api_key(provider: str, api_key: str | None) -> str | None:
     return None
 
 
-def build_stt(config: AgentConfig, language: str):
-    """Construye el STT según el provider del cliente."""
+def build_stt(
+    config: AgentConfig,
+    language: str,
+    multi_lang: list[str] | None = None,
+):
+    """Construye el STT según el provider del cliente.
+
+    Args:
+        config: Configuración del agente.
+        language: Idioma principal (ISO 639-1).
+        multi_lang: Lista de idiomas soportados para auto-detección.
+                    Si tiene más de 1 idioma, habilita detect_language en Deepgram.
+    """
     provider = config.stt_provider
     api_key = _validate_api_key(provider, config.stt_api_key)
 
@@ -80,6 +91,14 @@ def build_stt(config: AgentConfig, language: str):
             "punctuate": True,
             "no_delay": True,
         }
+        # Multi-idioma: habilitar auto-detección de Deepgram
+        if multi_lang and len(multi_lang) > 1:
+            kwargs["detect_language"] = True
+            del kwargs["language"]
+            logger.info(
+                "STT multi-idioma habilitado: detect_language=True (idiomas: %s)",
+                multi_lang,
+            )
         if api_key:
             kwargs["api_key"] = api_key
         return deepgram.STT(**kwargs)

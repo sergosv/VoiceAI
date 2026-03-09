@@ -326,6 +326,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             voice_agent = build_agent(
                 config, memory_context=memory_context,
                 mcp_servers=mcp_servers, api_integrations=api_integrations,
+                language_detector=language_detector,
             )
             logger.info(
                 "Modo inteligente solicitado pero solo %d agente(s), usando simple",
@@ -335,10 +336,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         voice_agent = build_agent(
             config, memory_context=memory_context,
             mcp_servers=mcp_servers, api_integrations=api_integrations,
+            language_detector=language_detector,
         )
 
     # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.client.language in ("es", "es-en") else "en"
+    # Multi-idioma: pasar idiomas soportados al STT si detección está habilitada
+    stt_multi_lang: list[str] | None = None
+    if lang_cfg.enabled:
+        stt_multi_lang = lang_cfg.supported_languages
 
     vad = silero.VAD.load(
         activation_threshold=0.5,
@@ -367,7 +373,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             config.agent.stt_provider, config.agent.llm_provider, config.agent.tts_provider,
         )
         session = AgentSession(
-            stt=build_stt(config.agent, stt_language),
+            stt=build_stt(config.agent, stt_language, multi_lang=stt_multi_lang),
             llm=build_llm(config.agent),
             tts=build_tts(config.agent, stt_language),
             vad=vad,
@@ -539,19 +545,24 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             if not isinstance(result, Exception):
                 result_map[name] = result
 
-        # Language detection: si se decidió un switch, loggear
+        # Language detection: si se decidió un switch, aplicar cambio de idioma
         if "language" in result_map and result_map["language"]:
             detected_lang = result_map["language"]
             logger.info(
-                "Switch de idioma detectado: %s → actualizar pipeline",
+                "Switch de idioma detectado: %s → actualizando pipeline",
                 detected_lang,
             )
-            # El prompt override se puede inyectar si está configurado
-            if language_detector:
-                override = language_detector.get_language_prompt_override()
-                if override and hasattr(voice_agent, "instructions"):
-                    voice_agent.instructions = override
-                    logger.info("System prompt actualizado por cambio de idioma")
+            # Aplicar switch de TTS + prompt override via VoiceAgent
+            if hasattr(voice_agent, "switch_language"):
+                voice_agent.switch_language(detected_lang)
+                logger.info("Pipeline actualizado a idioma: %s", detected_lang)
+            else:
+                # Fallback para OrchestratorAgent u otros tipos
+                if language_detector:
+                    override = language_detector.get_language_prompt_override()
+                    if override and hasattr(voice_agent, "_instructions"):
+                        voice_agent._instructions = override
+                        logger.info("System prompt actualizado por cambio de idioma")
 
         # Sentimiento: inyectar directiva si cambió
         sentiment = result_map.get("sentiment")
@@ -560,14 +571,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         directive = sentiment_analyzer.get_empathy_directive()
 
         # Inyectar directiva emocional al agente si cambió
-        if directive and hasattr(voice_agent, "instructions"):
+        if directive and hasattr(voice_agent, "_instructions"):
             # Limpiar directiva anterior si existe
             base = voice_agent.instructions
             for marker in ("## ALERTA:", "## ALERT:", "## ALERTA URGENTE:", "## URGENT ALERT:"):
                 idx = base.find(marker)
                 if idx != -1:
                     base = base[:idx].rstrip()
-            voice_agent.instructions = base + directive
+            voice_agent._instructions = base + directive
             logger.info(
                 "Directiva emocional inyectada al prompt (sentiment=%s)",
                 sentiment,
