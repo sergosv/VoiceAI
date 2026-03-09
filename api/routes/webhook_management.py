@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from api.routes.auth import get_current_user
+from api.middleware.auth import CurrentUser, get_current_user
 from api.services.webhook_service import (
     create_webhook_endpoint,
     delete_webhook_endpoint,
@@ -30,12 +30,19 @@ class UpdateWebhookRequest(BaseModel):
     description: str | None = None
 
 
+def _check_access(user: CurrentUser, client_id: str) -> None:
+    """Verifica que el usuario tenga acceso al client_id solicitado."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+
 @router.get("/{client_id}")
 async def list_endpoints(
     client_id: str,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
     """Lista webhook endpoints del cliente."""
+    _check_access(user, client_id)
     return await list_webhook_endpoints(client_id)
 
 
@@ -43,9 +50,10 @@ async def list_endpoints(
 async def create_endpoint(
     client_id: str,
     req: CreateWebhookRequest,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Crea un webhook endpoint. Retorna el secret (SOLO en esta respuesta)."""
+    _check_access(user, client_id)
     return await create_webhook_endpoint(
         client_id=client_id,
         url=req.url,
@@ -59,9 +67,10 @@ async def update_endpoint(
     client_id: str,
     endpoint_id: str,
     req: UpdateWebhookRequest,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Actualiza un webhook endpoint."""
+    _check_access(user, client_id)
     updates = req.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No hay campos para actualizar")
@@ -75,9 +84,10 @@ async def update_endpoint(
 async def delete_endpoint(
     client_id: str,
     endpoint_id: str,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Elimina un webhook endpoint."""
+    _check_access(user, client_id)
     ok = await delete_webhook_endpoint(endpoint_id, client_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Webhook no encontrado")
@@ -89,7 +99,8 @@ async def get_deliveries(
     client_id: str,
     endpoint_id: str,
     limit: int = Query(50, ge=1, le=200),
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
     """Lista entregas de un webhook endpoint."""
+    _check_access(user, client_id)
     return await list_deliveries(endpoint_id, limit)

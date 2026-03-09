@@ -1091,7 +1091,7 @@ def _build_mode_agent(
 
     mode_engine = ModeEngine(
         mode=config.agent.conversation_mode,
-        config=config.agent.mode_config,
+        config=config.agent.mode_config or {},
     )
 
     agent = ModeVoiceAgent(

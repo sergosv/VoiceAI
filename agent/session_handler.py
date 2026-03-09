@@ -374,11 +374,11 @@ class SessionHandler:
         if existing.data:
             row = existing.data[0]
             sb.table("usage_daily").update({
-                "total_calls": row["total_calls"] + 1,
-                "total_minutes": float(Decimal(str(row["total_minutes"])) + duration_minutes),
-                "total_cost": float(Decimal(str(row["total_cost"])) + total_cost),
-                "inbound_calls": row["inbound_calls"] + is_inbound,
-                "outbound_calls": row["outbound_calls"] + is_outbound,
+                "total_calls": (row.get("total_calls") or 0) + 1,
+                "total_minutes": float(Decimal(str(row.get("total_minutes") or 0)) + duration_minutes),
+                "total_cost": float(Decimal(str(row.get("total_cost") or 0)) + total_cost),
+                "inbound_calls": (row.get("inbound_calls") or 0) + is_inbound,
+                "outbound_calls": (row.get("outbound_calls") or 0) + is_outbound,
             }).eq("id", row["id"]).execute()
         else:
             sb.table("usage_daily").insert({
