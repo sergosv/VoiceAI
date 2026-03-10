@@ -26,6 +26,8 @@ import { FlowToolbar } from '../components/flow/FlowToolbar'
 import { FlowTemplates } from '../components/flow/FlowTemplates'
 import { ValidationPanel } from '../components/flow/ValidationPanel'
 import { FlowGuide } from '../components/flow/FlowGuide'
+import { FlowPreview } from '../components/FlowPreview'
+import { FlowVersions } from '../components/FlowVersions'
 
 const DEFAULT_START_NODE = {
   id: 'start-1',
@@ -64,6 +66,10 @@ function FlowBuilderInner() {
   const [selectedNodeIds, setSelectedNodeIds] = useState([])
   const [showGrid, setShowGrid] = useState(true)
   const [showGuide, setShowGuide] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const [showVersions, setShowVersions] = useState(false)
+  const [highlightedNodeId, setHighlightedNodeId] = useState(null)
+  const [viewingVersion, setViewingVersion] = useState(null) // { number, id }
   const [searchQuery, setSearchQuery] = useState('')
   const [searchActive, setSearchActive] = useState(false)
   const [searchCurrentIndex, setSearchCurrentIndex] = useState(0)
@@ -211,7 +217,9 @@ function FlowBuilderInner() {
         d.label || '', d.message || '', d.greeting || '',
         d.prompt || '', d.variableName || '', d.actionType || '',
         d.onFailureMessage || '', d.retryMessage || '',
-        d.transferNumber || '', n.type || '',
+        d.transferNumber || '', n.type || '', d.comment || '',
+        ...(d.fields || []).map(f => `${f.name || ''} ${f.prompt || ''}`),
+        d.condition?.variable || '',
       ]
       return texts.some(t => t.toLowerCase().includes(q))
     })
@@ -399,12 +407,24 @@ function FlowBuilderInner() {
         if (params.sourceHandle === 'yes') label = 'Si'
         else if (params.sourceHandle === 'no') label = 'No'
         else if (params.sourceHandle === 'maxRetries') label = 'Max reintentos'
+        else if (params.sourceHandle === 'timeout') label = 'Timeout'
       }
 
       // Auto-label para action success/failure
       if (sourceNode?.type === 'action') {
         if (params.sourceHandle === 'success') label = 'OK'
         else if (params.sourceHandle === 'failure') label = 'Error'
+      }
+
+      // Auto-label para loop
+      if (sourceNode?.type === 'loop') {
+        if (params.sourceHandle === 'loop') label = 'Repetir'
+        else if (params.sourceHandle === 'exit') label = 'Salir'
+      }
+
+      // Auto-label para collectMultiple
+      if (sourceNode?.type === 'collectMultiple') {
+        if (params.sourceHandle === 'default') label = 'Siguiente'
       }
 
       setEdges((eds) => addEdge({
@@ -562,6 +582,43 @@ function FlowBuilderInner() {
     reader.readAsText(file)
   }, [setNodes, setEdges, pushHistory, nodes, edges, toast])
 
+  // ── Version management ──────────────────────────────
+  const handleLoadVersion = useCallback((flowData, versionNumber, versionId) => {
+    pushHistory(nodes, edges)
+    setNodes(flowData.nodes || [])
+    setEdges(flowData.edges || [])
+    setViewingVersion({ number: versionNumber, id: versionId })
+    toast.info(`Viendo version v${versionNumber}`)
+  }, [pushHistory, nodes, edges, setNodes, setEdges, toast])
+
+  const handleRestoreVersion = useCallback(() => {
+    // Al restaurar, simplemente limpiar el banner de version — el flow ya esta cargado
+    setViewingVersion(null)
+    setIsDirty(true)
+    toast.success('Version restaurada. Recuerda guardar los cambios.')
+  }, [toast])
+
+  const handleDiscardVersion = useCallback(() => {
+    // Deshacer la carga de version: recargar desde el agente
+    if (agent?.conversation_flow?.nodes?.length > 0) {
+      pushHistory(nodes, edges)
+      setNodes(agent.conversation_flow.nodes)
+      setEdges(agent.conversation_flow.edges || [])
+    }
+    setViewingVersion(null)
+    toast.info('Version descartada')
+  }, [agent, pushHistory, nodes, edges, setNodes, setEdges, toast])
+
+  // Callback para resaltar nodo en preview
+  const handleHighlightNode = useCallback((nodeId) => {
+    setHighlightedNodeId(nodeId)
+    // Centrar vista en el nodo resaltado
+    const node = nodes.find(n => n.id === nodeId)
+    if (node) {
+      setCenter(node.position.x + 100, node.position.y + 50, { zoom: 1, duration: 400 })
+    }
+  }, [nodes, setCenter])
+
   // ── Guardar ────────────────────────────────────────
   const handleSave = async () => {
     if (!clientId) return
@@ -710,19 +767,22 @@ function FlowBuilderInner() {
     }))
   , [edges, selectedEdgeId])
 
-  // ── Nodos con errores de validacion + search dimming ─
+  // ── Nodos con errores de validacion + search dimming + preview highlight ─
   const styledNodes = useMemo(() => {
     const isSearching = searchActive && searchQuery.trim()
     return nodes.map((n, idx) => {
       let className = ''
       if (isSearching) {
         if (searchResultIds.has(n.id)) {
-          // Encontrar indice en searchResults para resaltar current
           const matchIdx = searchResults.findIndex(r => r.id === n.id)
           className = matchIdx === searchCurrentIndex ? 'search-current' : 'search-match'
         } else {
           className = 'dimmed'
         }
+      }
+      // Resaltar nodo activo en preview
+      if (showPreview && highlightedNodeId === n.id) {
+        className = className ? `${className} preview-active` : 'preview-active'
       }
       return {
         ...n,
@@ -733,7 +793,7 @@ function FlowBuilderInner() {
         },
       }
     })
-  }, [nodes, validationErrors, searchActive, searchQuery, searchResultIds, searchResults, searchCurrentIndex])
+  }, [nodes, validationErrors, searchActive, searchQuery, searchResultIds, searchResults, searchCurrentIndex, showPreview, highlightedNodeId])
 
   if (loading || authLoading) {
     return (
@@ -783,6 +843,9 @@ function FlowBuilderInner() {
         onSearchPrev={() => navigateSearch(-1)}
         flowData={{ nodes, edges }}
         onOpenGuide={() => setShowGuide(true)}
+        onTogglePreview={() => setShowPreview(p => !p)}
+        showPreview={showPreview}
+        onOpenVersions={() => setShowVersions(true)}
       />
       <FlowTemplates
         open={showTemplates}
@@ -790,6 +853,44 @@ function FlowBuilderInner() {
         onSelect={handleSelectTemplate}
       />
       <FlowGuide open={showGuide} onClose={() => setShowGuide(false)} />
+      <FlowVersions
+        open={showVersions}
+        onClose={() => setShowVersions(false)}
+        clientId={clientId}
+        agentId={agentId}
+        currentFlow={{ nodes, edges }}
+        onLoadVersion={handleLoadVersion}
+        toast={toast}
+      />
+      {/* Banner de version */}
+      {viewingVersion && (
+        <div className="flex items-center justify-between px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/30 shrink-0">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span className="text-sm text-yellow-300">
+              Viendo version v{viewingVersion.number} — Haz clic en 'Restaurar' para usar esta version
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRestoreVersion}
+              className="px-3 py-1 text-xs rounded-lg bg-yellow-500/20 text-yellow-300 border border-yellow-500/40
+                         hover:bg-yellow-500/30 transition-colors font-medium"
+            >
+              Restaurar
+            </button>
+            <button
+              onClick={handleDiscardVersion}
+              className="px-3 py-1 text-xs rounded-lg text-[#8888a0] hover:text-[#e8e8f0] transition-colors"
+            >
+              Descartar
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-1 overflow-hidden">
         <NodePalette />
         <div className="flex-1" ref={reactFlowWrapper}>
@@ -834,7 +935,9 @@ function FlowBuilderInner() {
                     start: '#22c55e',
                     message: '#60a5fa',
                     collectInput: '#fbbf24',
+                    collectMultiple: '#14b8a6',
                     condition: '#a78bfa',
+                    loop: '#8b5cf6',
                     action: '#00f0ff',
                     end: '#f87171',
                     transfer: '#fb923c',
@@ -869,6 +972,14 @@ function FlowBuilderInner() {
           apiTools={apiTools}
           nodes={nodes}
         />
+        {showPreview && (
+          <FlowPreview
+            nodes={nodes}
+            edges={edges}
+            onHighlightNode={handleHighlightNode}
+            onClose={() => { setShowPreview(false); setHighlightedNodeId(null) }}
+          />
+        )}
       </div>
     </div>
   )
@@ -910,6 +1021,10 @@ function getDefaultData(type) {
       return { message: 'Te voy a transferir con un agente.', transferNumber: '' }
     case 'wait':
       return { seconds: 2, message: '' }
+    case 'loop':
+      return { label: 'Repetir', maxIterations: 5, condition: { variable: '', operator: 'equals', value: '' } }
+    case 'collectMultiple':
+      return { label: 'Datos del cliente', fields: [{ name: '', type: 'text', prompt: '' }], maxRetries: 3 }
     default:
       return {}
   }
@@ -932,6 +1047,11 @@ function buildNodeErrors(nodes, edges) {
   for (const node of nodes) {
     if (node.type === 'collectInput' && node.data.variableName) {
       definedVars.add(node.data.variableName)
+    }
+    if (node.type === 'collectMultiple' && node.data.fields) {
+      for (const f of node.data.fields) {
+        if (f.name) definedVars.add(f.name)
+      }
     }
     if (node.type === 'start' && node.data.injectCallerInfo) {
       definedVars.add('caller_number')
@@ -1014,6 +1134,43 @@ function buildNodeErrors(nodes, edges) {
       addError(id, 'Falta numero de transferencia')
     }
 
+    // Loop validation
+    if (type === 'loop') {
+      const cond = data.condition || {}
+      if (!cond.variable) {
+        addError(id, 'Falta variable de condicion en el bucle')
+      }
+      if (!data.maxIterations || data.maxIterations < 1) {
+        addError(id, 'Iteraciones maximas debe ser mayor a 0')
+      }
+      const hasLoopEdge = edges.some(e => e.source === id && e.sourceHandle === 'loop')
+      const hasExitEdge = edges.some(e => e.source === id && e.sourceHandle === 'exit')
+      if (!hasLoopEdge) {
+        addError(id, 'Sin ruta de bucle (loop) conectada')
+      }
+      if (!hasExitEdge) {
+        addError(id, 'Sin ruta de salida (exit) conectada')
+      }
+    }
+
+    // CollectMultiple validation
+    if (type === 'collectMultiple') {
+      const fields = data.fields || []
+      if (fields.length === 0) {
+        addError(id, 'Debe tener al menos un campo')
+      }
+      for (const f of fields) {
+        if (!f.name) {
+          addError(id, 'Hay campos sin nombre de variable')
+          break
+        }
+        if (!f.prompt?.trim()) {
+          addError(id, `Campo "${f.name || '?'}" sin pregunta`)
+          break
+        }
+      }
+    }
+
     // Variables huerfanas: escanear {{var}} en mensajes/prompts
     const textsToScan = []
     if (type === 'message') textsToScan.push(data.message || '')
@@ -1023,6 +1180,9 @@ function buildNodeErrors(nodes, edges) {
     if (type === 'action') textsToScan.push(data.onFailureMessage || '')
     if (type === 'transfer') textsToScan.push(data.message || '')
     if (type === 'wait') textsToScan.push(data.message || '')
+    if (type === 'collectMultiple' && data.fields) {
+      for (const f of data.fields) textsToScan.push(f.prompt || '')
+    }
 
     const varPattern = /\{\{(\w+)\}\}/g
     const usedVarsInNode = new Set()

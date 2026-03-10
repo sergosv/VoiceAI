@@ -3,7 +3,9 @@ import React from 'react'
 const PALETTE_ITEMS = [
   { type: 'message', label: 'Mensaje', color: 'bg-blue-400', desc: 'Enviar mensaje' },
   { type: 'collectInput', label: 'Recopilar', color: 'bg-amber-400', desc: 'Pedir dato' },
+  { type: 'collectMultiple', label: 'Multi-campo', color: 'bg-teal-500', desc: 'Pedir varios datos' },
   { type: 'condition', label: 'Condicion', color: 'bg-purple-400', desc: 'Evaluar variable' },
+  { type: 'loop', label: 'Bucle', color: 'bg-violet-500', desc: 'Repetir hasta condicion' },
   { type: 'action', label: 'Accion', color: 'bg-[#00f0ff]', desc: 'Ejecutar tool' },
   { type: 'transfer', label: 'Transferir', color: 'bg-orange-400', desc: 'Transferir llamada' },
   { type: 'wait', label: 'Espera', color: 'bg-gray-400', desc: 'Pausa en el flujo' },

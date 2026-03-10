@@ -6,6 +6,8 @@ import { ActionNode } from './ActionNode'
 import { EndNode } from './EndNode'
 import { TransferNode } from './TransferNode'
 import { WaitNode } from './WaitNode'
+import { LoopNode } from './LoopNode'
+import { CollectMultipleNode } from './CollectMultipleNode'
 
 // Definido FUERA de componentes para evitar re-renders de React Flow
 export const nodeTypes = {
@@ -17,4 +19,6 @@ export const nodeTypes = {
   end: EndNode,
   transfer: TransferNode,
   wait: WaitNode,
+  loop: LoopNode,
+  collectMultiple: CollectMultipleNode,
 }

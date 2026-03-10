@@ -13,6 +13,7 @@ const TYPE_LABELS = {
 
 export const CollectInputNode = memo(({ data, selected }) => {
   const isYesNo = data.variableType === 'yes_no'
+  const hasTimeout = data.timeout && data.timeout > 0
   const errors = data._validationErrors || []
   const hasErrors = errors.length > 0
 
@@ -25,6 +26,13 @@ export const CollectInputNode = memo(({ data, selected }) => {
       {hasErrors && (
         <div className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold">
           {errors.length}
+        </div>
+      )}
+      {data.comment && (
+        <div className="absolute -top-2 -left-2 w-5 h-5 bg-amber-500/80 rounded-full flex items-center justify-center" title={data.comment}>
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+          </svg>
         </div>
       )}
       <Handle
@@ -57,18 +65,28 @@ export const CollectInputNode = memo(({ data, selected }) => {
             position={Position.Bottom}
             id="yes"
             className="!bg-green-400 !border-[#0a0a0f] !w-3 !h-3"
-            style={{ left: '30%' }}
+            style={{ left: hasTimeout ? '20%' : '30%' }}
           />
           <Handle
             type="source"
             position={Position.Bottom}
             id="no"
             className="!bg-red-400 !border-[#0a0a0f] !w-3 !h-3"
-            style={{ left: '70%' }}
+            style={{ left: hasTimeout ? '50%' : '70%' }}
           />
+          {hasTimeout && (
+            <Handle
+              type="source"
+              position={Position.Bottom}
+              id="timeout"
+              className="!bg-gray-400 !border-[#0a0a0f] !w-3 !h-3"
+              style={{ left: '80%' }}
+            />
+          )}
           <div className="flex justify-between mt-2 text-[10px] text-[#8888a0]">
             <span>Si</span>
             <span>No</span>
+            {hasTimeout && <span className="text-gray-400">Timeout</span>}
           </div>
         </>
       ) : (
@@ -78,18 +96,28 @@ export const CollectInputNode = memo(({ data, selected }) => {
             position={Position.Bottom}
             id="default"
             className="!bg-amber-400 !border-[#0a0a0f] !w-3 !h-3"
-            style={{ left: '35%' }}
+            style={{ left: hasTimeout ? '20%' : '35%' }}
           />
           <Handle
             type="source"
             position={Position.Bottom}
             id="maxRetries"
             className="!bg-red-400 !border-[#0a0a0f] !w-3 !h-3"
-            style={{ left: '65%' }}
+            style={{ left: hasTimeout ? '50%' : '65%' }}
           />
+          {hasTimeout && (
+            <Handle
+              type="source"
+              position={Position.Bottom}
+              id="timeout"
+              className="!bg-gray-400 !border-[#0a0a0f] !w-3 !h-3"
+              style={{ left: '80%' }}
+            />
+          )}
           <div className="flex justify-between mt-2 text-[10px] text-[#8888a0]">
             <span>OK</span>
             <span>Max reintentos</span>
+            {hasTimeout && <span className="text-gray-400">Timeout</span>}
           </div>
         </>
       )}

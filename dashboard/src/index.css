@@ -120,6 +120,16 @@ body {
   transition: opacity 0.2s ease, filter 0.2s ease;
 }
 
+/* Preview simulator — nodo activo con pulso */
+@keyframes preview-pulse {
+  0%, 100% { filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.5)); }
+  50% { filter: drop-shadow(0 0 18px rgba(0, 240, 255, 0.9)); }
+}
+
+.react-flow .react-flow__node.preview-active {
+  animation: preview-pulse 2s ease-in-out infinite;
+}
+
 /* Flow Guide content styling */
 .flow-guide-content p {
   color: #c8c8d8;

@@ -220,6 +220,18 @@ export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [],
               </p>
             </div>
           )}
+          <div>
+            <Label>Timeout (seg)</Label>
+            <Input
+              type="number"
+              value={data.timeout}
+              onChange={(v) => update('timeout', v || null)}
+              placeholder="Sin timeout"
+            />
+            <p className="text-[10px] text-[#555570] mt-1">
+              Si el usuario no responde en este tiempo, se sigue por la ruta "Timeout"
+            </p>
+          </div>
         </div>
       )}
 
@@ -368,6 +380,28 @@ export function PropertiesPanel({ selectedNode, onNodeDataChange, mcpTools = [],
         </div>
       )}
 
+      {type === 'loop' && (
+        <LoopProperties data={data} onUpdate={update} nodes={nodes} />
+      )}
+
+      {type === 'collectMultiple' && (
+        <CollectMultipleProperties data={data} onUpdate={update} />
+      )}
+
+      {/* Notas — disponible para TODOS los nodos */}
+      <div className="mt-4 pt-4 border-t border-[#2a2a3e]">
+        <Label>Notas</Label>
+        <TextArea
+          value={data.comment}
+          onChange={(v) => update('comment', v)}
+          placeholder="Notas internas sobre este nodo..."
+          rows={2}
+        />
+        <p className="text-[10px] text-[#555570] mt-1">
+          Visible como icono en el canvas. No afecta el flujo.
+        </p>
+      </div>
+
       <VariableInspector nodes={nodes} />
     </div>
   )
@@ -473,6 +507,14 @@ function VariableInspector({ nodes }) {
       if (node.type === 'collectInput' && node.data.variableName) {
         const typeLabel = VARIABLE_TYPES.find(t => t.value === node.data.variableType)?.label || node.data.variableType
         vars.push({ name: node.data.variableName, type: typeLabel })
+      }
+      if (node.type === 'collectMultiple' && node.data.fields) {
+        for (const f of node.data.fields) {
+          if (f.name) {
+            const typeLabel = VARIABLE_TYPES.find(t => t.value === f.type)?.label || f.type
+            vars.push({ name: f.name, type: typeLabel })
+          }
+        }
       }
       if (node.type === 'start' && node.data.injectCallerInfo) {
         vars.push({ name: 'caller_number', type: 'Telefono' })
@@ -611,6 +653,202 @@ function ConditionProperties({ conditions, defaultHandleId, onUpdate, nodes = []
           Agrega condiciones para ramificar el flujo
         </p>
       )}
+    </div>
+  )
+}
+
+function LoopProperties({ data, onUpdate, nodes = [] }) {
+  const condition = data.condition || { variable: '', operator: 'equals', value: '' }
+
+  const availableVars = React.useMemo(() => {
+    const vars = []
+    for (const node of nodes) {
+      if (node.type === 'collectInput' && node.data.variableName) vars.push(node.data.variableName)
+      if (node.type === 'collectMultiple' && node.data.fields) {
+        for (const f of node.data.fields) {
+          if (f.name) vars.push(f.name)
+        }
+      }
+      if (node.type === 'start' && node.data.injectCallerInfo) vars.push('caller_number')
+      if (node.type === 'action' && node.data.resultVariable) vars.push(node.data.resultVariable)
+    }
+    return vars
+  }, [nodes])
+
+  const updateCondField = (key, value) => {
+    onUpdate('condition', { ...condition, [key]: value })
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <Label>Iteraciones maximas</Label>
+        <Input
+          type="number"
+          value={data.maxIterations}
+          onChange={(v) => onUpdate('maxIterations', Math.max(1, Math.min(20, v || 1)))}
+          placeholder="5"
+        />
+      </div>
+      <div>
+        <Label>Variable de condicion</Label>
+        {availableVars.length > 0 ? (
+          <select
+            className="w-full bg-[#0a0a0f] border border-[#2a2a3e] rounded-lg px-3 py-2
+                       text-sm text-[#e8e8f0] focus:outline-none focus:border-[#00f0ff]/50"
+            value={condition.variable || ''}
+            onChange={(e) => updateCondField('variable', e.target.value)}
+          >
+            <option value="">Seleccionar variable...</option>
+            {availableVars.map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+        ) : (
+          <Input
+            value={condition.variable}
+            onChange={(v) => updateCondField('variable', v)}
+            placeholder="nombre de variable"
+          />
+        )}
+      </div>
+      <div>
+        <Label>Operador</Label>
+        <Select
+          value={condition.operator}
+          onChange={(v) => updateCondField('operator', v)}
+          options={OPERATORS}
+        />
+      </div>
+      {!['not_empty', 'empty'].includes(condition.operator) && (
+        <div>
+          <Label>Valor</Label>
+          <Input
+            value={condition.value}
+            onChange={(v) => updateCondField('value', v)}
+            placeholder="valor a comparar"
+          />
+        </div>
+      )}
+      <p className="text-[10px] text-[#555570] leading-relaxed">
+        El bucle se repite hasta que la condicion sea verdadera o se alcance el maximo de iteraciones
+      </p>
+    </div>
+  )
+}
+
+function CollectMultipleProperties({ data, onUpdate }) {
+  const fields = data.fields || []
+
+  const addField = () => {
+    onUpdate('fields', [...fields, { name: '', type: 'text', prompt: '' }])
+  }
+
+  const removeField = (index) => {
+    onUpdate('fields', fields.filter((_, i) => i !== index))
+  }
+
+  const updateField = (index, key, value) => {
+    const updated = fields.map((f, i) => (i === index ? { ...f, [key]: value } : f))
+    onUpdate('fields', updated)
+  }
+
+  const moveField = (index, direction) => {
+    const newFields = [...fields]
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= newFields.length) return
+    const temp = newFields[index]
+    newFields[index] = newFields[targetIndex]
+    newFields[targetIndex] = temp
+    onUpdate('fields', newFields)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label>Campos a recopilar</Label>
+        <button
+          onClick={addField}
+          className="text-xs text-[#00f0ff] hover:text-[#00f0ff]/80"
+        >
+          + Agregar campo
+        </button>
+      </div>
+      {fields.map((field, i) => (
+        <div key={i} className="p-3 rounded-lg border border-[#2a2a3e] bg-[#0a0a0f] space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[#8888a0]">Campo {i + 1}</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => moveField(i, -1)}
+                disabled={i === 0}
+                className="text-[10px] text-[#555570] hover:text-[#e8e8f0] disabled:opacity-30 px-1"
+                title="Subir"
+              >
+                &#9650;
+              </button>
+              <button
+                onClick={() => moveField(i, 1)}
+                disabled={i === fields.length - 1}
+                className="text-[10px] text-[#555570] hover:text-[#e8e8f0] disabled:opacity-30 px-1"
+                title="Bajar"
+              >
+                &#9660;
+              </button>
+              <button
+                onClick={() => removeField(i)}
+                className="text-xs text-red-400 hover:text-red-300 ml-1"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] text-[#555570]">Nombre de variable</label>
+            <Input
+              value={field.name}
+              onChange={(v) => updateField(i, 'name', v)}
+              placeholder="nombre, telefono..."
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-[#555570]">Tipo</label>
+            <Select
+              value={field.type}
+              onChange={(v) => updateField(i, 'type', v)}
+              options={VARIABLE_TYPES}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] text-[#555570]">Pregunta</label>
+            <TextArea
+              value={field.prompt}
+              onChange={(v) => updateField(i, 'prompt', v)}
+              placeholder="Como te llamas?"
+              rows={2}
+            />
+          </div>
+        </div>
+      ))}
+      {fields.length === 0 && (
+        <p className="text-xs text-[#555570] italic">
+          Agrega campos para recopilar multiples datos en secuencia
+        </p>
+      )}
+      <div>
+        <Label>Reintentos maximos por campo</Label>
+        <Input
+          type="number"
+          value={data.maxRetries}
+          onChange={(v) => onUpdate('maxRetries', v)}
+          placeholder="3"
+        />
+      </div>
+      <p className="text-[10px] text-[#555570] leading-relaxed">
+        Recopila multiples datos en secuencia
+      </p>
     </div>
   )
 }

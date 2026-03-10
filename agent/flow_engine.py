@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +29,9 @@ class FlowState:
     awaiting_input: bool = False
     completed: bool = False
     step_count: int = 0
+    awaiting_since: float | None = None  # Timestamp para timeout de collectInput
+    loop_counts: dict[str, int] = field(default_factory=dict)  # node_id → iteración actual
+    _current_field_index: int = 0  # Índice del campo actual en collectMultiple
 
 
 @dataclass
@@ -87,6 +91,48 @@ class FlowEngine:
             return ""
         data = node.get("data", {})
         return self._interpolate(data.get("greeting", ""), state.variables)
+
+    def check_timeout(self, state: FlowState) -> FlowAction | None:
+        """Verifica si el nodo actual (collectInput) ha superado su timeout.
+
+        Llamar periódicamente para detectar timeouts. Retorna None si no hay
+        timeout, o un FlowAction si se debe avanzar.
+        """
+        if state.awaiting_since is None or state.completed:
+            return None
+
+        node = self._nodes.get(state.current_node_id)
+        if not node:
+            return None
+
+        data = node.get("data", {})
+        timeout_seconds = data.get("timeout_seconds")
+        if timeout_seconds is None:
+            return None
+
+        elapsed = time.time() - state.awaiting_since
+        if elapsed < timeout_seconds:
+            return None
+
+        # Timeout alcanzado: resetear estado de espera y avanzar
+        logger.info(
+            "Timeout de %ds alcanzado en nodo %s (esperó %.1fs)",
+            timeout_seconds,
+            state.current_node_id,
+            elapsed,
+        )
+        state.awaiting_since = None
+        state.awaiting_input = False
+        state.retry_count = 0
+
+        # Intentar avanzar por handle "timeout", o "default" como fallback
+        edges = self._adjacency.get(state.current_node_id, [])
+        has_timeout_handle = any(
+            e.get("sourceHandle") == "timeout" for e in edges
+        )
+        handle = "timeout" if has_timeout_handle else "default"
+        state = self._advance(state, handle)
+        return self._action_for_current_node(state)
 
     def build_system_prompt(self, state: FlowState, base_rules: str = "") -> str:
         """Genera un system prompt dinámico según el nodo actual del flujo."""
@@ -221,6 +267,57 @@ class FlowEngine:
                     f"Pausa silenciosa de {seconds} segundos. No digas nada."
                 )
 
+        elif node_type == "loop":
+            max_iter = data.get("maxIterations", 5)
+            iteration = state.loop_counts.get(state.current_node_id, 0)
+            cond = data.get("condition", {})
+            prompt_parts.append(
+                f"\n**Paso actual**: BUCLE (iteración {iteration + 1}/{max_iter})\n"
+                f"Repitiendo hasta que {cond.get('variable', '?')} "
+                f"{cond.get('operator', 'equals')} {cond.get('value', '?')} "
+                f"o se alcancen {max_iter} iteraciones."
+            )
+
+        elif node_type == "collectMultiple":
+            fields = data.get("fields", [])
+            field_idx = state._current_field_index
+            max_retries = data.get("maxRetries", 3)
+
+            prompt_parts.append(
+                f"\n**Paso actual**: RECOPILAR MÚLTIPLES DATOS\n"
+                f"Necesitas recopilar {len(fields)} datos del usuario.\n"
+            )
+            for i, f in enumerate(fields):
+                fname = f.get("name", f"campo_{i}")
+                collected_val = state.variables.get(fname)
+                status = f"✓ {collected_val}" if collected_val else "pendiente"
+                marker = " ← ACTUAL" if i == field_idx and not collected_val else ""
+                prompt_parts.append(f"  - {fname} ({f.get('type', 'text')}): {status}{marker}")
+
+            if field_idx < len(fields):
+                current_field = fields[field_idx]
+                prompt_text = self._interpolate(
+                    current_field.get("prompt", f"¿Cuál es tu {current_field.get('name', 'dato')}?"),
+                    state.variables,
+                )
+                type_instructions = {
+                    "text": "Acepta cualquier texto.",
+                    "phone": "Debe ser un número de teléfono válido.",
+                    "email": "Debe ser un correo electrónico válido con @.",
+                    "date": "Debe ser una fecha.",
+                    "time": "Debe ser una hora.",
+                    "number": "Debe ser un número.",
+                    "yes_no": "Debe ser sí o no.",
+                }
+                ftype = current_field.get("type", "text")
+                prompt_parts.append(
+                    f"\nPregunta actual: {prompt_text}\n"
+                    f"Validación: {type_instructions.get(ftype, 'Acepta cualquier texto.')}\n"
+                    f"Reintentos restantes: {max_retries - state.retry_count}"
+                )
+            else:
+                prompt_parts.append("\nTodos los datos han sido recopilados. Continúa.")
+
         elif node_type == "end":
             message = self._interpolate(data.get("message", ""), state.variables)
             prompt_parts.append(
@@ -244,6 +341,9 @@ class FlowEngine:
         extracted_value: str | None = None,
     ) -> tuple[FlowState, FlowAction]:
         """Procesa la respuesta del usuario y avanza el flujo."""
+        # Feature 3: Guardar último input del usuario para condiciones
+        state.variables["_last_user_input"] = user_text
+
         node = self._nodes.get(state.current_node_id)
         if not node:
             state.completed = True
@@ -251,6 +351,23 @@ class FlowEngine:
 
         node_type = node.get("type", "")
         data = node.get("data", {})
+
+        # Feature 1: Verificar timeout en collectInput antes de procesar
+        if node_type == "collectInput" and state.awaiting_since is not None:
+            timeout_seconds = data.get("timeout_seconds")
+            if timeout_seconds is not None:
+                elapsed = time.time() - state.awaiting_since
+                if elapsed > timeout_seconds:
+                    state.awaiting_since = None
+                    state.awaiting_input = False
+                    state.retry_count = 0
+                    edges = self._adjacency.get(state.current_node_id, [])
+                    has_timeout = any(
+                        e.get("sourceHandle") == "timeout" for e in edges
+                    )
+                    handle = "timeout" if has_timeout else "default"
+                    state = self._advance(state, handle)
+                    return state, self._action_for_current_node(state)
 
         if node_type == "start":
             # Despues del saludo, avanzar al siguiente nodo
@@ -279,6 +396,7 @@ class FlowEngine:
             if self._validate_input(value, var_type):
                 state.variables[var_name] = value
                 state.retry_count = 0
+                state.awaiting_since = None  # Limpiar timeout al recibir respuesta
                 # Si es yes_no, avanzar por handle específico
                 if var_type == "yes_no":
                     normalized = value.lower().strip()
@@ -351,6 +469,101 @@ class FlowEngine:
                 hangup=data.get("hangup", False),
             )
 
+        elif node_type == "loop":
+            # Feature 2: Evaluar condición del loop
+            node_id = state.current_node_id
+            iteration = state.loop_counts.get(node_id, 0)
+            max_iterations = data.get("maxIterations", 5)
+            condition = data.get("condition", {})
+
+            cond_met = False
+            if condition:
+                var_value = str(state.variables.get(condition.get("variable", ""), ""))
+                cond_met = self._eval_operator(
+                    var_value,
+                    condition.get("operator", "equals"),
+                    str(condition.get("value", "")),
+                )
+
+            if cond_met or iteration >= max_iterations:
+                # Condición cumplida o máx iteraciones: salir del loop
+                state.loop_counts[node_id] = 0
+                state = self._advance(state, "exit")
+            else:
+                # Continuar iterando
+                state.loop_counts[node_id] = iteration + 1
+                state = self._advance(state, "loop")
+            return state, self._action_for_current_node(state)
+
+        elif node_type == "collectMultiple":
+            # Feature 4: Recopilar múltiples campos secuencialmente
+            fields = data.get("fields", [])
+            max_retries = data.get("maxRetries", 3)
+            field_idx = state._current_field_index
+
+            if field_idx < len(fields):
+                current_field = fields[field_idx]
+                fname = current_field.get("name", f"campo_{field_idx}")
+                ftype = current_field.get("type", "text")
+                value = extracted_value or user_text
+
+                if self._validate_input(value, ftype):
+                    state.variables[fname] = value
+                    state.retry_count = 0
+                    state._current_field_index = field_idx + 1
+
+                    # Verificar si quedan más campos
+                    if state._current_field_index >= len(fields):
+                        # Todos recopilados, avanzar al siguiente nodo
+                        state._current_field_index = 0
+                        state = self._advance(state, "default")
+                        return state, self._action_for_current_node(state)
+                    else:
+                        # Siguiente campo: generar collect action
+                        next_field = fields[state._current_field_index]
+                        prompt_text = self._interpolate(
+                            next_field.get(
+                                "prompt",
+                                f"¿Cuál es tu {next_field.get('name', 'dato')}?",
+                            ),
+                            state.variables,
+                        )
+                        state.awaiting_input = True
+                        return state, FlowAction(type="collect", message=prompt_text)
+                else:
+                    state.retry_count += 1
+                    if state.retry_count >= max_retries:
+                        # Máx reintentos para este campo, avanzar al siguiente o salir
+                        state.retry_count = 0
+                        state._current_field_index = field_idx + 1
+                        if state._current_field_index >= len(fields):
+                            state._current_field_index = 0
+                            state = self._advance(state, "default")
+                            return state, self._action_for_current_node(state)
+                        next_field = fields[state._current_field_index]
+                        prompt_text = self._interpolate(
+                            next_field.get(
+                                "prompt",
+                                f"¿Cuál es tu {next_field.get('name', 'dato')}?",
+                            ),
+                            state.variables,
+                        )
+                        state.awaiting_input = True
+                        return state, FlowAction(type="collect", message=prompt_text)
+                    retry_msg = current_field.get(
+                        "retryMessage",
+                        f"No entendí tu {fname}, ¿puedes repetirlo?",
+                    )
+                    return state, FlowAction(
+                        type="collect",
+                        message=self._interpolate(retry_msg, state.variables),
+                    )
+
+            # Todos los campos ya recopilados (no debería llegar aquí)
+            state._current_field_index = 0
+            state = self._advance(state, "default")
+            return state, self._action_for_current_node(state)
+
         # Fallback
         state = self._advance(state, "default")
         return state, self._action_for_current_node(state)
@@ -414,6 +627,30 @@ class FlowEngine:
         if next_node and next_node.get("type") == "condition":
             cond_handle = self._evaluate_conditions(next_node, state)
             return self._advance(state, cond_handle)
+
+        # Auto-avanzar nodos de loop (se evalúan sin input del usuario)
+        if next_node and next_node.get("type") == "loop":
+            loop_data = next_node.get("data", {})
+            loop_id = next_node_id
+            iteration = state.loop_counts.get(loop_id, 0)
+            max_iter = loop_data.get("maxIterations", 5)
+            condition = loop_data.get("condition", {})
+
+            cond_met = False
+            if condition:
+                var_val = str(state.variables.get(condition.get("variable", ""), ""))
+                cond_met = self._eval_operator(
+                    var_val,
+                    condition.get("operator", "equals"),
+                    str(condition.get("value", "")),
+                )
+
+            if cond_met or iteration >= max_iter:
+                state.loop_counts[loop_id] = 0
+                return self._advance(state, "exit")
+            else:
+                state.loop_counts[loop_id] = iteration + 1
+                return self._advance(state, "loop")
 
         return state
 
@@ -567,12 +804,15 @@ class FlowEngine:
 
         if node_type == "message":
             state.awaiting_input = data.get("waitForResponse", False)
-            return FlowAction(
-                type="say",
-                message=self._interpolate(data.get("message", ""), state.variables),
-            )
+            msg = self._interpolate(data.get("message", ""), state.variables)
+            # Feature 3: Guardar último mensaje del AI
+            state.variables["_last_ai_response"] = msg
+            return FlowAction(type="say", message=msg)
         elif node_type == "collectInput":
             state.awaiting_input = True
+            # Feature 1: Iniciar tracking de timeout si el nodo lo tiene configurado
+            if data.get("timeout_seconds") is not None:
+                state.awaiting_since = time.time()
             return FlowAction(
                 type="collect",
                 message=self._interpolate(data.get("prompt", ""), state.variables),
@@ -606,6 +846,52 @@ class FlowEngine:
                 message=self._interpolate(data.get("message", ""), state.variables),
                 hangup=data.get("hangup", False),
             )
+        elif node_type == "loop":
+            # Feature 2: Evaluar condición del loop y enrutar
+            node_id = state.current_node_id
+            iteration = state.loop_counts.get(node_id, 0)
+            max_iterations = data.get("maxIterations", 5)
+            condition = data.get("condition", {})
+
+            cond_met = False
+            if condition:
+                var_value = str(state.variables.get(condition.get("variable", ""), ""))
+                cond_met = self._eval_operator(
+                    var_value,
+                    condition.get("operator", "equals"),
+                    str(condition.get("value", "")),
+                )
+
+            if cond_met or iteration >= max_iterations:
+                state.loop_counts[node_id] = 0
+                state = self._advance(state, "exit")
+            else:
+                state.loop_counts[node_id] = iteration + 1
+                state = self._advance(state, "loop")
+            return self._action_for_current_node(state, _depth + 1)
+
+        elif node_type == "collectMultiple":
+            # Feature 4: Retornar collect action para el campo actual
+            fields = data.get("fields", [])
+            field_idx = state._current_field_index
+
+            if field_idx < len(fields):
+                current_field = fields[field_idx]
+                prompt_text = self._interpolate(
+                    current_field.get(
+                        "prompt",
+                        f"¿Cuál es tu {current_field.get('name', 'dato')}?",
+                    ),
+                    state.variables,
+                )
+                state.awaiting_input = True
+                return FlowAction(type="collect", message=prompt_text)
+            else:
+                # Todos los campos recopilados, avanzar
+                state._current_field_index = 0
+                state = self._advance(state, "default")
+                return self._action_for_current_node(state, _depth + 1)
+
         elif node_type == "condition":
             # Auto-evaluar condición y avanzar
             handle = self._evaluate_conditions(node, state)
@@ -673,6 +959,10 @@ class FlowEngine:
             ndata = node.get("data", {})
             if ntype == "collectInput" and ndata.get("variableName"):
                 defined_vars.add(ndata["variableName"])
+            if ntype == "collectMultiple":
+                for f in ndata.get("fields", []):
+                    if f.get("name"):
+                        defined_vars.add(f["name"])
             if ntype == "start" and ndata.get("injectCallerInfo"):
                 defined_vars.add("caller_number")
             if ntype == "action" and ndata.get("resultVariable"):
@@ -711,6 +1001,58 @@ class FlowEngine:
                         f"Nodo transferir '{data.get('label', node['id'])}' no tiene número de transferencia."
                     )
 
+        # Construir mapa de handles por nodo (necesario para loop y action validation)
+        edge_handles: dict[str, set[str]] = {}
+        for edge in edges:
+            src = edge.get("source", "")
+            handle = edge.get("sourceHandle", "default")
+            edge_handles.setdefault(src, set()).add(handle)
+
+        # Verificar nodos loop
+        for node in nodes:
+            if node.get("type") == "loop":
+                data = node.get("data", {})
+                if not data.get("condition"):
+                    warnings.append(
+                        f"Nodo loop '{data.get('label', node['id'])}' no tiene condición de salida."
+                    )
+                max_iter = data.get("maxIterations")
+                if max_iter is not None and (not isinstance(max_iter, int) or max_iter < 1):
+                    warnings.append(
+                        f"Nodo loop '{data.get('label', node['id'])}': maxIterations debe ser un entero >= 1."
+                    )
+                # Verificar que tiene handles loop y exit
+                handles = edge_handles.get(node["id"], set())
+                if "loop" not in handles:
+                    warnings.append(
+                        f"Nodo loop '{data.get('label', node['id'])}' no tiene ruta de cuerpo (loop)."
+                    )
+                if "exit" not in handles:
+                    warnings.append(
+                        f"Nodo loop '{data.get('label', node['id'])}' no tiene ruta de salida (exit)."
+                    )
+
+        # Verificar nodos collectMultiple
+        for node in nodes:
+            if node.get("type") == "collectMultiple":
+                data = node.get("data", {})
+                fields = data.get("fields", [])
+                if not fields:
+                    errors.append(
+                        f"Nodo '{data.get('label', node['id'])}' (Recopilar Múltiples) "
+                        "necesita al menos un campo."
+                    )
+                for i, f in enumerate(fields):
+                    if not f.get("name"):
+                        errors.append(
+                            f"Nodo '{data.get('label', node['id'])}': campo {i} necesita un nombre."
+                        )
+                    if not (f.get("prompt") or "").strip():
+                        warnings.append(
+                            f"Nodo '{data.get('label', node['id'])}': campo '{f.get('name', i)}' "
+                            "no tiene pregunta al usuario."
+                        )
+
         # Operadores válidos para condiciones
         valid_operators = {
             "equals", "not_equals", "contains", "not_contains",
@@ -718,7 +1060,10 @@ class FlowEngine:
             "gt", "gte", "lt", "lte", "regex", "in", "not_in",
         }
         # Variables de sistema (no requieren definición en el flujo)
-        system_vars = {"_turn_count", "_sentiment", "_sentiment_score", "_consecutive_negative"}
+        system_vars = {
+            "_turn_count", "_sentiment", "_sentiment_score", "_consecutive_negative",
+            "_last_user_input", "_last_ai_response",
+        }
 
         # Verificar que nodos condition tienen condiciones
         for node in nodes:
@@ -744,12 +1089,6 @@ class FlowEngine:
                         )
 
         # Verificar action nodes sin failure edge
-        edge_handles: dict[str, set[str]] = {}
-        for edge in edges:
-            src = edge.get("source", "")
-            handle = edge.get("sourceHandle", "default")
-            edge_handles.setdefault(src, set()).add(handle)
-
         for node in nodes:
             if node.get("type") == "action":
                 data = node.get("data", {})
@@ -781,6 +1120,10 @@ class FlowEngine:
                 texts.append(data.get("message", ""))
             elif ntype == "wait":
                 texts.append(data.get("message", ""))
+            elif ntype == "collectMultiple":
+                for f in data.get("fields", []):
+                    texts.append(f.get("prompt", ""))
+                    texts.append(f.get("retryMessage", ""))
 
             for txt in texts:
                 for match in var_pattern.finditer(txt):

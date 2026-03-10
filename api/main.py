@@ -26,8 +26,9 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 from api.routes import (
     agents, ai, analytics, api_integrations, api_keys, auth, billing, calls, campaigns,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
-    documents, evaluations, evolution, ghl, looptalk, mcp, proactive, templates, v1,
-    voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks, widget,
+    documents, evaluations, evolution, flow_builder, ghl, looptalk, mcp, proactive,
+    templates, v1, voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks,
+    widget,
 )
 from api.services.chat_store import start_cleanup_loop
 from api.services.conversation_cleanup import start_conversation_cleanup
@@ -194,6 +195,7 @@ app.include_router(evaluations.router, prefix="/api/evaluations", tags=["evaluat
 app.include_router(conversation_results.router, prefix="/api", tags=["conversation-results"])
 app.include_router(api_keys.router, prefix="/api", tags=["api-keys"])
 app.include_router(webhook_management.router, prefix="/api", tags=["webhook-management"])
+app.include_router(flow_builder.router, prefix="/api/clients", tags=["flow-versions"])
 app.include_router(v1.router, prefix="/api", tags=["public-api-v1"])
 
 # Dashboard React (build estático) — solo si existe el directorio dist

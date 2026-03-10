@@ -338,6 +338,19 @@ async def update_agent(
     result = sb.table("agents").update(updates).eq("id", agent_id).eq("client_id", client_id).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
+
+    # Auto-guardar versión del flujo cuando se actualiza conversation_flow
+    if "conversation_flow" in updates and updates["conversation_flow"]:
+        try:
+            from api.routes.flow_builder import _auto_save_version
+            _auto_save_version(agent_id, client_id, updates["conversation_flow"], user.id)
+        except Exception:
+            # No bloquear la actualización del agente si falla el versionamiento
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to auto-save flow version for agent %s", agent_id
+            )
+
     log_audit(
         "agent.update",
         user_id=user.id,
@@ -506,3 +519,149 @@ async def purchase_agent_phone(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
     return agent_out_from_row(row)
+
+
+# ── Flow Versioning ──────────────────────────────────────────────────
+
+
+@router.get("/{client_id}/agents/{agent_id}/flow-versions")
+async def list_flow_versions(
+    client_id: str,
+    agent_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    """Lista todas las versiones guardadas de un flujo."""
+    sb = get_supabase()
+    res = (
+        sb.table("flow_versions")
+        .select("id, agent_id, version, label, is_published, created_at")
+        .eq("agent_id", agent_id)
+        .order("version", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
+@router.post("/{client_id}/agents/{agent_id}/flow-versions", status_code=201)
+async def create_flow_version(
+    client_id: str,
+    agent_id: str,
+    body: dict,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Guarda una nueva version del flujo."""
+    sb = get_supabase()
+
+    # Obtener el siguiente version
+    existing = (
+        sb.table("flow_versions")
+        .select("version")
+        .eq("agent_id", agent_id)
+        .order("version", desc=True)
+        .limit(1)
+        .execute()
+    )
+    next_version = 1
+    if existing.data:
+        next_version = existing.data[0]["version"] + 1
+
+    row = (
+        sb.table("flow_versions")
+        .insert({
+            "agent_id": agent_id,
+            "client_id": client_id,
+            "version": next_version,
+            "label": body.get("label", ""),
+            "flow_data": body.get("flow_data", {}),
+            "is_published": False,
+        })
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(status_code=500, detail="Error creando version")
+    return row.data[0]
+
+
+@router.get("/{client_id}/agents/{agent_id}/flow-versions/{version_id}")
+async def get_flow_version(
+    client_id: str,
+    agent_id: str,
+    version_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Obtiene una version especifica con su flow_data."""
+    sb = get_supabase()
+    res = (
+        sb.table("flow_versions")
+        .select("*")
+        .eq("id", version_id)
+        .eq("agent_id", agent_id)
+        .limit(1)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Version no encontrada")
+    return res.data[0]
+
+
+@router.post("/{client_id}/agents/{agent_id}/flow-versions/{version_id}/publish")
+async def publish_flow_version(
+    client_id: str,
+    agent_id: str,
+    version_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Publica una version: la marca como publicada y actualiza el flujo del agente."""
+    sb = get_supabase()
+
+    # Quitar published de todas las versiones de este agente
+    sb.table("flow_versions").update({"is_published": False}).eq("agent_id", agent_id).execute()
+
+    # Marcar esta version como publicada
+    res = (
+        sb.table("flow_versions")
+        .update({"is_published": True})
+        .eq("id", version_id)
+        .eq("agent_id", agent_id)
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Version no encontrada")
+
+    version = res.data[0]
+
+    # Actualizar el flujo del agente con el flow_data de esta version
+    sb.table("agents").update({
+        "conversation_flow": version["flow_data"],
+        "conversation_mode": "flow",
+    }).eq("id", agent_id).execute()
+
+    return version
+
+
+@router.delete("/{client_id}/agents/{agent_id}/flow-versions/{version_id}")
+async def delete_flow_version(
+    client_id: str,
+    agent_id: str,
+    version_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Elimina una version (no se puede eliminar la publicada)."""
+    sb = get_supabase()
+
+    # Verificar que no sea la publicada
+    check = (
+        sb.table("flow_versions")
+        .select("is_published")
+        .eq("id", version_id)
+        .eq("agent_id", agent_id)
+        .limit(1)
+        .execute()
+    )
+    if not check.data:
+        raise HTTPException(status_code=404, detail="Version no encontrada")
+    if check.data[0].get("is_published"):
+        raise HTTPException(status_code=400, detail="No se puede eliminar la version publicada")
+
+    sb.table("flow_versions").delete().eq("id", version_id).eq("agent_id", agent_id).execute()
+    return {"message": "Version eliminada"}
