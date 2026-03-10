@@ -39,6 +39,7 @@ const LoopTalk = lazy(() => import('./pages/LoopTalk').then(m => ({ default: m.L
 const ProactiveActions = lazy(() => import('./pages/ProactiveActions').then(m => ({ default: m.ProactiveActions })))
 const QualityMonitor = lazy(() => import('./pages/QualityMonitor').then(m => ({ default: m.QualityMonitor })))
 const ConversationResults = lazy(() => import('./pages/ConversationResults').then(m => ({ default: m.ConversationResults })))
+const Profile = lazy(() => import('./pages/Profile').then(m => ({ default: m.Profile })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -80,6 +81,7 @@ export default function App() {
                 <Route path="/proactive" element={<ProactiveActions />} />
                 <Route path="/quality" element={<QualityMonitor />} />
                 <Route path="/conversation-results" element={<ConversationResults />} />
+                <Route path="/profile" element={<Profile />} />
 
                 {/* Admin — protegido */}
                 <Route path="/admin/clients" element={<AdminRoute><ClientsList /></AdminRoute>} />

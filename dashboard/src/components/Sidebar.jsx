@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
-  ChevronDown, Bot, Sparkles, BarChart3, FlaskConical, Bell, ClipboardList, Shield,
+  ChevronDown, Bot, Sparkles, BarChart3, FlaskConical, Bell, ClipboardList, Shield, CircleUser,
 } from 'lucide-react'
 
 const navGroups = [
@@ -47,6 +47,7 @@ const navGroups = [
   {
     label: 'Cuenta',
     items: [
+      { to: '/profile', icon: CircleUser, label: 'Mi Perfil' },
       { to: '/billing', icon: CreditCard, label: 'Creditos' },
     ],
   },
@@ -125,6 +126,7 @@ function NavGroup({ group, onClick, defaultOpen = true }) {
 
 export function Sidebar() {
   const { user, signOut } = useAuth()
+  const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
   const [open, setOpen] = useState(false)
 
@@ -182,13 +184,19 @@ export function Sidebar() {
         {/* User */}
         <div className="p-3 border-t border-border">
           <div className="flex items-center gap-2 px-3 py-2">
-            <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
-              {user?.email?.[0]?.toUpperCase() || '?'}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs truncate">{user?.email}</p>
-              <p className="text-[10px] text-text-muted">{user?.role}</p>
-            </div>
+            <button
+              onClick={() => { closeMobile(); navigate('/profile') }}
+              className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer hover:opacity-80 transition-opacity"
+              title="Mi Perfil"
+            >
+              <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
+                {user?.email?.[0]?.toUpperCase() || '?'}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-xs truncate">{user?.email}</p>
+                <p className="text-[10px] text-text-muted">{user?.role}</p>
+              </div>
+            </button>
             <button onClick={signOut} className="text-text-muted hover:text-danger cursor-pointer" title="Cerrar sesion">
               <LogOut size={16} />
             </button>

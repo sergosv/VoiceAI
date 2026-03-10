@@ -30,6 +30,98 @@ async def get_me(request: Request, user: CurrentUser = Depends(get_current_user)
     )
 
 
+@router.get("/profile")
+@limiter.limit("60/minute")
+async def get_profile(request: Request, user: CurrentUser = Depends(get_current_user)) -> dict:
+    """Retorna perfil completo del usuario con datos del cliente."""
+    sb = get_supabase()
+    result = (
+        sb.table("users")
+        .select("id, email, role, client_id, display_name, timezone, language")
+        .eq("id", user.id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    row = result.data[0]
+
+    # Obtener nombre del cliente si existe
+    client_name = None
+    if row.get("client_id"):
+        client_result = (
+            sb.table("clients")
+            .select("name")
+            .eq("id", row["client_id"])
+            .limit(1)
+            .execute()
+        )
+        if client_result.data:
+            client_name = client_result.data[0]["name"]
+
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "role": row["role"],
+        "client_id": str(row["client_id"]) if row.get("client_id") else None,
+        "client_name": client_name,
+        "display_name": row.get("display_name"),
+        "timezone": row.get("timezone", "America/Mexico_City"),
+        "language": row.get("language", "es"),
+    }
+
+
+@router.patch("/profile")
+@limiter.limit("30/minute")
+async def update_profile(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Actualiza perfil del usuario (display_name, timezone, language)."""
+    body = await request.json()
+    sb = get_supabase()
+
+    allowed_fields = {"display_name", "timezone", "language"}
+    updates: dict = {}
+    for field in allowed_fields:
+        if field in body:
+            value = body[field]
+            if not isinstance(value, str) or len(value) > 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Campo '{field}' inválido",
+                )
+            updates[field] = value.strip()
+
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se proporcionaron campos para actualizar",
+        )
+
+    # Validar timezone
+    if "timezone" in updates:
+        import zoneinfo
+        try:
+            zoneinfo.ZoneInfo(updates["timezone"])
+        except (KeyError, Exception):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Zona horaria inválida",
+            )
+
+    # Validar language
+    if "language" in updates and updates["language"] not in ("es", "en"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idioma debe ser 'es' o 'en'",
+        )
+
+    sb.table("users").update(updates).eq("id", user.id).execute()
+    return {"ok": True}
+
+
 @router.post("/register-user", response_model=UserOut, status_code=201)
 @limiter.limit("10/minute")
 async def register_user(

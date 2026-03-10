@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { Sidebar } from '../components/Sidebar'
 import { Breadcrumbs } from '../components/Breadcrumbs'
 import { CommandPalette } from '../components/CommandPalette'
+import { LowBalanceAlert } from '../components/LowBalanceAlert'
 import { PageLoader } from '../components/ui/Spinner'
 import { Search } from 'lucide-react'
 
@@ -45,6 +46,7 @@ export function DashboardLayout() {
           </button>
         </div>
 
+        {!isAdmin && <LowBalanceAlert />}
         <Breadcrumbs />
         <Outlet />
       </main>
