@@ -1,10 +1,11 @@
-"""Rutas del dashboard (overview y usage)."""
+"""Rutas del dashboard (overview, usage, onboarding)."""
 
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.cost_rates import build_cost_breakdown
 from api.deps import get_supabase
@@ -149,3 +150,110 @@ async def get_usage(
     ]
 
     return DashboardUsage(data=data, period_days=days)
+
+
+@router.get("/audit-logs")
+async def list_audit_logs(
+    user: CurrentUser = Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+    action: str | None = None,
+) -> dict:
+    """Lista de audit logs del cliente, paginada."""
+    sb = get_supabase()
+    query = (
+        sb.table("audit_logs")
+        .select("*", count="exact")
+        .eq("client_id", user.client_id)
+        .order("created_at", desc=True)
+    )
+
+    if action:
+        query = query.eq("action", action)
+
+    offset = (page - 1) * per_page
+    query = query.range(offset, offset + per_page - 1)
+    result = query.execute()
+
+    return {
+        "data": result.data or [],
+        "total": result.count or 0,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+# --- Onboarding progress ---
+
+REQUIRED_ONBOARDING_STEPS = [
+    "create_agent",
+    "configure_voice",
+    "upload_docs",
+    "test_call",
+    "add_credits",
+]
+
+
+@router.get("/onboarding")
+async def get_onboarding(
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Obtiene el progreso de onboarding del cliente."""
+    sb = get_supabase()
+    result = (
+        sb.table("clients")
+        .select("onboarding_progress, onboarding_completed")
+        .eq("id", user.client_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return {"progress": {}, "completed": False}
+    row = result.data[0]
+    return {
+        "progress": row.get("onboarding_progress") or {},
+        "completed": row.get("onboarding_completed", False),
+    }
+
+
+@router.patch("/onboarding")
+async def update_onboarding(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Marca un paso de onboarding como completado."""
+    body = await request.json()
+    sb = get_supabase()
+
+    # Obtener progreso actual
+    current = (
+        sb.table("clients")
+        .select("onboarding_progress")
+        .eq("id", user.client_id)
+        .limit(1)
+        .execute()
+    )
+    progress: dict[str, bool] = (
+        (current.data[0].get("onboarding_progress") or {})
+        if current.data
+        else {}
+    )
+
+    # Merge: marcar paso individual o dismiss completo
+    step = body.get("step")
+    if step and step in REQUIRED_ONBOARDING_STEPS:
+        progress[step] = True
+
+    dismiss = body.get("dismiss")
+    if dismiss:
+        progress["dismissed"] = True
+
+    # Verificar si todos los pasos requeridos estan completos
+    all_done = all(progress.get(s) for s in REQUIRED_ONBOARDING_STEPS)
+
+    sb.table("clients").update({
+        "onboarding_progress": progress,
+        "onboarding_completed": all_done,
+    }).eq("id", user.client_id).execute()
+
+    return {"progress": progress, "completed": all_done}

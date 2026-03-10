@@ -48,6 +48,7 @@ const navGroups = [
     label: 'Cuenta',
     items: [
       { to: '/profile', icon: CircleUser, label: 'Mi Perfil' },
+      { to: '/audit-log', icon: ClipboardList, label: 'Actividad' },
       { to: '/billing', icon: CreditCard, label: 'Creditos' },
     ],
   },
