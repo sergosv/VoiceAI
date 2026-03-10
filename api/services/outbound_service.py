@@ -46,13 +46,27 @@ async def start_campaign(campaign_id: str) -> dict:
     if not pending.count:
         raise ValueError("No hay contactos pendientes en esta campaña")
 
-    # Actualizar status
+    # Verificar créditos suficientes (estimado: 2 min por contacto)
+    client_id = camp["client_id"]
+    balance = sb.table("credit_balances").select("balance").eq("client_id", client_id).limit(1).execute()
+    current_balance = float((balance.data[0]["balance"]) if balance.data else 0)
+    estimated_cost = (pending.count or 0) * 2  # 2 créditos por contacto estimado
+    if current_balance < min(estimated_cost, 5):
+        raise ValueError(
+            f"Créditos insuficientes ({current_balance:.0f}) para campaña "
+            f"de {pending.count} contactos (estimado: {estimated_cost})"
+        )
+
+    # Actualizar status atómicamente (solo si está en draft/paused/completed)
     result = (
         sb.table("campaigns")
         .update({"status": "running"})
         .eq("id", campaign_id)
+        .in_("status", ["draft", "paused", "completed"])
         .execute()
     )
+    if not result.data:
+        raise ValueError("La campaña ya está en ejecución o no se puede iniciar")
 
     # Lanzar runner async
     asyncio.create_task(_campaign_runner(campaign_id, camp["max_concurrent"]))

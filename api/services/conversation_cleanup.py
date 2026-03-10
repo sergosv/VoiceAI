@@ -33,6 +33,10 @@ async def _cleanup_loop() -> None:
             count = await _sweep_stale_conversations()
             if count:
                 logger.info("Cleanup: %d conversaciones expiradas", count)
+            # Limpiar active_calls stale (llamadas que nunca se cerraron)
+            stale_calls = await _sweep_stale_active_calls()
+            if stale_calls:
+                logger.info("Cleanup: %d active_calls stale eliminados", stale_calls)
         except asyncio.CancelledError:
             return
         except Exception:
@@ -100,7 +104,7 @@ async def _sweep_ghl(sb: Client, now: datetime) -> int:
         "facebook": 30, "instagram": 30, "email": 1440,
     }
     closed = 0
-    for cfg in configs.data or []:
+    for cfg in (configs.data or []):
         channel_timeouts = cfg.get("channel_timeouts") or {}
         fallback = cfg.get("session_timeout_minutes", 30)
 
@@ -131,3 +135,11 @@ async def _sweep_ghl(sb: Client, now: datetime) -> int:
                 )
                 closed += 1
     return closed
+
+
+async def _sweep_stale_active_calls() -> int:
+    """Elimina registros de active_calls que llevan >30 min (llamadas que no se cerraron)."""
+    sb = _get_supabase()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    result = sb.table("active_calls").delete().lt("started_at", cutoff).execute()
+    return len(result.data) if result.data else 0

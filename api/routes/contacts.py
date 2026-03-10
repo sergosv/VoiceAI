@@ -349,9 +349,13 @@ async def delete_contact(
     # Borrar citas del contacto
     sb.table("appointments").delete().eq("contact_id", contact_id).execute()
 
-    # Borrar campaign_calls por teléfono
+    # Borrar campaign_calls por teléfono (scoped por client_id via campaign)
     if phone:
-        sb.table("campaign_calls").delete().eq("phone", phone).execute()
+        campaigns = sb.table("campaigns").select("id").eq("client_id", client_id).execute()
+        if campaigns.data:
+            campaign_ids = [c["id"] for c in campaigns.data]
+            for cid in campaign_ids:
+                sb.table("campaign_calls").delete().eq("campaign_id", cid).eq("phone", phone).execute()
 
     # contact_identifiers y memories se borran por CASCADE
     sb.table("contacts").delete().eq("id", contact_id).execute()
