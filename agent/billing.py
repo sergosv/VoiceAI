@@ -31,6 +31,7 @@ class CallBilling:
         self.start_time: datetime | None = None
         self._billing_task: asyncio.Task | None = None
         self._is_active = False
+        self._incremental_count: int = 0
 
     async def check_can_take_call(self) -> dict[str, object]:
         """Verificar créditos ANTES de conectar."""
@@ -77,6 +78,7 @@ class CallBilling:
                     if row.get("was_insufficient"):
                         logger.warning("Client %s out of credits mid-call", self.client_id)
                         break
+                    self._incremental_count += 1
                 await asyncio.sleep(60)
         except asyncio.CancelledError:
             pass  # Normal al colgar
@@ -94,7 +96,7 @@ class CallBilling:
         total_minutes = duration_seconds / 60.0
 
         try:
-            if duration_seconds < 300:
+            if duration_seconds <= 300:
                 # Llamadas cortas (<5 min): no hubo billing incremental, cobrar todo
                 credits_to_consume = round(total_minutes, 2)
                 if credits_to_consume > 0:
@@ -107,8 +109,8 @@ class CallBilling:
                     }).execute()
             else:
                 # Llamadas largas: cobrar minutos restantes no facturados
-                # El billing incremental cobró 1 crédito cada 60s después del min 5
-                incremental_billed = max((duration_seconds - 300) // 60, 0)
+                # Usar el conteo real de créditos incrementales cobrados
+                incremental_billed = self._incremental_count
                 remaining = total_minutes - incremental_billed
                 if remaining > 0:
                     self.supabase.rpc("consume_credits", {

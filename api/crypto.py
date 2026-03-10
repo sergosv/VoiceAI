@@ -29,19 +29,24 @@ def _get_fernet() -> Fernet | None:
 
 
 def encrypt_value(plaintext: str) -> str:
-    """Encrypt a string. Returns 'enc:' prefixed base64 if encryption available,
-    otherwise returns plaintext."""
+    """Encrypt a string. Returns 'enc:' prefixed token if encryption available,
+    otherwise returns plaintext.
+
+    Fernet.encrypt() already returns url-safe base64, so we use it directly
+    (no extra base64 layer).
+    """
     if not plaintext:
         return plaintext
     f = _get_fernet()
     if not f:
         return plaintext
     encrypted = f.encrypt(plaintext.encode())
-    return f"enc:{base64.urlsafe_b64encode(encrypted).decode()}"
+    return f"enc:{encrypted.decode()}"
 
 
 def decrypt_value(stored: str) -> str:
-    """Decrypt a stored value. Handles both encrypted ('enc:' prefix) and legacy plaintext."""
+    """Decrypt a stored value. Handles encrypted ('enc:' prefix), legacy plaintext,
+    and old double-base64 format for backward compatibility."""
     if not stored:
         return stored
     if not stored.startswith("enc:"):
@@ -50,9 +55,16 @@ def decrypt_value(stored: str) -> str:
     if not f:
         logger.error("Cannot decrypt: ENCRYPTION_KEY not available")
         return ""
+    token = stored[4:]
+    # Intentar formato nuevo (Fernet token directo)
     try:
-        encrypted = base64.urlsafe_b64decode(stored[4:])
+        return f.decrypt(token.encode()).decode()
+    except Exception:
+        pass
+    # Fallback: formato viejo con doble base64
+    try:
+        encrypted = base64.urlsafe_b64decode(token)
         return f.decrypt(encrypted).decode()
     except Exception as e:
-        logger.error("Decryption failed: %s", e)
+        logger.error("Decryption failed (both formats): %s", e)
         return ""

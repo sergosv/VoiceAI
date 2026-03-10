@@ -269,16 +269,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.exception("Error playing capacity limit message")
         return
 
-    # Registrar llamada activa
-    try:
-        sb.table("active_calls").insert({
-            "client_id": config.client.id,
-            "agent_id": config.agent.id,
-            "room_name": ctx.room.name,
-        }).execute()
-    except Exception:
-        logger.exception("Error registering active call — continuing anyway")
-
     # ========= BILLING: Check ANTES de atender =========
     billing = CallBilling(config.client.id)
     credit_check = await billing.check_can_take_call()
@@ -300,6 +290,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         except Exception:
             logger.exception("Error playing rejection message")
         return
+
+    # Registrar llamada activa (después de pasar validaciones de concurrencia y créditos)
+    try:
+        sb.table("active_calls").insert({
+            "client_id": config.client.id,
+            "agent_id": config.agent.id,
+            "room_name": ctx.room.name,
+        }).execute()
+    except Exception:
+        logger.exception("Error registering active call — continuing anyway")
 
     # Override del system prompt para outbound con script de campaña
     if outbound_mode and campaign_script:

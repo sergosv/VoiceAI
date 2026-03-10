@@ -204,12 +204,12 @@ async def clone_voice(
             detail=f"Formato de audio no soportado: {content_type}. Usa WAV, MP3, OGG o FLAC.",
         )
 
-    # Leer audio con límite de tamaño
-    audio_data = await audio.read()
+    # Leer audio con límite de tamaño (sin cargar todo el archivo en memoria)
+    audio_data = await audio.read(MAX_AUDIO_SIZE + 1)
     if len(audio_data) > MAX_AUDIO_SIZE:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Audio demasiado grande ({len(audio_data) // 1024}KB). Máximo: 10MB.",
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Audio file too large. Max {MAX_AUDIO_SIZE // (1024 * 1024)}MB",
         )
 
     if len(audio_data) < 1000:
@@ -303,7 +303,7 @@ async def list_cloned_voices(
     query = sb.table("cloned_voices").select("*").eq("client_id", client_id)
     if provider:
         query = query.eq("provider", provider)
-    query = query.order("created_at", desc=True)
+    query = query.order("created_at", desc=True).limit(500)
 
     result = query.execute()
     return [

@@ -38,10 +38,16 @@ async def evaluate_call(call_id: str, sb=None) -> dict | None:
         )
         agent = agent_result.data[0] if agent_result.data else None
 
-    # 3. Build transcript from metadata or summary
+    # 3. Build transcript from call data
     transcript = ""
-    if call.get("metadata") and isinstance(call["metadata"], dict):
-        transcript = call["metadata"].get("transcript", "")
+    # transcript column stores a list of {role, text, timestamp} dicts
+    raw_transcript = call.get("transcript")
+    if raw_transcript and isinstance(raw_transcript, list):
+        transcript = "\n".join(
+            f"{t.get('role', 'unknown')}: {t.get('text', '')}"
+            for t in raw_transcript
+            if t.get("text")
+        )
     if not transcript:
         transcript = call.get("resumen_ia") or call.get("summary") or ""
 

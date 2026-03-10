@@ -32,11 +32,8 @@ async def start_campaign(campaign_id: str) -> dict:
     if camp["status"] == "running":
         raise ValueError("La campaña ya está en ejecución")
 
-    # Si viene de paused, resetear contactos "calling" que se quedaron colgados
-    if camp["status"] == "paused":
-        sb.table("campaign_calls").update({
-            "status": "pending",
-        }).eq("campaign_id", campaign_id).eq("status", "calling").execute()
+    # No reset "calling" to "pending" — in-flight calls will complete on their own
+    # and update to "completed"/"failed" naturally.
 
     # Contar contactos pendientes
     pending = (
@@ -165,13 +162,22 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
 
         # Obtener siguiente batch de llamadas pendientes
         slots_available = max(max_concurrent - active_count, 0)
+
+        if slots_available <= 0:
+            await asyncio.sleep(5)
+            continue
+
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Fetch pending calls OR retry calls whose retry time has passed
         pending = (
             sb.table("campaign_calls")
             .select("*")
             .eq("campaign_id", campaign_id)
-            .in_("status", ["pending", "retry"])
+            .or_(f"status.eq.pending,and(status.eq.retry,next_retry_at.lte.{now_iso})")
             .order("created_at")
-            .limit(slots_available if slots_available > 0 else 1)
+            .limit(slots_available)
             .execute()
         )
 

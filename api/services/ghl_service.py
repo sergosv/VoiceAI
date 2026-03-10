@@ -37,6 +37,11 @@ def _get_lock(config_id: str, remote_phone: str) -> asyncio.Lock:
             for k in keys_to_remove:
                 if not _locks[k].locked():
                     del _locks[k]
+            # Si aún estamos al límite, forzar evicción de las más antiguas (probablemente stale)
+            if len(_locks) >= _MAX_LOCKS:
+                keys_to_force = list(_locks.keys())[:500]
+                for k in keys_to_force:
+                    _locks.pop(k, None)
         _locks[key] = asyncio.Lock()
     return _locks[key]
 

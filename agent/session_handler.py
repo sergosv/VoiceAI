@@ -250,7 +250,7 @@ class SessionHandler:
                 if phone:
                     cc = (
                         sb.table("campaign_calls")
-                        .select("id, campaign_id")
+                        .select("id, campaign_id, contact_id")
                         .eq("campaign_id", self._campaign_id)
                         .eq("phone", phone)
                         .eq("status", "calling")
@@ -628,20 +628,30 @@ def _evaluate_proactive_rules(
         max_attempts = rule.get("max_attempts", 2)
         schedule_config = rule.get("schedule")
 
-        # Verificar horario si existe
+        # Verificar horario si existe (convertir a zona horaria del negocio)
         if schedule_config:
             from datetime import timedelta
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+
             scheduled_time = now + timedelta(minutes=delay_minutes)
+            # Usar timezone del cliente si disponible, default a México
+            client_timezone = getattr(config.client, "timezone", None)
+            biz_tz = ZoneInfo(client_timezone or "America/Mexico_City")
+            local_time = scheduled_time.astimezone(biz_tz)
+
             allowed_hours = schedule_config.get("hours", "09:00-19:00")
             allowed_days = schedule_config.get("days", ["mon", "tue", "wed", "thu", "fri"])
             day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
-            if day_map.get(scheduled_time.weekday()) not in allowed_days:
+            if day_map.get(local_time.weekday()) not in allowed_days:
                 continue
             try:
                 start_h, end_h = allowed_hours.split("-")
                 sh, sm = map(int, start_h.split(":"))
                 eh, em = map(int, end_h.split(":"))
-                hour_decimal = scheduled_time.hour + scheduled_time.minute / 60
+                hour_decimal = local_time.hour + local_time.minute / 60
                 start_decimal = sh + sm / 60
                 end_decimal = eh + em / 60
                 if not (start_decimal <= hour_decimal <= end_decimal):

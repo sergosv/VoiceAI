@@ -803,6 +803,7 @@ async def get_stats(
     query = (
         sb.table("test_runs")
         .select("id, status, score, persona_id, test_personas(name)")
+        .limit(10000)
     )
 
     # Multi-tenancy

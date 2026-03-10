@@ -550,8 +550,10 @@ class FlowEngine:
                 return node
         return None
 
-    def _action_for_current_node(self, state: FlowState) -> FlowAction:
+    def _action_for_current_node(self, state: FlowState, _depth: int = 0) -> FlowAction:
         """Genera la acción correspondiente al nodo actual."""
+        if _depth > 50:
+            return FlowAction(type="say", message="Error: flow loop detected")
         if state.completed:
             return FlowAction(type="end")
 
@@ -608,7 +610,7 @@ class FlowEngine:
             # Auto-evaluar condición y avanzar
             handle = self._evaluate_conditions(node, state)
             state = self._advance(state, handle)
-            return self._action_for_current_node(state)
+            return self._action_for_current_node(state, _depth + 1)
 
         return FlowAction(type="advance")
 

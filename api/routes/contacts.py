@@ -440,15 +440,25 @@ async def get_contact_timeline(
         .execute()
     )
 
-    # Campaign calls por teléfono
-    campaign_calls_raw = (
-        sb.table("campaign_calls")
-        .select("id, campaign_id, phone, status, result_summary, analysis_data, created_at")
-        .eq("phone", phone)
-        .order("created_at", desc=True)
-        .limit(50)
-        .execute()
-    )
+    # Campaign calls por teléfono (scoped por client_id via campaigns)
+    client_campaigns = sb.table("campaigns").select("id").eq("client_id", cid).execute()
+    campaign_ids_for_calls = [c["id"] for c in (client_campaigns.data or [])]
+
+    if campaign_ids_for_calls:
+        campaign_calls_raw = (
+            sb.table("campaign_calls")
+            .select("id, campaign_id, phone, status, result_summary, analysis_data, created_at")
+            .eq("phone", phone)
+            .in_("campaign_id", campaign_ids_for_calls)
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+    else:
+        # Sin campañas del cliente, no hay campaign_calls
+        class _Empty:
+            data = []
+        campaign_calls_raw = _Empty()
 
     # Enriquecer campaign_calls con nombre de campaña
     campaign_calls = campaign_calls_raw.data or []
@@ -511,7 +521,7 @@ async def get_contact_conversations(
     # WhatsApp conversations
     wa = (
         sb.table("whatsapp_conversations")
-        .select("id, agent_id, remote_phone, status, message_count, last_message_at, created_at, summary, result, closed_by")
+        .select("id, config_id, remote_phone, status, message_count, last_message_at, created_at, summary, result, closed_by")
         .eq("contact_id", contact_id)
         .order("last_message_at", desc=True)
         .limit(limit)
@@ -524,14 +534,14 @@ async def get_contact_conversations(
     # GHL conversations
     ghl = (
         sb.table("ghl_conversations")
-        .select("id, agent_id, channel_type, status, message_count, last_message_at, created_at, summary, result, closed_by")
+        .select("id, config_id, channel, status, message_count, last_message_at, created_at, summary, result, closed_by")
         .eq("contact_id", contact_id)
         .order("last_message_at", desc=True)
         .limit(limit)
         .execute()
     )
     for row in ghl.data or []:
-        row["channel"] = row.get("channel_type") or "ghl"
+        row["channel"] = row.get("channel") or "ghl"
         conversations.append(row)
 
     # Ordenar por fecha más reciente

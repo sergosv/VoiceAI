@@ -82,6 +82,13 @@ async def get_call_stats(
     # Determinar el client_id efectivo
     effective_client_id = user.client_id if user.role == "client" else client_id
 
+    # Obtener el total real usando count="exact"
+    count_query = sb.table("calls").select("id", count="exact")
+    if effective_client_id:
+        count_query = count_query.eq("client_id", effective_client_id)
+    count_result = count_query.limit(0).execute()
+    real_total = count_result.count if count_result.count is not None else 0
+
     query = sb.table("calls").select(
         "duration_seconds, cost_total, started_at"
     )
@@ -108,7 +115,7 @@ async def get_call_stats(
     today_seconds = sum(r.get("duration_seconds", 0) for r in today_rows)
 
     return CallStatsOut(
-        total_calls=len(rows),
+        total_calls=real_total,
         total_minutes=round(total_seconds / 60, 2),
         total_cost=round(total_cost, 4),
         avg_duration_seconds=round(total_seconds / len(rows), 1) if rows else 0,

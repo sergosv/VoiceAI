@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 import time
+import uuid
 
 import httpx
 
@@ -91,6 +92,7 @@ async def _deliver_webhook(
     body = json.dumps({
         "event": event,
         "timestamp": int(time.time()),
+        "delivery_id": str(uuid.uuid4()),
         "data": payload,
     })
     signature = _sign_payload(body, secret)

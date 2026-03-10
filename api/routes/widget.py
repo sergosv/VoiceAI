@@ -134,7 +134,8 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
             )
             logger.info("Widget room + dispatch created: %s (agent_id=%s)", room_name, agent["id"])
     except Exception as e:
-        logger.warning("Could not create room/dispatch: %s", e)
+        logger.error("Could not create room/dispatch: %s", e)
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Could not create room")
 
     from datetime import timedelta
 

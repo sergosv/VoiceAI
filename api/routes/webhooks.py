@@ -48,7 +48,7 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
     except ValueError:
         logger.warning("Stripe webhook: payload inválido")
         raise HTTPException(400, "Invalid payload")
-    except stripe.error.SignatureVerificationError:
+    except stripe.SignatureVerificationError:
         logger.warning("Stripe webhook: firma inválida")
         raise HTTPException(400, "Invalid signature")
 

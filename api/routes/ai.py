@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -45,7 +46,7 @@ def _call_gemini(system_instruction: str, user_prompt: str) -> str:
             temperature=0.8,
         ),
     )
-    return response.text.strip()
+    return (response.text or "").strip()
 
 
 # Meta-prompt para generar prompts desde cero
@@ -157,7 +158,7 @@ async def generate_prompt(
     logger.info("generate_prompt type=%s user=%s", req.type, user.id)
 
     try:
-        result = _call_gemini(system, user_prompt)
+        result = await asyncio.to_thread(_call_gemini, system, user_prompt)
     except HTTPException:
         raise
     except Exception as exc:
@@ -191,7 +192,7 @@ async def improve_prompt(
     logger.info("improve_prompt type=%s user=%s", req.type, user.id)
 
     try:
-        result = _call_gemini(_IMPROVE_SYSTEM, user_prompt)
+        result = await asyncio.to_thread(_call_gemini, _IMPROVE_SYSTEM, user_prompt)
     except HTTPException:
         raise
     except Exception as exc:

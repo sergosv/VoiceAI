@@ -288,9 +288,17 @@ class RealtimeSentimentAnalyzer:
 
     def get_call_sentiment_summary(self) -> dict:
         """Resumen de sentimiento para guardar con la llamada."""
+        # Determinar sentimiento dominante: último en el historial, o el más frecuente
+        dominant = "neutral"
+        if self._state.history:
+            from collections import Counter
+            counts = Counter(self._state.history)
+            dominant = counts.most_common(1)[0][0]
+
         return {
             "timeline": self._state.timeline,
             "average_score": round(self._state.average_score, 2),
+            "dominant_sentiment": dominant,
             "escalation_triggered": self._state.escalation_triggered,
             "consecutive_negative_max": self._count_max_consecutive_negative(),
             "total_turns": len(self._state.history),

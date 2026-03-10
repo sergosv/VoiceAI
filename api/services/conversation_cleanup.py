@@ -22,7 +22,7 @@ def _get_supabase() -> Client:
 
 def start_conversation_cleanup() -> None:
     """Inicia el loop de limpieza de conversaciones."""
-    asyncio.get_event_loop().create_task(_cleanup_loop())
+    asyncio.create_task(_cleanup_loop())
     logger.info("Conversation cleanup worker started (poll=%ds)", POLL_INTERVAL_S)
 
 

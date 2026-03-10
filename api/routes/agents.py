@@ -300,11 +300,12 @@ async def update_agent(
         updates["stt_config"] = stt_config
 
     # Validar formato de API keys vs provider en configs actualizados
-    if voice_changed and voice_config.get("api_key"):
+    # Solo validar keys nuevas (no encriptadas) — las existentes ya fueron validadas al crearlas
+    if voice_changed and voice_config.get("api_key") and not voice_config["api_key"].startswith("enc:"):
         _validate_provider_key(voice_config.get("provider", ""), voice_config["api_key"])
-    if llm_changed and llm_config.get("api_key"):
+    if llm_changed and llm_config.get("api_key") and not llm_config["api_key"].startswith("enc:"):
         _validate_provider_key(llm_config.get("provider", ""), llm_config["api_key"])
-    if stt_changed and stt_config.get("api_key"):
+    if stt_changed and stt_config.get("api_key") and not stt_config["api_key"].startswith("enc:"):
         _validate_provider_key(stt_config.get("provider", ""), stt_config["api_key"])
 
     # Encrypt API keys before persisting (skip already-encrypted values)

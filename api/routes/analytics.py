@@ -312,10 +312,10 @@ async def analytics_quality_distribution(
     calls = query.execute().data
 
     buckets = [
-        ("Excelente", 80, 100),
-        ("Bueno", 60, 79),
-        ("Regular", 40, 59),
-        ("Bajo", 0, 39),
+        ("Excelente", 80, 101),
+        ("Bueno", 60, 80),
+        ("Regular", 40, 60),
+        ("Bajo", 0, 40),
     ]
 
     scores = [float(c.get("quality_score", 0) or 0) for c in calls]
@@ -323,7 +323,7 @@ async def analytics_quality_distribution(
 
     distribution = []
     for label, lo, hi in buckets:
-        bucket_scores = [s for s in scores if lo <= s <= hi]
+        bucket_scores = [s for s in scores if lo <= s < hi]
         count = len(bucket_scores)
         avg = round(sum(bucket_scores) / count, 1) if count else 0
         distribution.append({
@@ -384,7 +384,7 @@ async def analytics_proactive_stats(
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     query = sb.table("scheduled_actions").select(
-        "id, status, channel, action_type"
+        "id, status, channel, rule_type"
     ).gte("created_at", since)
     if cid:
         query = query.eq("client_id", cid)
@@ -398,7 +398,7 @@ async def analytics_proactive_stats(
         by_status[s] = by_status.get(s, 0) + 1
         ch = a.get("channel", "unknown")
         by_channel[ch] = by_channel.get(ch, 0) + 1
-        t = a.get("action_type", "unknown")
+        t = a.get("rule_type", "unknown")
         by_type[t] = by_type.get(t, 0) + 1
 
     return {
