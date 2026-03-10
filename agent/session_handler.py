@@ -62,6 +62,8 @@ class SessionHandler:
         self._sentiment_summary: dict | None = None
         self._intent_summary: dict | None = None
         self._mode_results: dict | None = None
+        # Almacenar referencias a tareas fire-and-forget para evitar GC
+        self._background_tasks: set[asyncio.Task] = set()
 
     def set_agent_turns(self, turns: list[dict]) -> None:
         """Establece el historial de ruteo de agentes (modo orquestado)."""
@@ -106,6 +108,13 @@ class SessionHandler:
             "text": text,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+
+    def _create_background_task(self, coro) -> asyncio.Task:
+        """Crea un task async y almacena la referencia para evitar GC prematuro."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     async def finalize(
         self,
@@ -178,7 +187,7 @@ class SessionHandler:
         try:
             from agent.webhook_dispatch import dispatch_event as _dispatch
 
-            asyncio.create_task(_dispatch(
+            self._create_background_task(_dispatch(
                 self._client_id,
                 "call.completed",
                 {
@@ -331,7 +340,7 @@ class SessionHandler:
 
         # Lanzar análisis universal IA como task async para TODAS las llamadas
         if call_id and len(self._transcript) >= 2:
-            asyncio.create_task(
+            self._create_background_task(
                 _async_universal_analysis(
                     call_id=call_id,
                     transcript=list(self._transcript),
@@ -344,7 +353,7 @@ class SessionHandler:
 
         # Lanzar detección de fallos silenciosos (fire-and-forget)
         if call_id and len(self._transcript) >= 2:
-            asyncio.create_task(
+            self._create_background_task(
                 _async_failure_detection(
                     call_id=call_id,
                     client_id=self._client_id,

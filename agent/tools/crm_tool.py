@@ -31,7 +31,6 @@ async def save_contact(
     data: dict = {
         "client_id": client_id,
         "phone": phone,
-        "source": source,
     }
     if name:
         data["name"] = name
@@ -42,6 +41,20 @@ async def save_contact(
 
     try:
         sb = _get_supabase()
+
+        # Verificar si el contacto ya existe para no sobreescribir source
+        existing = (
+            sb.table("contacts")
+            .select("id")
+            .eq("client_id", client_id)
+            .eq("phone", phone)
+            .limit(1)
+            .execute()
+        )
+        if not existing.data:
+            # Contacto nuevo: incluir source
+            data["source"] = source
+
         result = (
             sb.table("contacts")
             .upsert(data, on_conflict="client_id,phone")

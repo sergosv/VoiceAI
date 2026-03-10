@@ -205,9 +205,9 @@ if dashboard_dir.exists():
     # SPA catch-all: cualquier ruta no-API sirve index.html
     @app.get("/{path:path}")
     async def spa_fallback(request: Request, path: str) -> FileResponse:
-        # Si el archivo existe en dist, servirlo directamente
-        file_path = dashboard_dir / path
-        if file_path.is_file():
+        # Si el archivo existe en dist, servirlo directamente (con path containment check)
+        file_path = (dashboard_dir / path).resolve()
+        if file_path.is_file() and file_path.is_relative_to(dashboard_dir.resolve()):
             return FileResponse(str(file_path))
         # Cualquier otra ruta → index.html (React Router maneja el routing)
         return FileResponse(str(dashboard_dir / "index.html"))

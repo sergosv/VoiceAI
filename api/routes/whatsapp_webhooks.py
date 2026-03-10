@@ -70,6 +70,13 @@ async def webhook_evolution(request: Request) -> Response:
 
     Retorna 200 inmediato y procesa en background.
     """
+    body = await request.body()
+    headers = dict(request.headers)
+
+    if not _evo.validate_webhook(headers, body):
+        logger.warning("Evolution webhook: validación fallida")
+        return Response(status_code=401)
+
     try:
         payload = await request.json()
     except Exception:

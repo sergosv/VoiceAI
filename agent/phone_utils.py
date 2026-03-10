@@ -5,16 +5,24 @@ from __future__ import annotations
 import re
 
 
-def normalize_phone(phone: str) -> str:
+def normalize_phone(phone: str, default_country: str = "MX") -> str:
     """Normaliza teléfono a formato E.164. México: +52XXXXXXXXXX.
+
+    Args:
+        phone: Número telefónico en cualquier formato.
+        default_country: País por defecto para 10 dígitos sin código de país.
+            "MX" (default) → +52, "CO" → +57. Solo aplica a 10 dígitos
+            que inicien con 2-9 (códigos de área válidos).
 
     Reglas:
     - Elimina espacios, guiones, paréntesis, puntos
-    - Si 10 dígitos → agrega +52 (México)
+    - Si 10 dígitos (empezando 2-9) → agrega código de país según default_country
     - Si 11 dígitos empezando con 1 después de 52 → quita el 1 viejo
     - Si ya tiene +52 con 10 dígitos → OK
     - Preserva otros prefijos de país
     """
+    _COUNTRY_CODES = {"MX": "52", "CO": "57", "US": "1", "CA": "1"}
+
     # Limpiar caracteres no numéricos excepto el + inicial
     cleaned = re.sub(r"[^\d+]", "", phone)
 
@@ -25,9 +33,11 @@ def normalize_phone(phone: str) -> str:
     if not digits:
         return phone  # Devolver original si no hay dígitos
 
-    # Caso: 10 dígitos puros → número mexicano sin código de país
-    if len(digits) == 10:
-        return f"+52{digits}"
+    # Caso: 10 dígitos puros → número sin código de país
+    # Solo asignar si empieza con 2-9 (códigos de área válidos en MX/CO)
+    if len(digits) == 10 and digits[0] in "23456789":
+        country_code = _COUNTRY_CODES.get(default_country, "52")
+        return f"+{country_code}{digits}"
 
     # Caso: 12 dígitos empezando con 52 → formato +52XXXXXXXXXX
     if len(digits) == 12 and digits.startswith("52"):

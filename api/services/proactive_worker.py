@@ -115,6 +115,13 @@ async def _execute_action(
                     "result": "Canal SMS no implementado",
                 }).eq("id", action_id).execute()
                 return
+            else:
+                logger.error("Canal desconocido '%s' para acción %s", channel, action_id)
+                sb.table("scheduled_actions").update({
+                    "status": "failed",
+                    "result": f"Canal desconocido: {channel}",
+                }).eq("id", action_id).execute()
+                return
 
             # Marcar como completada
             sb.table("scheduled_actions").update({
@@ -190,45 +197,47 @@ async def _execute_outbound_call(action: dict) -> None:
         api_secret=os.environ["LIVEKIT_API_SECRET"],
     )
 
-    room_name = f"proactive-{action['id'][:8]}"
-    room_metadata = json.dumps({
-        "type": "outbound",
-        "proactive": True,
-        "action_id": action["id"],
-        "client_id": client_id,
-        "agent_id": agent_id,
-        "script": message or "Saluda y explica el motivo de la llamada proactiva.",
-        "rule_type": action.get("rule_type", "manual"),
-    })
-
-    create_room_req = CreateRoomRequest(
-        name=room_name,
-        metadata=room_metadata,
-        empty_timeout=60,
-        agents=[
-            RoomAgentDispatch(
-                agent_name="voice-ai-platform",
-                metadata=room_metadata,
-            )
-        ],
-    )
-    await lk.room.create_room(create_room_req)
-
-    request = CreateSIPParticipantRequest(
-        sip_trunk_id=trunk_id,
-        sip_call_to=target,
-        sip_number=from_number,
-        room_name=room_name,
-        participant_identity=f"proactive-{action['id'][:8]}",
-        participant_name=f"Proactive to {target}",
-        participant_metadata=json.dumps({
-            "type": "proactive",
+    try:
+        room_name = f"proactive-{action['id'][:8]}"
+        room_metadata = json.dumps({
+            "type": "outbound",
+            "proactive": True,
             "action_id": action["id"],
-            "rule_type": action.get("rule_type"),
-        }),
-    )
-    await lk.sip.create_sip_participant(request)
-    await lk.aclose()
+            "client_id": client_id,
+            "agent_id": agent_id,
+            "script": message or "Saluda y explica el motivo de la llamada proactiva.",
+            "rule_type": action.get("rule_type", "manual"),
+        })
+
+        create_room_req = CreateRoomRequest(
+            name=room_name,
+            metadata=room_metadata,
+            empty_timeout=60,
+            agents=[
+                RoomAgentDispatch(
+                    agent_name="voice-ai-platform",
+                    metadata=room_metadata,
+                )
+            ],
+        )
+        await lk.room.create_room(create_room_req)
+
+        request = CreateSIPParticipantRequest(
+            sip_trunk_id=trunk_id,
+            sip_call_to=target,
+            sip_number=from_number,
+            room_name=room_name,
+            participant_identity=f"proactive-{action['id'][:8]}",
+            participant_name=f"Proactive to {target}",
+            participant_metadata=json.dumps({
+                "type": "proactive",
+                "action_id": action["id"],
+                "rule_type": action.get("rule_type"),
+            }),
+        )
+        await lk.sip.create_sip_participant(request)
+    finally:
+        await lk.aclose()
 
     logger.info("Llamada proactiva colocada: %s -> %s", from_number, target)
 

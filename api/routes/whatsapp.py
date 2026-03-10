@@ -43,6 +43,33 @@ def _check_client(user, client_id: str) -> None:
         raise HTTPException(403, "No autorizado para este cliente")
 
 
+def _verify_conversation_ownership(sb, user, conversation_id: str) -> dict:
+    """Verifica que la conversación pertenezca al cliente del usuario.
+
+    Retorna la conversación si es válida, lanza 403/404 si no.
+    """
+    role = user.role if hasattr(user, 'role') else user.get("role")
+    client_id = user.client_id if hasattr(user, 'client_id') else user.get("client_id")
+
+    conv_result = (
+        sb.table("whatsapp_conversations")
+        .select("*, whatsapp_configs!inner(client_id)")
+        .eq("id", conversation_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_result.data:
+        raise HTTPException(404, "Conversación no encontrada")
+
+    conv = conv_result.data[0]
+    config_client_id = conv.get("whatsapp_configs", {}).get("client_id")
+
+    if role != "admin" and config_client_id != client_id:
+        raise HTTPException(403, "No autorizado para esta conversación")
+
+    return conv
+
+
 # ── Config CRUD (prefix: /api/clients) ──────────────────
 
 
@@ -225,6 +252,7 @@ async def get_conversation_messages(
 ) -> list[WhatsAppMessageOut]:
     """Obtiene mensajes de una conversación."""
     sb = _sb()
+    _verify_conversation_ownership(sb, user, conversation_id)
     result = (
         sb.table("whatsapp_messages")
         .select("*")
@@ -246,6 +274,7 @@ async def close_conversation(
 ) -> MessageResponse:
     """Cierra una conversación manualmente."""
     sb = _sb()
+    _verify_conversation_ownership(sb, user, conversation_id)
     sb.table("whatsapp_conversations").update(
         {"status": "closed", "is_human_controlled": False}
     ).eq("id", conversation_id).execute()
@@ -262,6 +291,7 @@ async def takeover_conversation(
 ) -> MessageResponse:
     """Tomar control humano — el bot deja de responder en esta conversación."""
     sb = _sb()
+    _verify_conversation_ownership(sb, user, conversation_id)
     sb.table("whatsapp_conversations").update(
         {"is_human_controlled": True}
     ).eq("id", conversation_id).execute()
@@ -278,6 +308,7 @@ async def release_conversation(
 ) -> MessageResponse:
     """Devolver control al bot."""
     sb = _sb()
+    _verify_conversation_ownership(sb, user, conversation_id)
     sb.table("whatsapp_conversations").update(
         {"is_human_controlled": False}
     ).eq("id", conversation_id).execute()
@@ -295,6 +326,7 @@ async def send_manual_message(
 ) -> MessageResponse:
     """Envía mensaje manual (human takeover)."""
     sb = _sb()
+    _verify_conversation_ownership(sb, user, conversation_id)
 
     # Cargar conversación con su config
     conv_result = (

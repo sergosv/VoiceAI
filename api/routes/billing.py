@@ -77,6 +77,13 @@ async def purchase_credits(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Iniciar compra. Crea sesión de pago, retorna URL para redirigir."""
+    # Verificar que el client_id coincida para usuarios con rol client
+    if user.role == "client" and purchase.client_id != user.client_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No puedes comprar créditos para otro cliente",
+        )
+
     sb = get_supabase()
 
     # Obtener paquete

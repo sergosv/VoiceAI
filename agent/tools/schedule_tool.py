@@ -8,6 +8,7 @@ Permite al usuario decir cosas como:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -64,7 +65,7 @@ async def schedule_reminder_action(
             message = f"Recordatorio: {description}"
 
         from api.services.proactive_worker import create_scheduled_action
-        create_scheduled_action(
+        await asyncio.to_thread(create_scheduled_action,
             agent_id=agent_id,
             client_id=client_id,
             rule_type="reminder",

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.request
 from dataclasses import dataclass
-from functools import lru_cache
 
 import jwt
 from jwt import PyJWK
@@ -20,15 +20,28 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
 
-@lru_cache(maxsize=1)
+_jwks_cache: dict | None = None
+_jwks_cache_time: float = 0
+_JWKS_TTL: float = 3600  # 1 hora
+
+
 def _fetch_jwks() -> dict:
-    """Obtiene las JWKS keys del endpoint de Supabase Auth (cacheado)."""
+    """Obtiene las JWKS keys del endpoint de Supabase Auth (cacheado con TTL de 1h)."""
+    global _jwks_cache, _jwks_cache_time
+    now = time.time()
+    if _jwks_cache and (now - _jwks_cache_time) < _JWKS_TTL:
+        return _jwks_cache
+
     supabase_url = os.environ["SUPABASE_URL"]
     anon_key = os.environ["SUPABASE_ANON_KEY"]
     url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
     req = urllib.request.Request(url, headers={"apikey": anon_key})
     with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+        result = json.loads(resp.read())
+
+    _jwks_cache = result
+    _jwks_cache_time = now
+    return result
 
 
 def _get_signing_key(token: str) -> PyJWK:

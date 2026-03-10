@@ -7,6 +7,7 @@ cargando la configuración del agente + cliente desde Supabase.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import signal
@@ -55,14 +56,17 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(lk_room)s] %(name)s — %(message)s",
 )
-# Filter que inyecta lk_room en cada log record (NO usar "room" — conflicto con livekit SDK)
+# ContextVar para almacenar el room name por tarea async (thread-safe para llamadas concurrentes)
+_current_room: contextvars.ContextVar[str] = contextvars.ContextVar("_current_room", default="-")
+
+# Factory que inyecta lk_room en cada log record (NO usar "room" — conflicto con livekit SDK)
+# Se setea UNA VEZ a nivel de módulo; lee el room de la ContextVar por tarea.
 _old_factory = logging.getLogRecordFactory()
 
 
 def _record_factory(*args: object, **kwargs: object) -> logging.LogRecord:
     record = _old_factory(*args, **kwargs)
-    if not hasattr(record, "lk_room"):
-        record.lk_room = "-"  # type: ignore[attr-defined]
+    record.lk_room = _current_room.get("-")  # type: ignore[attr-defined]
     return record
 
 
@@ -70,6 +74,9 @@ logging.setLogRecordFactory(_record_factory)
 logger = logging.getLogger("voice-ai")
 
 server = AgentServer()
+
+# Conjunto para mantener referencias a tasks en background y evitar GC prematuro
+_bg_tasks: set[asyncio.Task] = set()
 
 # ── Graceful SIGTERM handler ────────────────────────────
 _shutting_down = False
@@ -91,15 +98,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect(auto_subscribe=agents.AutoSubscribe.AUDIO_ONLY)
 
     # Setear lk_room como correlation ID para todos los logs de esta llamada
-    _old = logging.getLogRecordFactory()
-    _room = ctx.room.name
-
-    def _room_factory(*a: object, **kw: object) -> logging.LogRecord:
-        r = _old(*a, **kw)
-        r.lk_room = _room  # type: ignore[attr-defined]
-        return r
-
-    logging.setLogRecordFactory(_room_factory)
+    _current_room.set(ctx.room.name)
 
     logger.info("Nueva sesión en room: %s", ctx.room.name)
 
@@ -256,7 +255,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         )
         # Reproducir mensaje de capacidad antes de colgar
         try:
-            session_reject = AgentSession(vad=silero.VAD.load())
+            from livekit.plugins import cartesia
+            reject_tts = cartesia.TTS(model="sonic-3")
+            session_reject = AgentSession(vad=silero.VAD.load(), tts=reject_tts)
             await session_reject.start(room=ctx.room)
             await session_reject.say(
                 "Lo sentimos, en este momento todas nuestras líneas están ocupadas. "
@@ -286,8 +287,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.warning("Client %s no credits, rejecting call", config.client.id)
         # Intentar reproducir mensaje antes de colgar
         try:
-            from livekit.agents import tts as _tts_mod
-            session_reject = AgentSession(vad=silero.VAD.load())
+            from livekit.plugins import cartesia
+            reject_tts = cartesia.TTS(model="sonic-3")
+            session_reject = AgentSession(vad=silero.VAD.load(), tts=reject_tts)
             await session_reject.start(room=ctx.room)
             await session_reject.say(
                 "Lo sentimos, en este momento no podemos atender tu llamada. "
@@ -747,13 +749,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
         # Quality scoring async (no bloquea el shutdown)
         if quality_cfg.enabled and len(handler._transcript) >= 2:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 _async_quality_score(
                     transcript=list(handler._transcript),
                     business_type=config.client.business_type,
                     room_name=ctx.room.name,
                 )
             )
+            _bg_tasks.add(task)
+            task.add_done_callback(_bg_tasks.discard)
 
         # Limpiar registro de llamada activa
         try:

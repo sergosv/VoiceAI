@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIXES: dict[str, tuple[str, ...]] = {
     "cartesia": ("sk_car_",),
     "openai": ("sk-",),
+    "elevenlabs": (),  # Sin prefijo fijo — keys alfanuméricas, validación por cross-check
 }
-# ElevenLabs NO tiene prefijo fijo — sus keys son alfanuméricas sin patrón
 
 
 def _validate_api_key(provider: str, api_key: str | None) -> str | None:

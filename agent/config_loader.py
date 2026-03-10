@@ -278,13 +278,20 @@ async def load_config_by_phone(phone_number: str) -> ResolvedConfig | None:
 async def load_config_by_agent_id(agent_id: str) -> ResolvedConfig | None:
     """Carga config por UUID del agente."""
     sb = _get_supabase()
-    result = (
-        sb.table("agents")
-        .select("*, clients(*)")
-        .eq("id", agent_id)
-        .limit(1)
-        .execute()
-    )
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: sb.table("agents")
+                .select("*, clients(*)")
+                .eq("id", agent_id)
+                .limit(1)
+                .execute()
+            ),
+            timeout=DB_QUERY_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout cargando config por agent_id: %s", agent_id)
+        return None
     if not result.data:
         return None
     return _rows_to_resolved(result.data[0])
@@ -293,15 +300,22 @@ async def load_config_by_agent_id(agent_id: str) -> ResolvedConfig | None:
 async def load_config_by_client_id(client_id: str) -> ResolvedConfig | None:
     """Carga config del primer agente activo del cliente."""
     sb = _get_supabase()
-    result = (
-        sb.table("agents")
-        .select("*, clients(*)")
-        .eq("client_id", client_id)
-        .eq("is_active", True)
-        .order("created_at")
-        .limit(1)
-        .execute()
-    )
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: sb.table("agents")
+                .select("*, clients(*)")
+                .eq("client_id", client_id)
+                .eq("is_active", True)
+                .order("created_at")
+                .limit(1)
+                .execute()
+            ),
+            timeout=DB_QUERY_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout cargando config por client_id: %s", client_id)
+        return None
     if not result.data:
         return None
     return _rows_to_resolved(result.data[0])
@@ -319,8 +333,8 @@ async def load_mcp_servers(client_id: str, agent_id: str | None = None) -> list[
         Lista de dicts con la config de cada MCP server.
     """
     sb = _get_supabase()
-    result = (
-        sb.table("mcp_servers")
+    result = await asyncio.to_thread(
+        lambda: sb.table("mcp_servers")
         .select("*")
         .eq("client_id", client_id)
         .eq("is_active", True)
@@ -356,8 +370,8 @@ async def load_api_integrations(
         Lista de dicts con la config de cada API integration.
     """
     sb = _get_supabase()
-    result = (
-        sb.table("api_integrations")
+    result = await asyncio.to_thread(
+        lambda: sb.table("api_integrations")
         .select("*")
         .eq("client_id", client_id)
         .eq("is_active", True)
@@ -381,8 +395,8 @@ async def load_api_integrations(
 async def load_whatsapp_config_by_agent_id(agent_id: str) -> dict | None:
     """Carga whatsapp_config por agent_id."""
     sb = _get_supabase()
-    result = (
-        sb.table("whatsapp_configs")
+    result = await asyncio.to_thread(
+        lambda: sb.table("whatsapp_configs")
         .select("*")
         .eq("agent_id", agent_id)
         .eq("is_active", True)
@@ -395,8 +409,8 @@ async def load_whatsapp_config_by_agent_id(agent_id: str) -> dict | None:
 async def load_ghl_config_by_location(location_id: str) -> dict | None:
     """Carga ghl_config por ghl_location_id."""
     sb = _get_supabase()
-    result = (
-        sb.table("ghl_configs")
+    result = await asyncio.to_thread(
+        lambda: sb.table("ghl_configs")
         .select("*")
         .eq("ghl_location_id", location_id)
         .eq("is_active", True)
@@ -409,8 +423,8 @@ async def load_ghl_config_by_location(location_id: str) -> dict | None:
 async def load_whatsapp_config_by_evo_instance(instance_id: str) -> dict | None:
     """Carga whatsapp_config por evo_instance_id."""
     sb = _get_supabase()
-    result = (
-        sb.table("whatsapp_configs")
+    result = await asyncio.to_thread(
+        lambda: sb.table("whatsapp_configs")
         .select("*")
         .eq("evo_instance_id", instance_id)
         .eq("is_active", True)
@@ -426,8 +440,8 @@ async def load_orchestrated_configs(client_id: str) -> list[ResolvedConfig]:
     Retorna lista ordenada por orchestrator_priority DESC.
     """
     sb = _get_supabase()
-    result = (
-        sb.table("agents")
+    result = await asyncio.to_thread(
+        lambda: sb.table("agents")
         .select("*, clients(*)")
         .eq("client_id", client_id)
         .eq("is_active", True)

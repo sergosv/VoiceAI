@@ -34,6 +34,7 @@ router = APIRouter()
 _PROVIDER_KEY_HINTS: dict[str, tuple[str, str]] = {
     "cartesia": ("sk_car_", "Cartesia inician con 'sk_car_'"),
     "openai": ("sk-", "OpenAI inician con 'sk-'"),
+    "elevenlabs": ("", "ElevenLabs"),
 }
 
 
@@ -306,20 +307,20 @@ async def update_agent(
     if stt_changed and stt_config.get("api_key"):
         _validate_provider_key(stt_config.get("provider", ""), stt_config["api_key"])
 
-    # Encrypt API keys before persisting
+    # Encrypt API keys before persisting (skip already-encrypted values)
     if "voice_config" in updates:
         vc = updates["voice_config"]
-        if vc.get("api_key"):
+        if vc.get("api_key") and not vc["api_key"].startswith("enc:"):
             vc["api_key"] = encrypt_value(vc["api_key"])
-        if vc.get("realtime_api_key"):
+        if vc.get("realtime_api_key") and not vc["realtime_api_key"].startswith("enc:"):
             vc["realtime_api_key"] = encrypt_value(vc["realtime_api_key"])
     if "llm_config" in updates:
         lc = updates["llm_config"]
-        if lc.get("api_key"):
+        if lc.get("api_key") and not lc["api_key"].startswith("enc:"):
             lc["api_key"] = encrypt_value(lc["api_key"])
     if "stt_config" in updates:
         sc = updates["stt_config"]
-        if sc.get("api_key"):
+        if sc.get("api_key") and not sc["api_key"].startswith("enc:"):
             sc["api_key"] = encrypt_value(sc["api_key"])
 
     if not updates:

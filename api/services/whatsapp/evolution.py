@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
+import os
 import random
 
 import httpx
@@ -138,5 +140,29 @@ class EvolutionProvider(WhatsAppProvider):
             pass
 
     def validate_webhook(self, headers: dict, body: bytes) -> bool:
-        """Evolution API no usa firma HMAC — validamos por instance_id en el payload."""
+        """Valida webhook de Evolution API usando el token compartido.
+
+        Evolution envía el token configurado en el header 'apikey'.
+        Comparamos contra EVOLUTION_WEBHOOK_TOKEN (env var) usando comparación
+        de tiempo constante para prevenir timing attacks.
+        Si no hay token configurado, se acepta (dev/legacy mode) pero se loguea warning.
+        """
+        expected_token = os.environ.get("EVOLUTION_WEBHOOK_TOKEN", "")
+        if not expected_token:
+            logger.warning(
+                "EVOLUTION_WEBHOOK_TOKEN no configurado — webhook aceptado sin validación. "
+                "Configura esta variable para proteger el endpoint."
+            )
+            return True
+
+        # Evolution API envía el token en el header 'apikey'
+        incoming_token = headers.get("apikey", "") or headers.get("Apikey", "")
+        if not incoming_token:
+            logger.warning("Evolution webhook: no se recibió header 'apikey'")
+            return False
+
+        if not hmac.compare_digest(incoming_token, expected_token):
+            logger.warning("Evolution webhook: token inválido")
+            return False
+
         return True

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from api.middleware.auth import CurrentUser, get_current_user
+from api.utils.url_validator import validate_url_not_private
 from api.services.webhook_service import (
     create_webhook_endpoint,
     delete_webhook_endpoint,
@@ -54,6 +55,8 @@ async def create_endpoint(
 ) -> dict:
     """Crea un webhook endpoint. Retorna el secret (SOLO en esta respuesta)."""
     _check_access(user, client_id)
+    if not validate_url_not_private(req.url):
+        raise HTTPException(status_code=400, detail="URL no permitida: no se permiten direcciones internas o privadas")
     return await create_webhook_endpoint(
         client_id=client_id,
         url=req.url,
@@ -71,6 +74,8 @@ async def update_endpoint(
 ) -> dict:
     """Actualiza un webhook endpoint."""
     _check_access(user, client_id)
+    if req.url and not validate_url_not_private(req.url):
+        raise HTTPException(status_code=400, detail="URL no permitida: no se permiten direcciones internas o privadas")
     updates = req.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No hay campos para actualizar")

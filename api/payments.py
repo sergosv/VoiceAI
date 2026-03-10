@@ -49,7 +49,7 @@ async def create_stripe_checkout(
                         "name": f"Créditos: {package_name}",
                         "description": f"{credits} minutos de agente IA",
                     },
-                    "unit_amount": int(price_usd * 100),  # Stripe usa centavos
+                    "unit_amount": int(round(price_usd * 100)),  # Stripe usa centavos
                 },
                 "quantity": 1,
             }],

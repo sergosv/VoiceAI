@@ -94,9 +94,9 @@ async def list_provider_voices(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado"
                 )
-                client = result.data[0]
-                provider = client.get("tts_provider", "cartesia")
-                api_key = client.get("tts_api_key")
+            client = result.data[0]
+            provider = client.get("tts_provider", "cartesia")
+            api_key = client.get("tts_api_key")
     else:
         # Con provider override, aún necesitamos la API key del agente
         if agent_id:

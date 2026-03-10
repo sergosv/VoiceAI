@@ -213,6 +213,12 @@ async def _process_locked(
     conv_row = await _get_or_create_conversation(
         sb, config_id, contact_id, msg.remote_phone, wa_config
     )
+    if conv_row is None:
+        logger.error(
+            "WA: no se pudo crear/obtener conversación para contact=%s phone=%s",
+            contact_id, msg.remote_phone,
+        )
+        return
     conv_id = conv_row["id"]
 
     # 5. Deserializar historial

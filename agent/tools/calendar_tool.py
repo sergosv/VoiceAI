@@ -6,18 +6,27 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
+logger = logging.getLogger(__name__)
+
 try:
     from zoneinfo import ZoneInfo
     TZ_MEXICO = ZoneInfo("America/Mexico_City")
 except ImportError:
-    # Fallback si zoneinfo no tiene datos (ej: Windows sin tzdata)
-    TZ_MEXICO = timezone(timedelta(hours=-6))
+    try:
+        from backports.zoneinfo import ZoneInfo
+        TZ_MEXICO = ZoneInfo("America/Mexico_City")
+    except ImportError:
+        # Fallback estático: UTC-6 sin soporte DST.
+        # Para soporte correcto de DST, instalar 'tzdata' (pip install tzdata).
+        logger.warning(
+            "zoneinfo no disponible y backports.zoneinfo no instalado. "
+            "Usando UTC-6 fijo sin soporte de horario de verano (DST)."
+        )
+        TZ_MEXICO = timezone(timedelta(hours=-6))
 
 from supabase import Client
 
 from agent.db import get_supabase
-
-logger = logging.getLogger(__name__)
 
 
 def _get_supabase() -> Client:

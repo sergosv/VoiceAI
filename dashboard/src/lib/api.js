@@ -29,6 +29,7 @@ async function request(path, options = {}) {
     throw new Error(err.detail || `Error ${res.status}`)
   }
 
+  if (res.status === 204 || res.headers.get('content-length') === '0') return null
   return res.json()
 }
 

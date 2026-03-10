@@ -649,7 +649,7 @@ function ApiKeysPanel({ clientId }) {
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyScopes, setNewKeyScopes] = useState('')
   const [createdKey, setCreatedKey] = useState(null)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const loadKeys = useCallback(async () => {
     try {
@@ -670,10 +670,10 @@ function ApiKeysPanel({ clientId }) {
       setCreatedKey(result.key)
       setNewKeyName('')
       setNewKeyScopes('')
-      toast('API key creada. Copia la key ahora — no se volvera a mostrar.', 'success')
+      toast.success('API key creada. Copia la key ahora — no se volvera a mostrar.')
       await loadKeys()
     } catch (e) {
-      toast(e.message || 'Error creando API key', 'error')
+      toast.error(e.message || 'Error creando API key')
     }
     setCreating(false)
   }
@@ -681,20 +681,20 @@ function ApiKeysPanel({ clientId }) {
   async function handleRevoke(id) {
     try {
       await api.post(`/api-keys/${clientId}/${id}/revoke`)
-      toast('API key revocada', 'success')
+      toast.success('API key revocada')
       await loadKeys()
     } catch (e) {
-      toast(e.message, 'error')
+      toast.error(e.message)
     }
   }
 
   async function handleDelete(id) {
     try {
       await api.delete(`/api-keys/${clientId}/${id}`)
-      toast('API key eliminada', 'success')
+      toast.success('API key eliminada')
       await loadKeys()
     } catch (e) {
-      toast(e.message, 'error')
+      toast.error(e.message)
     }
   }
 
@@ -777,7 +777,7 @@ function WebhooksPanel({ clientId }) {
   const [newUrl, setNewUrl] = useState('')
   const [newEvents, setNewEvents] = useState('')
   const [createdSecret, setCreatedSecret] = useState(null)
-  const { toast } = useToast()
+  const toast = useToast()
 
   const loadEndpoints = useCallback(async () => {
     try {
@@ -798,10 +798,10 @@ function WebhooksPanel({ clientId }) {
       setCreatedSecret(result.secret)
       setNewUrl('')
       setNewEvents('')
-      toast('Webhook creado. Copia el secret para verificar las firmas.', 'success')
+      toast.success('Webhook creado. Copia el secret para verificar las firmas.')
       await loadEndpoints()
     } catch (e) {
-      toast(e.message || 'Error creando webhook', 'error')
+      toast.error(e.message || 'Error creando webhook')
     }
     setCreating(false)
   }
@@ -809,10 +809,10 @@ function WebhooksPanel({ clientId }) {
   async function handleDelete(id) {
     try {
       await api.delete(`/webhook-endpoints/${clientId}/${id}`)
-      toast('Webhook eliminado', 'success')
+      toast.success('Webhook eliminado')
       await loadEndpoints()
     } catch (e) {
-      toast(e.message, 'error')
+      toast.error(e.message)
     }
   }
 
@@ -821,7 +821,7 @@ function WebhooksPanel({ clientId }) {
       await api.patch(`/webhook-endpoints/${clientId}/${ep.id}`, { is_active: !ep.is_active })
       await loadEndpoints()
     } catch (e) {
-      toast(e.message, 'error')
+      toast.error(e.message)
     }
   }
 

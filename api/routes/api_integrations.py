@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
+from api.utils.url_validator import validate_url_not_private
 from api.schemas import (
     ApiIntegrationCreateRequest,
     ApiIntegrationOut,
@@ -53,6 +54,14 @@ async def create_api_integration(
     user: CurrentUser = Depends(get_current_user),
 ) -> ApiIntegrationOut:
     _check_client_access(user, client_id)
+
+    # Validación SSRF: rechazar URLs que apunten a IPs privadas/internas
+    if req.url and not validate_url_not_private(req.url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL no permitida: apunta a una dirección privada o interna",
+        )
+
     sb = get_supabase()
 
     data: dict = {
@@ -86,6 +95,14 @@ async def update_api_integration(
     user: CurrentUser = Depends(get_current_user),
 ) -> ApiIntegrationOut:
     _check_client_access(user, client_id)
+
+    # Validación SSRF si se actualiza la URL
+    if req.url and not validate_url_not_private(req.url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL no permitida: apunta a una dirección privada o interna",
+        )
+
     sb = get_supabase()
 
     updates = req.model_dump(exclude_none=True)
@@ -155,6 +172,14 @@ async def test_api_integration(
         raise HTTPException(status_code=404, detail="API integration no encontrada")
 
     row = result.data[0]
+
+    # Validación SSRF antes de ejecutar la llamada
+    test_url = row.get("url", "")
+    if test_url and not validate_url_not_private(test_url):
+        return ApiIntegrationTestResult(
+            success=False,
+            error="URL no permitida: apunta a una dirección privada o interna",
+        )
 
     try:
         from agent.api_executor import execute_api_call

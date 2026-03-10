@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
+from api.utils.url_validator import validate_url_not_private
 from api.schemas import (
     McpServerCreateRequest,
     McpServerOut,
@@ -54,6 +55,14 @@ async def create_mcp_server(
     user: CurrentUser = Depends(get_current_user),
 ) -> McpServerOut:
     _check_client_access(user, client_id)
+
+    # Validación SSRF: rechazar URLs que apunten a IPs privadas/internas
+    if req.url and not validate_url_not_private(req.url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL no permitida: apunta a una dirección privada o interna",
+        )
+
     sb = get_supabase()
 
     data: dict = {
@@ -107,6 +116,14 @@ async def update_mcp_server(
     user: CurrentUser = Depends(get_current_user),
 ) -> McpServerOut:
     _check_client_access(user, client_id)
+
+    # Validación SSRF si se actualiza la URL
+    if req.url and not validate_url_not_private(req.url):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL no permitida: apunta a una dirección privada o interna",
+        )
+
     sb = get_supabase()
 
     updates = req.model_dump(exclude_none=True)
@@ -173,6 +190,14 @@ async def test_mcp_server(
         raise HTTPException(status_code=404, detail="MCP server no encontrado")
 
     row = result.data[0]
+
+    # Validación SSRF antes de conectar
+    server_url = row.get("url", "")
+    if server_url and not validate_url_not_private(server_url):
+        return McpTestResult(
+            success=False,
+            error="URL no permitida: apunta a una dirección privada o interna",
+        )
 
     try:
         from agent.mcp_builder import build_mcp_servers

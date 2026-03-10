@@ -33,6 +33,46 @@ def _check_client(user, client_id: str) -> None:
         raise HTTPException(403, "No autorizado para este cliente")
 
 
+def _mask_api_key(row: dict) -> dict:
+    """Remueve ghl_api_key del row y lo reemplaza con versión enmascarada."""
+    raw_key = row.pop("ghl_api_key", None)
+    row["has_ghl_api_key"] = bool(raw_key)
+    if raw_key and len(raw_key) > 4:
+        row["ghl_api_key_masked"] = "****" + raw_key[-4:]
+    elif raw_key:
+        row["ghl_api_key_masked"] = "****"
+    else:
+        row["ghl_api_key_masked"] = None
+    return row
+
+
+def _verify_ghl_conversation_ownership(sb, user, conversation_id: str) -> dict:
+    """Verifica que la conversación GHL pertenezca al cliente del usuario.
+
+    Retorna la conversación si es válida, lanza 403/404 si no.
+    """
+    role = user.role if hasattr(user, "role") else user.get("role")
+    client_id = user.client_id if hasattr(user, "client_id") else user.get("client_id")
+
+    conv_result = (
+        sb.table("ghl_conversations")
+        .select("*, ghl_configs!inner(client_id)")
+        .eq("id", conversation_id)
+        .limit(1)
+        .execute()
+    )
+    if not conv_result.data:
+        raise HTTPException(404, "Conversación no encontrada")
+
+    conv = conv_result.data[0]
+    config_client_id = conv.get("ghl_configs", {}).get("client_id")
+
+    if role != "admin" and config_client_id != client_id:
+        raise HTTPException(403, "No autorizado para esta conversación")
+
+    return conv
+
+
 # ── Config CRUD (prefix: /api/clients) ──────────────────
 
 
@@ -55,8 +95,7 @@ async def get_ghl_config(
     if not result.data:
         return None
     row = dict(result.data[0])
-    row["has_ghl_api_key"] = bool(row.pop("ghl_api_key", None))
-    return row
+    return _mask_api_key(row)
 
 
 @router.post("/{client_id}/agents/{agent_id}/ghl")
@@ -97,8 +136,7 @@ async def create_ghl_config(
 
     result = sb.table("ghl_configs").insert(record).execute()
     row = dict(result.data[0])
-    row["has_ghl_api_key"] = bool(row.pop("ghl_api_key", None))
-    return row
+    return _mask_api_key(row)
 
 
 @router.patch("/{client_id}/agents/{agent_id}/ghl")
@@ -130,8 +168,7 @@ async def update_ghl_config(
     if not result.data:
         raise HTTPException(404, "Config GHL no encontrada")
     row = dict(result.data[0])
-    row["has_ghl_api_key"] = bool(row.pop("ghl_api_key", None))
-    return row
+    return _mask_api_key(row)
 
 
 @router.delete("/{client_id}/agents/{agent_id}/ghl", response_model=MessageResponse)
@@ -204,6 +241,7 @@ async def get_ghl_messages(
 ) -> list[dict]:
     """Obtiene mensajes de una conversación GHL."""
     sb = _sb()
+    _verify_ghl_conversation_ownership(sb, user, conversation_id)
     result = (
         sb.table("ghl_messages")
         .select("*")
@@ -223,6 +261,7 @@ async def send_ghl_manual_message(
 ) -> MessageResponse:
     """Envía mensaje manual en conversación GHL."""
     sb = _sb()
+    _verify_ghl_conversation_ownership(sb, user, conversation_id)
     message = body.get("message", "")
     if not message:
         raise HTTPException(400, "Mensaje vacío")

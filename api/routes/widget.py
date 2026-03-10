@@ -136,10 +136,13 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
     except Exception as e:
         logger.warning("Could not create room/dispatch: %s", e)
 
+    from datetime import timedelta
+
     token = (
         AccessToken(api_key, api_secret)
         .with_identity(f"widget-user-{uuid.uuid4().hex[:6]}")
         .with_name("Web Visitor")
+        .with_ttl(timedelta(minutes=10))
         .with_grants(
             VideoGrants(
                 room_join=True,

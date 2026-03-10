@@ -128,8 +128,16 @@ async def list_personas(
     query = sb.table("test_personas").select("*").order("created_at", desc=True)
 
     if user.role == "client":
-        # Templates + las del cliente
-        query = query.or_(f"is_template.eq.true,client_id.eq.{user.client_id}")
+        # Templates + las del cliente — validar UUID antes de interpolar
+        client_id_str = str(user.client_id)
+        try:
+            uuid.UUID(client_id_str)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="client_id inválido",
+            )
+        query = query.or_(f"is_template.eq.true,client_id.eq.{client_id_str}")
     # Admin ve todas
 
     if difficulty:

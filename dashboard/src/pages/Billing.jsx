@@ -138,7 +138,17 @@ export function Billing() {
         payment_method: paymentMethod,
       })
       if (data.checkout_url) {
-        window.location.href = data.checkout_url
+        const trustedDomains = [
+          'https://checkout.stripe.com',
+          'https://www.mercadopago.com',
+          'https://sandbox.mercadopago.com',
+        ]
+        if (trustedDomains.some(d => data.checkout_url.startsWith(d))) {
+          window.location.href = data.checkout_url
+        } else {
+          console.error('Untrusted checkout URL:', data.checkout_url)
+          toast.error('URL de pago no confiable. Contacta soporte.')
+        }
       }
     } catch (err) {
       toast.error(err.message || 'Error al procesar compra. Intenta de nuevo.')

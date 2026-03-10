@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.auth_apikey import get_api_key_client, require_scope
 from api.deps import get_supabase
+from api.utils.url_validator import validate_url_not_private
 
 router = APIRouter(prefix="/v1", tags=["public-api-v1"])
 
@@ -84,7 +87,8 @@ async def list_contacts(
         .range(offset, offset + limit - 1)
     )
     if search:
-        query = query.or_(f"name.ilike.%{search}%,phone.ilike.%{search}%,email.ilike.%{search}%")
+        safe_search = re.sub(r'[,.()*%:!]', '', search)  # strip PostgREST special chars
+        query = query.or_(f"name.ilike.%{safe_search}%,phone.ilike.%{safe_search}%,email.ilike.%{safe_search}%")
     result = query.execute()
     return {"data": result.data or [], "count": len(result.data or [])}
 
@@ -209,6 +213,8 @@ async def create_webhook(
         raise HTTPException(status_code=400, detail="url es requerido")
     if not events:
         raise HTTPException(status_code=400, detail="events es requerido (lista de eventos)")
+    if not validate_url_not_private(url):
+        raise HTTPException(status_code=400, detail="URL no permitida: no se permiten direcciones internas o privadas")
     endpoint = await create_webhook_endpoint(api_key["client_id"], url, events, description)
     return {"data": endpoint}
 

@@ -470,7 +470,7 @@ export function QualityMonitor() {
                 <ChevronLeft size={16} />
               </button>
               <span className="text-xs text-text-muted font-mono">
-                {evalOffset + 1}-{evalOffset + evaluations.length}
+                {evaluations.length > 0 ? `${evalOffset + 1}-${evalOffset + evaluations.length}` : '0'}
               </span>
               <button
                 type="button"

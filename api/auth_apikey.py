@@ -41,7 +41,7 @@ def require_scope(scope: str):
 
     async def _check(api_key_record: dict = Security(get_api_key_client)) -> dict:
         scopes = api_key_record.get("scopes") or []
-        if scopes and scope not in scopes and "*" not in scopes:
+        if scope not in scopes and "*" not in scopes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Scope '{scope}' requerido. Tu key tiene: {scopes}",

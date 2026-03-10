@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 RETRY_DELAYS = [5, 30, 120]  # segundos entre reintentos
 
+# Almacenar referencias a tasks para evitar garbage collection prematuro
+_tasks: set[asyncio.Task] = set()
+
 
 def _sign_payload(payload: str, secret: str) -> str:
     """Genera firma HMAC-SHA256 del payload."""
@@ -59,9 +62,11 @@ async def dispatch_event(
         if not event_matches:
             continue
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             _deliver_webhook(ep, event, payload)
         )
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
 
 
 async def _deliver_webhook(
@@ -73,7 +78,15 @@ async def _deliver_webhook(
     """Entrega un webhook con reintentos."""
     sb = get_supabase()
     url = endpoint["url"]
-    secret = endpoint.get("secret", "")
+    secret = endpoint.get("secret") or ""
+
+    if not secret:
+        logger.warning(
+            "Webhook endpoint %s has no secret configured, skipping delivery to %s",
+            endpoint.get("id"),
+            url,
+        )
+        return
 
     body = json.dumps({
         "event": event,

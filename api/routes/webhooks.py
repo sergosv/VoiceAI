@@ -63,6 +63,21 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
 
         if client_id and credits > 0:
             sb = get_supabase()
+
+            # Idempotency: verificar si ya se procesó este payment_id
+            existing = (
+                sb.table("credit_transactions")
+                .select("id")
+                .eq("payment_id", session["id"])
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                logger.info(
+                    "Stripe: payment %s ya procesado — skip duplicado", session["id"]
+                )
+                return {"status": "ok"}
+
             sb.rpc("add_credits", {
                 "p_client_id": client_id,
                 "p_credits": credits,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.cost_rates import build_cost_breakdown
 from api.deps import get_supabase
@@ -23,10 +23,25 @@ async def get_overview(
     sb = get_supabase()
     effective_client_id = user.client_id if user.role == "client" else client_id
 
-    # Datos de llamadas (incluir campos de costo individual y metadata para clasificación)
-    query = sb.table("calls").select(
-        "duration_seconds, cost_total, cost_livekit, cost_stt, cost_llm, "
-        "cost_tts, cost_telephony, metadata, started_at"
+    # Admin sin client_id explícito no debe ver datos de todos los clientes
+    if user.role == "admin" and not effective_client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="client_id is required for admin users",
+        )
+
+    # Datos de llamadas — limitar a últimos 30 días para evitar cargar filas ilimitadas
+    thirty_days_ago = (
+        datetime.now(timezone.utc) - timedelta(days=30)
+    ).date().isoformat()
+    query = (
+        sb.table("calls")
+        .select(
+            "duration_seconds, cost_total, cost_livekit, cost_stt, cost_llm, "
+            "cost_tts, cost_telephony, metadata, started_at"
+        )
+        .gte("started_at", f"{thirty_days_ago}T00:00:00")
+        .limit(5000)
     )
     if effective_client_id:
         query = query.eq("client_id", effective_client_id)
@@ -102,6 +117,13 @@ async def get_usage(
     """Datos de uso diario para gráficas."""
     sb = get_supabase()
     effective_client_id = user.client_id if user.role == "client" else client_id
+
+    # Admin sin client_id explícito no debe ver datos de todos los clientes
+    if user.role == "admin" and not effective_client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="client_id is required for admin users",
+        )
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
 

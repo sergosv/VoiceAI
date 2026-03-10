@@ -21,21 +21,22 @@ async def evaluate_call(call_id: str, sb=None) -> dict | None:
     sb = sb or get_supabase()
 
     # 1. Fetch call data
-    call = sb.table("calls").select("*").eq("id", call_id).single().execute().data
-    if not call:
+    call_result = sb.table("calls").select("*").eq("id", call_id).limit(1).execute()
+    if not call_result.data:
         return None
+    call = call_result.data[0]
 
     # 2. Get agent config (system_prompt)
     agent = None
     if call.get("agent_id"):
-        agent = (
+        agent_result = (
             sb.table("agents")
             .select("name, system_prompt, agent_type")
             .eq("id", call["agent_id"])
-            .single()
+            .limit(1)
             .execute()
-            .data
         )
+        agent = agent_result.data[0] if agent_result.data else None
 
     # 3. Build transcript from metadata or summary
     transcript = ""

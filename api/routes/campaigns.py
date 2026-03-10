@@ -78,6 +78,7 @@ class BulkContactsRequest(BaseModel):
 async def list_campaigns(
     user: CurrentUser = Depends(get_current_user),
     client_id: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
 ) -> list[CampaignOut]:
     """Lista campañas."""
     sb = get_supabase()
@@ -89,6 +90,8 @@ async def list_campaigns(
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)
+
+    query = query.limit(limit)
 
     result = query.execute()
     return [CampaignOut(**row) for row in result.data]
@@ -271,6 +274,7 @@ async def list_campaign_calls(
     campaign_id: str,
     user: CurrentUser = Depends(get_current_user),
     status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(100, ge=1, le=500),
 ) -> list[CampaignCallOut]:
     """Lista las llamadas de una campaña."""
     sb = get_supabase()
@@ -289,6 +293,8 @@ async def list_campaign_calls(
     )
     if status_filter:
         query = query.eq("status", status_filter)
+
+    query = query.limit(limit)
 
     result = query.execute()
     return [CampaignCallOut(**row) for row in result.data]

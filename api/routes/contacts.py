@@ -61,7 +61,9 @@ async def list_contacts(
         query = query.lte("created_at", f"{date_to}T23:59:59")
 
     if search:
-        query = query.or_(f"name.ilike.%{search}%,phone.ilike.%{search}%,email.ilike.%{search}%")
+        import re
+        safe_search = re.sub(r'[,.()*%:!]', '', search)
+        query = query.or_(f"name.ilike.%{safe_search}%,phone.ilike.%{safe_search}%,email.ilike.%{safe_search}%")
 
     offset = (page - 1) * per_page
     query = query.range(offset, offset + per_page - 1)

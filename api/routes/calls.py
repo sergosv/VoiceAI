@@ -88,6 +88,9 @@ async def get_call_stats(
     if effective_client_id:
         query = query.eq("client_id", effective_client_id)
 
+    # Limitar para evitar cargar millones de filas en memoria
+    query = query.limit(10000)
+
     result = query.execute()
     rows = result.data
 

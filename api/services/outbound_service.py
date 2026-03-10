@@ -16,6 +16,9 @@ from api.deps import get_supabase
 
 logger = logging.getLogger(__name__)
 
+# Mantener referencias a tasks de campañas para evitar GC prematuro
+_running_campaigns: set[asyncio.Task] = set()
+
 
 async def start_campaign(campaign_id: str) -> dict:
     """Inicia una campaña: actualiza status y lanza el runner en background."""
@@ -68,8 +71,10 @@ async def start_campaign(campaign_id: str) -> dict:
     if not result.data:
         raise ValueError("La campaña ya está en ejecución o no se puede iniciar")
 
-    # Lanzar runner async
-    asyncio.create_task(_campaign_runner(campaign_id, camp["max_concurrent"]))
+    # Lanzar runner async con referencia para evitar GC
+    task = asyncio.create_task(_campaign_runner(campaign_id, camp["max_concurrent"]))
+    _running_campaigns.add(task)
+    task.add_done_callback(_running_campaigns.discard)
 
     return result.data[0] if result.data else camp
 
@@ -288,6 +293,7 @@ async def _place_outbound_call(
             "attempt": call_entry.get("attempt", 0) + 1,
         }).eq("id", call_entry_id).execute()
 
+        lk_api: LiveKitAPI | None = None
         try:
             lk_api = LiveKitAPI(
                 url=os.environ["LIVEKIT_URL"],
@@ -352,10 +358,6 @@ async def _place_outbound_call(
 
             logger.info("Llamada outbound colocada: %s -> %s (room: %s)", from_number, phone, room_name)
 
-            # NO marcar como completed aquí — el agent session_handler lo hará
-            # cuando la llamada realmente termine. Solo cerramos el API client.
-            await lk_api.aclose()
-
         except Exception as e:
             logger.error("Error en llamada outbound %s: %s", call_entry_id, e)
 
@@ -378,6 +380,9 @@ async def _place_outbound_call(
                     "status": "failed",
                     "result_summary": str(e)[:500],
                 }).eq("id", call_entry_id).execute()
+        finally:
+            if lk_api is not None:
+                await lk_api.aclose()
 
 
 def _update_campaign_counters(sb, campaign_id: str) -> None:

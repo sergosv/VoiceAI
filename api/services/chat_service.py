@@ -372,11 +372,14 @@ async def _execute_mcp_tool(
             )
 
             errlog = open(os.devnull, "w")
-            async with stdio_client(server_params, errlog=errlog) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.call_tool(real_name, tool_args)
-                    return _extract_mcp_result(result)
+            try:
+                async with stdio_client(server_params, errlog=errlog) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        result = await session.call_tool(real_name, tool_args)
+                        return _extract_mcp_result(result)
+            finally:
+                errlog.close()
 
         else:
             # HTTP (SSE o streamable_http)
