@@ -80,9 +80,9 @@ if _extra:
 _cf_pages_domain = os.environ.get("CF_PAGES_DOMAIN", "")
 
 _cf_regex = (
-    rf"https://.*\.{_cf_pages_domain.replace('.', r'\.')}"
+    rf"https://[a-f0-9]+\.{_cf_pages_domain.replace('.', r'\.')}"
     if _cf_pages_domain
-    else r"https://.*\.voiceai-69f\.pages\.dev"
+    else r"https://[a-f0-9]+\.voiceai-69f\.pages\.dev"
 )
 
 app.add_middleware(

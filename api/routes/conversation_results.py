@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from api.routes.auth import get_current_user
+from api.middleware.auth import CurrentUser, get_current_user
 from api.deps import get_supabase
 from api.schemas import ConversationResultOut
 
 router = APIRouter(prefix="/conversation-results", tags=["conversation-results"])
+
+
+def _check_access(user: CurrentUser, client_id: str) -> None:
+    """Verifica que el usuario tenga acceso al client_id solicitado."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
 
 @router.get("/{client_id}", response_model=list[ConversationResultOut])
@@ -19,9 +25,10 @@ async def list_results(
     completed: bool | None = Query(None, description="Filtrar por completado"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> list[ConversationResultOut]:
     """Lista resultados de conversaciones estructuradas."""
+    _check_access(user, client_id)
     sb = get_supabase()
     query = (
         sb.table("conversation_results")
@@ -45,9 +52,10 @@ async def list_results(
 async def get_result(
     client_id: str,
     result_id: str,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> ConversationResultOut:
     """Obtiene un resultado específico."""
+    _check_access(user, client_id)
     sb = get_supabase()
     result = (
         sb.table("conversation_results")
@@ -67,9 +75,10 @@ async def get_mode_stats(
     client_id: str,
     agent_id: str,
     mode: str | None = Query(None),
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Estadísticas agregadas de resultados por agente."""
+    _check_access(user, client_id)
     sb = get_supabase()
     query = (
         sb.table("conversation_results")

@@ -24,6 +24,7 @@ from api.services.whatsapp.gohighlevel import GoHighLevelProvider
 
 logger = logging.getLogger(__name__)
 
+_MAX_LOCKS = 5000
 _locks: dict[str, asyncio.Lock] = {}
 _provider = GoHighLevelProvider()
 
@@ -31,6 +32,11 @@ _provider = GoHighLevelProvider()
 def _get_lock(config_id: str, remote_phone: str) -> asyncio.Lock:
     key = f"ghl:{config_id}:{remote_phone}"
     if key not in _locks:
+        if len(_locks) >= _MAX_LOCKS:
+            keys_to_remove = list(_locks.keys())[:1000]
+            for k in keys_to_remove:
+                if not _locks[k].locked():
+                    del _locks[k]
         _locks[key] = asyncio.Lock()
     return _locks[key]
 

@@ -26,6 +26,8 @@ from api.services.whatsapp.router import get_provider
 logger = logging.getLogger(__name__)
 
 # Lock por (config_id, remote_phone) para evitar race conditions
+# Máximo 5000 locks en memoria — los más viejos se eliminan
+_MAX_LOCKS = 5000
 _locks: dict[str, asyncio.Lock] = {}
 
 
@@ -33,6 +35,12 @@ def _get_lock(config_id: str, remote_phone: str) -> asyncio.Lock:
     """Obtiene o crea un lock por (config_id, phone)."""
     key = f"{config_id}:{remote_phone}"
     if key not in _locks:
+        if len(_locks) >= _MAX_LOCKS:
+            # Eliminar los primeros 1000 locks (los más viejos por orden de inserción)
+            keys_to_remove = list(_locks.keys())[:1000]
+            for k in keys_to_remove:
+                if not _locks[k].locked():
+                    del _locks[k]
         _locks[key] = asyncio.Lock()
     return _locks[key]
 
@@ -373,7 +381,7 @@ async def _resolve_contact(
     }
     try:
         sb.table("contacts").insert(new_contact).execute()
-        logger.info("WA: contacto creado para +%s", clean)
+        logger.info("WA: contacto creado para +%s", normalized)
         return new_contact["id"]
     except Exception as e:
         logger.error("WA: error creando contacto — %s", e)
