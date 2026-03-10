@@ -186,8 +186,12 @@ async def process_ghl_inbound(msg: InboundMessage) -> None:
         await _save_message(sb, conv_id, msg, "inbound")
         sb.table("ghl_conversations").update({
             "last_message_at": datetime.now(timezone.utc).isoformat(),
-            "message_count": (active_conv.data[0].get("message_count", 0) or 0) + 1,
         }).eq("id", conv_id).execute()
+        sb.rpc("increment_message_count", {
+            "p_table_name": "ghl_conversations",
+            "p_conversation_id": conv_id,
+            "p_increment": 1,
+        }).execute()
         return
 
     # Lock por (config_id, phone)
@@ -311,9 +315,13 @@ async def _process_locked(sb: Client, config: dict, msg: InboundMessage) -> None
     try:
         sb.table("ghl_conversations").update({
             "history": serialized,
-            "message_count": (conv_row.get("message_count", 0) or 0) + 2,
             "last_message_at": now,
         }).eq("id", conv_id).execute()
+        sb.rpc("increment_message_count", {
+            "p_table_name": "ghl_conversations",
+            "p_conversation_id": conv_id,
+            "p_increment": 2,
+        }).execute()
     except Exception:
         logger.exception("GHL: error actualizando conversación %s", conv_id)
 

@@ -7,6 +7,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from api.audit import log_audit
 from api.crypto import encrypt_value
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user, require_admin
@@ -176,6 +177,13 @@ async def create_agent(
     result = sb.table("agents").insert(data).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error creando agente")
+    log_audit(
+        "agent.create",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="agent",
+        resource_id=result.data[0]["id"],
+    )
     return agent_out_from_row(result.data[0])
 
 
@@ -330,6 +338,13 @@ async def update_agent(
     result = sb.table("agents").update(updates).eq("id", agent_id).eq("client_id", client_id).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
+    log_audit(
+        "agent.update",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="agent",
+        resource_id=agent_id,
+    )
     return agent_out_from_row(result.data[0])
 
 
@@ -360,6 +375,13 @@ async def delete_agent(
     result = sb.table("agents").delete().eq("id", agent_id).eq("client_id", client_id).execute()
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agente no encontrado")
+    log_audit(
+        "agent.delete",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="agent",
+        resource_id=agent_id,
+    )
     return MessageResponse(message="Agente eliminado")
 
 

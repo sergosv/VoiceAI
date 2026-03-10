@@ -7,8 +7,10 @@ import logging
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
@@ -16,6 +18,7 @@ from api.services.looptalk_service import generate_personas, run_test
 
 logger = logging.getLogger("looptalk")
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Schemas ──────────────────────────────────────────────
@@ -318,7 +321,9 @@ async def generate_test_personas(
 
 
 @router.post("/run", status_code=201)
+@limiter.limit("5/minute")
 async def start_test_run(
+    request: Request,
     req: RunRequest,
     background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),
@@ -387,7 +392,9 @@ async def start_test_run(
 
 
 @router.post("/run/batch", status_code=201)
+@limiter.limit("2/minute")
 async def start_batch_runs(
+    request: Request,
     req: BatchRunRequest,
     background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),

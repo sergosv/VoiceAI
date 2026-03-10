@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from api.audit import log_audit
 from api.middleware.auth import CurrentUser, get_current_user
 from api.services.api_key_service import (
     create_api_key,
@@ -42,6 +43,13 @@ async def create_key(
         scopes=req.scopes,
         expires_at=req.expires_at,
     )
+    log_audit(
+        "apikey.create",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="api_key",
+        resource_id=result.get("id"),
+    )
     return result
 
 
@@ -66,6 +74,13 @@ async def revoke_key(
     ok = await revoke_api_key(key_id, client_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key no encontrada")
+    log_audit(
+        "apikey.revoke",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="api_key",
+        resource_id=key_id,
+    )
     return {"revoked": True}
 
 

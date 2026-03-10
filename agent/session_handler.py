@@ -366,39 +366,20 @@ class SessionHandler:
                 )
             )
 
-        # Actualizar usage_daily (upsert)
-        today = self._started_at.date().isoformat()
-        is_inbound = 1 if self._direction == "inbound" else 0
-        is_outbound = 1 if self._direction == "outbound" else 0
-
-        existing = (
-            sb.table("usage_daily")
-            .select("*")
-            .eq("client_id", self._client_id)
-            .eq("date", today)
-            .limit(1)
-            .execute()
-        )
-
-        if existing.data:
-            row = existing.data[0]
-            sb.table("usage_daily").update({
-                "total_calls": (row.get("total_calls") or 0) + 1,
-                "total_minutes": float(Decimal(str(row.get("total_minutes") or 0)) + duration_minutes),
-                "total_cost": float(Decimal(str(row.get("total_cost") or 0)) + total_cost),
-                "inbound_calls": (row.get("inbound_calls") or 0) + is_inbound,
-                "outbound_calls": (row.get("outbound_calls") or 0) + is_outbound,
-            }).eq("id", row["id"]).execute()
-        else:
-            sb.table("usage_daily").insert({
-                "client_id": self._client_id,
-                "date": today,
-                "total_calls": 1,
-                "total_minutes": float(duration_minutes),
-                "total_cost": float(total_cost),
-                "inbound_calls": is_inbound,
-                "outbound_calls": is_outbound,
-            }).execute()
+        # Actualizar usage_daily (atomic RPC upsert)
+        today_str = self._started_at.date().isoformat()
+        try:
+            await asyncio.to_thread(
+                lambda: sb.rpc("increment_usage_daily", {
+                    "p_client_id": self._client_id,
+                    "p_date": today_str,
+                    "p_calls": 1,
+                    "p_minutes": float(duration_minutes),
+                    "p_cost": float(total_cost),
+                }).execute()
+            )
+        except Exception:
+            logger.exception("Error en increment_usage_daily RPC")
 
 
 def _update_contact_stats(

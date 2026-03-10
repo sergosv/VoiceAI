@@ -180,8 +180,12 @@ async def process_inbound_message(msg: InboundMessage) -> None:
         # Actualizar last_message_at
         sb.table("whatsapp_conversations").update({
             "last_message_at": datetime.now(timezone.utc).isoformat(),
-            "message_count": (active_conv.data[0].get("message_count", 0) or 0) + 1,
         }).eq("id", conv_id).execute()
+        sb.rpc("increment_message_count", {
+            "p_table_name": "whatsapp_conversations",
+            "p_conversation_id": conv_id,
+            "p_increment": 1,
+        }).execute()
         return
 
     # Lock por (config_id, phone)
@@ -330,9 +334,13 @@ async def _process_locked(
     try:
         sb.table("whatsapp_conversations").update({
             "history": serialized,
-            "message_count": (conv_row.get("message_count", 0) or 0) + 2,
             "last_message_at": now,
         }).eq("id", conv_id).execute()
+        sb.rpc("increment_message_count", {
+            "p_table_name": "whatsapp_conversations",
+            "p_conversation_id": conv_id,
+            "p_increment": 2,
+        }).execute()
     except Exception:
         logger.exception("WA: error actualizando conversación %s", conv_id)
 

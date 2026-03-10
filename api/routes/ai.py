@@ -7,15 +7,18 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from google import genai
 from google.genai import types
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import GeneratePromptRequest, ImprovePromptRequest, PromptAIResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 # Referencia: template generico como ejemplo de formato
 _TEMPLATE_DIR = Path(__file__).parent.parent.parent / "config" / "prompts" / "templates"
@@ -116,7 +119,9 @@ Con gusto, Fíjese que). NO sonar robótico.
 
 
 @router.post("/generate-prompt", response_model=PromptAIResponse)
+@limiter.limit("10/minute")
 async def generate_prompt(
+    request: Request,
     req: GeneratePromptRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> PromptAIResponse:
@@ -172,7 +177,9 @@ async def generate_prompt(
 
 
 @router.post("/improve-prompt", response_model=PromptAIResponse)
+@limiter.limit("10/minute")
 async def improve_prompt(
+    request: Request,
     req: ImprovePromptRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> PromptAIResponse:

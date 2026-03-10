@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from api.audit import log_audit
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
 from api.payments import create_mercadopago_preference, create_stripe_checkout
@@ -101,7 +102,7 @@ async def purchase_credits(
     base_url = os.environ.get("DASHBOARD_URL", "https://innotecnia.app")
 
     if purchase.payment_method == "stripe":
-        return await create_stripe_checkout(
+        result = await create_stripe_checkout(
             client_id=purchase.client_id,
             package_id=purchase.package_id,
             package_name=pkg["name"],
@@ -110,8 +111,17 @@ async def purchase_credits(
             success_url=f"{base_url}/billing?status=success",
             cancel_url=f"{base_url}/billing?status=cancelled",
         )
+        log_audit(
+            "billing.purchase",
+            user_id=user.id,
+            client_id=purchase.client_id,
+            resource_type="credit_package",
+            resource_id=purchase.package_id,
+            details={"method": "stripe", "credits": pkg["credits"]},
+        )
+        return result
     elif purchase.payment_method == "mercadopago":
-        return await create_mercadopago_preference(
+        result = await create_mercadopago_preference(
             client_id=purchase.client_id,
             package_id=purchase.package_id,
             package_name=pkg["name"],
@@ -120,6 +130,15 @@ async def purchase_credits(
             success_url=f"{base_url}/billing?status=success",
             cancel_url=f"{base_url}/billing?status=cancelled",
         )
+        log_audit(
+            "billing.purchase",
+            user_id=user.id,
+            client_id=purchase.client_id,
+            resource_type="credit_package",
+            resource_id=purchase.package_id,
+            details={"method": "mercadopago", "credits": pkg["credits"]},
+        )
+        return result
 
     raise HTTPException(
         status.HTTP_400_BAD_REQUEST,

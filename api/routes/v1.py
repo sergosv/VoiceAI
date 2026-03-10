@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from api.auth_apikey import get_api_key_client, require_scope
 from api.deps import get_supabase
 from api.utils.url_validator import validate_url_not_private
 
 router = APIRouter(prefix="/v1", tags=["public-api-v1"])
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ── Calls ──
@@ -200,7 +203,9 @@ async def list_webhooks(
 
 
 @router.post("/webhooks", status_code=status.HTTP_201_CREATED)
+@limiter.limit("60/minute")
 async def create_webhook(
+    request: Request,
     body: dict,
     api_key: dict = Depends(require_scope("webhooks:write")),
 ) -> dict:
@@ -220,7 +225,9 @@ async def create_webhook(
 
 
 @router.delete("/webhooks/{endpoint_id}")
+@limiter.limit("60/minute")
 async def delete_webhook(
+    request: Request,
     endpoint_id: str,
     api_key: dict = Depends(require_scope("webhooks:write")),
 ) -> dict:

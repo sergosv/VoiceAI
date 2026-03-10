@@ -8,6 +8,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from api.audit import log_audit
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user, require_admin
 from api.schemas import (
@@ -540,6 +541,14 @@ async def delete_client(
     )
 
     total = sum(deleted_counts.values())
+    log_audit(
+        "client.gdpr_delete",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="client",
+        resource_id=client_id,
+        details={"deleted_counts": deleted_counts, "total_rows": total},
+    )
     return MessageResponse(
         message=f"Cliente y todos sus datos eliminados ({total} registros)"
     )
