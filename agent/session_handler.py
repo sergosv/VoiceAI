@@ -44,6 +44,7 @@ class SessionHandler:
         campaign_id: str | None = None,
         campaign_script: str | None = None,
         memory_contact_id: str | None = None,
+        recording_key: str | None = None,
     ) -> None:
         self._config = config
         self._client_id = config.client.id
@@ -55,6 +56,7 @@ class SessionHandler:
         self._campaign_id = campaign_id
         self._campaign_script = campaign_script
         self._memory_contact_id = memory_contact_id
+        self._recording_key = recording_key
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
         self._agent_turns: list[dict] = []
@@ -174,6 +176,10 @@ class SessionHandler:
                 "agent_name": self._config.agent.name,
             },
         }
+        # Datos de grabación
+        if self._recording_key:
+            call_data["recording_key"] = self._recording_key
+            call_data["recording_duration_seconds"] = duration_seconds
         if self._agent_turns:
             call_data["agent_turns"] = self._agent_turns
         if self._sentiment_summary:

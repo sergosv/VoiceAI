@@ -395,6 +395,7 @@ class CallOut(BaseModel):
     resumen_ia: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    has_recording: bool = False
 
 
 class CallDetailOut(CallOut):

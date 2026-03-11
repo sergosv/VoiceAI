@@ -10,6 +10,7 @@ import asyncio
 import contextvars
 import json
 import logging
+import os
 import signal
 from datetime import datetime, timezone
 
@@ -301,6 +302,54 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     except Exception:
         logger.exception("Error registering active call — continuing anyway")
 
+    # ========= RECORDING: Start egress if R2 configured =========
+    recording_egress_id: str | None = None
+    recording_key: str | None = None
+    if os.environ.get("R2_ACCESS_KEY_ID"):
+        try:
+            from livekit.api import (
+                LiveKitAPI,
+                RoomCompositeEgressRequest,
+                EncodedFileOutput,
+                EncodedFileType,
+                S3Upload,
+            )
+
+            lk_api = LiveKitAPI()
+            s3_upload = S3Upload(
+                access_key=os.environ["R2_ACCESS_KEY_ID"],
+                secret=os.environ["R2_SECRET_ACCESS_KEY"],
+                bucket=os.environ.get("R2_BUCKET", "voiceai-recordings"),
+                endpoint=os.environ["R2_ENDPOINT"],
+                region="auto",
+                force_path_style=True,
+            )
+
+            recording_key = f"{config.client.id}/{config.agent.id}/{ctx.room.name}.ogg"
+
+            egress_request = RoomCompositeEgressRequest(
+                room_name=ctx.room.name,
+                file_outputs=[EncodedFileOutput(
+                    file_type=EncodedFileType.OGG,
+                    filepath=recording_key,
+                    s3=s3_upload,
+                )],
+                audio_only=True,
+            )
+            egress_info = await lk_api.egress.start_room_composite_egress(
+                egress_request
+            )
+            recording_egress_id = egress_info.egress_id
+            logger.info(
+                "Recording started: egress_id=%s, key=%s",
+                recording_egress_id, recording_key,
+            )
+            await lk_api.aclose()
+        except Exception:
+            logger.exception("Failed to start recording — continuing without it")
+            recording_egress_id = None
+            recording_key = None
+
     # Override del system prompt para outbound con script de campaña
     if outbound_mode and campaign_script:
         from dataclasses import replace
@@ -521,6 +570,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         campaign_id=campaign_id,
         campaign_script=campaign_script,
         memory_contact_id=memory.contact_id if memory else None,
+        recording_key=recording_key,
     )
 
     # ========= BILLING: Start tracking =========
@@ -745,6 +795,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             handler.set_intent_summary(
                 intent_extractor.get_call_intent_summary()
             )
+
+        # Detener grabación de egress si estaba activa
+        if recording_egress_id:
+            try:
+                from livekit.api import LiveKitAPI, StopEgressRequest
+
+                lk_api = LiveKitAPI()
+                await lk_api.egress.stop_egress(
+                    StopEgressRequest(egress_id=recording_egress_id)
+                )
+                logger.info("Recording stopped: %s", recording_egress_id)
+                await lk_api.aclose()
+            except Exception:
+                logger.exception("Failed to stop recording egress")
+
         await handler.finalize(status="completed")
 
         # Quality scoring async (no bloquea el shutdown)

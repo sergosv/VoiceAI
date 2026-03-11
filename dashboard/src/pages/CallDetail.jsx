@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones, Mic } from 'lucide-react'
 import { api } from '../lib/api'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { TranscriptViewer } from '../components/TranscriptViewer'
+import { AudioPlayer } from '../components/AudioPlayer'
 import { PageLoader } from '../components/ui/Spinner'
 
 const SENTIMIENTO_COLORS = {
@@ -174,16 +175,14 @@ export function CallDetail() {
             </>
           )}
 
-          {/* Grabación */}
+          {/* Badge de grabación */}
           {call.recording_url && (
-            <>
-              <h2 className="text-sm font-semibold text-text-secondary pt-2 flex items-center gap-2">
-                <Headphones size={14} className="text-accent" /> Grabacion
-              </h2>
-              <audio controls className="w-full mt-1" preload="metadata">
-                <source src={call.recording_url} />
-              </audio>
-            </>
+            <div className="pt-2">
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent/15 text-accent">
+                <Mic size={12} />
+                Grabacion disponible
+              </span>
+            </div>
           )}
         </Card>
 
@@ -400,8 +399,26 @@ export function CallDetail() {
           </Card>
         )}
 
+        {/* Grabación */}
+        {call.recording_url && (
+          <Card className="lg:col-span-3 space-y-3">
+            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+              <Headphones size={16} className="text-accent" /> Grabacion
+            </h2>
+            <AudioPlayer
+              url={call.recording_url}
+              onDelete={() => {
+                if (!call.id) return
+                api.delete(`/calls/${call.id}/recording`)
+                  .then(() => setCall(prev => ({ ...prev, recording_url: null })))
+                  .catch(() => {})
+              }}
+            />
+          </Card>
+        )}
+
         <Card className="lg:col-span-2">
-          <h2 className="text-sm font-semibold text-text-secondary mb-4">Transcripción</h2>
+          <h2 className="text-sm font-semibold text-text-secondary mb-4">Transcripcion</h2>
           <TranscriptViewer transcript={call.transcript} />
         </Card>
       </div>

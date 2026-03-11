@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Phone, PhoneOutgoing } from 'lucide-react'
+import { Phone, PhoneOutgoing, Mic } from 'lucide-react'
 import { Badge } from './ui/Badge'
 import { Table, Th, Td } from './ui/Table'
 
@@ -52,9 +52,14 @@ export function CallsTable({ calls = [] }) {
             className="hover:bg-bg-hover/50 cursor-pointer transition-colors"
           >
             <Td>
-              {call.direction === 'inbound'
-                ? <Phone size={16} className="text-accent" />
-                : <PhoneOutgoing size={16} className="text-purple-400" />}
+              <span className="flex items-center gap-1.5">
+                {call.direction === 'inbound'
+                  ? <Phone size={16} className="text-accent" />
+                  : <PhoneOutgoing size={16} className="text-purple-400" />}
+                {call.has_recording && (
+                  <Mic size={12} className="text-accent/60" title="Tiene grabacion" />
+                )}
+              </span>
             </Td>
             <Td className="font-mono text-xs">
               {call.caller_number || call.callee_number || '-'}
