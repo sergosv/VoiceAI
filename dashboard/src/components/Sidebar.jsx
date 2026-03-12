@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
   ChevronDown, Bot, Sparkles, BarChart3, FlaskConical, Bell, ClipboardList, Shield, CircleUser,
+  Monitor, BookCopy, UserCog,
 } from 'lucide-react'
 
 const navGroups = [
@@ -57,7 +58,10 @@ const navGroups = [
 const adminGroup = {
   label: 'Admin',
   items: [
+    { to: '/admin/system', icon: Monitor, label: 'Sistema' },
     { to: '/admin/clients', icon: Users, label: 'Clientes' },
+    { to: '/admin/users', icon: UserCog, label: 'Usuarios' },
+    { to: '/admin/templates', icon: BookCopy, label: 'Templates' },
     { to: '/admin/pricing', icon: DollarSign, label: 'Precios' },
     { to: '/admin/providers', icon: Radio, label: 'Providers' },
   ],

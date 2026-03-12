@@ -42,6 +42,9 @@ const ConversationResults = lazy(() => import('./pages/ConversationResults').the
 const AuditLog = lazy(() => import('./pages/AuditLog').then(m => ({ default: m.AuditLog })))
 const Profile = lazy(() => import('./pages/Profile').then(m => ({ default: m.Profile })))
 const ProviderHealth = lazy(() => import('./pages/ProviderHealth').then(m => ({ default: m.ProviderHealth })))
+const AdminUsers = lazy(() => import('./pages/admin/AdminUsers').then(m => ({ default: m.AdminUsers })))
+const AdminTemplates = lazy(() => import('./pages/admin/AdminTemplates').then(m => ({ default: m.AdminTemplates })))
+const AdminSystem = lazy(() => import('./pages/admin/AdminSystem').then(m => ({ default: m.AdminSystem })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -92,6 +95,9 @@ export default function App() {
                 <Route path="/admin/clients/:id" element={<AdminRoute><ClientDetail /></AdminRoute>} />
                 <Route path="/admin/pricing" element={<AdminRoute><PricingConfig /></AdminRoute>} />
                 <Route path="/admin/providers" element={<AdminRoute><ProviderHealth /></AdminRoute>} />
+                <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
+                <Route path="/admin/templates" element={<AdminRoute><AdminTemplates /></AdminRoute>} />
+                <Route path="/admin/system" element={<AdminRoute><AdminSystem /></AdminRoute>} />
               </Route>
 
               {/* Flow Builder — fullscreen sin sidebar */}

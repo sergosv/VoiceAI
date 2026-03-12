@@ -210,6 +210,33 @@ async def template_stats(
     }
 
 
+class UpdateTemplateRequest(BaseModel):
+    is_active: bool | None = None
+    name: str | None = None
+    description: str | None = None
+
+
+@router.patch("/admin/templates/{template_id}")
+async def update_template(
+    template_id: str,
+    body: UpdateTemplateRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Actualizar un template (admin)."""
+    if user.role != "admin":
+        raise HTTPException(403, "Solo admin puede editar templates")
+
+    sb = get_supabase()
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(400, "No hay campos para actualizar")
+
+    result = sb.table("agent_templates").update(updates).eq("id", template_id).execute()
+    if not result.data:
+        raise HTTPException(404, "Template no encontrado")
+    return result.data[0]
+
+
 @router.get("/leads/{client_id}")
 async def get_leads_summary(
     client_id: str,
