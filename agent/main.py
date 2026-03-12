@@ -54,21 +54,22 @@ from agent.voice_quality import (
 
 load_dotenv()
 
-# ── Validación de variables de entorno requeridas ──────────────────
-_REQUIRED_ENV = [
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_KEY",
-    "GOOGLE_API_KEY",
-    "LIVEKIT_URL",
-    "LIVEKIT_API_KEY",
-    "LIVEKIT_API_SECRET",
-]
-_missing = [v for v in _REQUIRED_ENV if not os.environ.get(v)]
-if _missing:
-    raise RuntimeError(
-        f"Variables de entorno requeridas no configuradas: {', '.join(_missing)}. "
-        f"Configúralas en LiveKit Cloud secrets o en .env antes de iniciar."
-    )
+def _validate_env() -> None:
+    """Validar variables de entorno requeridas (llamar en runtime, no en import)."""
+    required = [
+        "SUPABASE_URL",
+        "SUPABASE_SERVICE_KEY",
+        "GOOGLE_API_KEY",
+        "LIVEKIT_URL",
+        "LIVEKIT_API_KEY",
+        "LIVEKIT_API_SECRET",
+    ]
+    missing = [v for v in required if not os.environ.get(v)]
+    if missing:
+        raise RuntimeError(
+            f"Variables de entorno requeridas no configuradas: {', '.join(missing)}. "
+            f"Configúralas en LiveKit Cloud secrets o en .env antes de iniciar."
+        )
 
 # Sentry — error tracking para el agente de voz
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
@@ -992,4 +993,5 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
 
 if __name__ == "__main__":
+    _validate_env()
     agents.cli.run_app(server)

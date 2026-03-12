@@ -304,7 +304,7 @@ async def list_admin_audit_logs(
     if action:
         query = query.eq("action", action)
     if resource_type:
-        query = query.eq("entity_type", resource_type)
+        query = query.eq("resource_type", resource_type)
     if date_from:
         query = query.gte("created_at", date_from)
     if date_to:
