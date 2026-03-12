@@ -47,6 +47,7 @@ from api.services.chat_store import start_cleanup_loop
 from api.services.conversation_cleanup import start_conversation_cleanup
 from api.services.proactive_worker import start_proactive_worker
 from api.services.call_evaluator import start_evaluation_worker
+from api.tasks.credit_alerts import start_credit_alert_worker
 
 def _rate_limit_key(request: Request) -> str:
     """Key function: usa client_id del JWT si existe, sino IP."""
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_proactive_worker()
     start_conversation_cleanup()
     start_evaluation_worker()
+    start_credit_alert_worker()
     yield
 
 

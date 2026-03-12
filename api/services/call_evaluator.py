@@ -150,6 +150,36 @@ async def evaluate_call(call_id: str, sb=None) -> dict | None:
         }
         sb.table("quality_alerts").insert(alert).execute()
 
+        # Enviar email de alerta de calidad
+        try:
+            from api.services.email_service import send_quality_alert
+
+            # Obtener email del cliente
+            client_row = (
+                sb.table("clients")
+                .select("name, email")
+                .eq("id", call["client_id"])
+                .limit(1)
+                .execute()
+            )
+            if client_row.data and client_row.data[0].get("email"):
+                await send_quality_alert(
+                    to=client_row.data[0]["email"],
+                    client_name=client_row.data[0].get("name", "Cliente"),
+                    agent_name=agent["name"] if agent else "Agente",
+                    call_id=call_id,
+                    severity=alert["severity"],
+                    score=analysis.overall_score,
+                    critical_count=analysis.critical_count,
+                    high_count=analysis.high_count,
+                    failure_types=list(
+                        set(f.failure_type.value for f in analysis.failures)
+                    ),
+                    summary=analysis.summary,
+                )
+        except Exception:
+            logger.exception("Error sending quality alert email for call %s", call_id)
+
     logger.info(
         "Evaluated call %s: score=%d failures=%d critical=%d",
         call_id,

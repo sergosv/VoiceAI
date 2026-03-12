@@ -10,6 +10,7 @@ Lógica:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -17,6 +18,32 @@ from datetime import datetime, timezone
 from supabase import Client, create_client
 
 logger = logging.getLogger("credit_alerts")
+
+_worker_task: asyncio.Task | None = None
+
+
+def start_credit_alert_worker(interval_minutes: int = 60) -> None:
+    """Inicia el worker de alertas de créditos como task async."""
+    global _worker_task
+    if _worker_task and not _worker_task.done():
+        logger.warning("Credit alert worker ya está corriendo")
+        return
+    _worker_task = asyncio.create_task(_credit_alert_loop(interval_minutes))
+    logger.info("Credit alert worker started (interval=%dm)", interval_minutes)
+
+
+async def _credit_alert_loop(interval_minutes: int = 60) -> None:
+    """Background loop que revisa balances bajos periódicamente."""
+    await asyncio.sleep(120)  # Esperar a que la app arranque
+    while True:
+        try:
+            await check_low_balances()
+        except asyncio.CancelledError:
+            logger.info("Credit alert worker cancelado")
+            return
+        except Exception:
+            logger.exception("Credit alert worker error")
+        await asyncio.sleep(interval_minutes * 60)
 
 
 def _get_supabase() -> Client:
@@ -83,16 +110,33 @@ async def check_low_balances() -> None:
 async def send_credit_alert_email(
     client_id: str, balance: float, alert_type: str,
 ) -> None:
-    """Envía email de alerta.
+    """Envía email de alerta de créditos bajos via Resend."""
+    from api.services.email_service import send_low_balance_alert
 
-    TODO: Implementar con SendGrid, SES, Resend, etc.
-    """
-    if alert_type == "critical":
-        subject = "URGENTE: Tu agente IA se quedará sin créditos pronto"
-    else:
-        subject = "Aviso: Tu balance de créditos está bajo"
+    sb = _get_supabase()
 
-    logger.info(
-        "Would send '%s' email to client %s (balance: %.0f): %s",
-        alert_type, client_id, balance, subject,
+    # Obtener email y nombre del cliente
+    client = (
+        sb.table("clients")
+        .select("name, email")
+        .eq("id", client_id)
+        .limit(1)
+        .execute()
     )
+    if not client.data or not client.data[0].get("email"):
+        logger.warning("No email for client %s, skipping alert", client_id)
+        return
+
+    client_name = client.data[0].get("name", "Cliente")
+    email = client.data[0]["email"]
+
+    result = await send_low_balance_alert(
+        to=email,
+        client_name=client_name,
+        balance=balance,
+        alert_type=alert_type,
+    )
+    if result:
+        logger.info("Credit alert '%s' sent to %s (%s)", alert_type, email, client_id)
+    else:
+        logger.error("Failed to send credit alert to %s (%s)", email, client_id)

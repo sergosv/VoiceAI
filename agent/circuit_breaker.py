@@ -51,11 +51,14 @@ class ProviderCircuit:
             self._failure_count += 1
             self._last_failure_time = time.time()
             if self._failure_count >= self.failure_threshold:
-                if self._state != CircuitState.OPEN:
+                was_open = self._state == CircuitState.OPEN
+                if not was_open:
                     logger.warning(
                         "Circuit %s: → OPEN after %d failures",
                         self.provider, self._failure_count,
                     )
+                    # Enviar alerta por email (fire-and-forget)
+                    _notify_circuit_open(self.provider, self._failure_count)
                 self._state = CircuitState.OPEN
 
 
@@ -130,3 +133,30 @@ def resolve_provider(component: str, primary: str) -> str:
     # No fallback available — try primary anyway (half-open or forced)
     logger.warning("No fallback for %s/%s — attempting primary anyway", component, primary)
     return primary
+
+
+def _notify_circuit_open(provider: str, failure_count: int) -> None:
+    """Envía alerta por email cuando un circuit breaker se abre (fire-and-forget)."""
+    import asyncio
+    import os
+
+    admin_email = os.environ.get("ADMIN_ALERT_EMAIL", "")
+    if not admin_email:
+        return
+
+    async def _send() -> None:
+        try:
+            from api.services.email_service import send_circuit_open_alert
+            await send_circuit_open_alert(
+                to=admin_email,
+                provider=provider,
+                failure_count=failure_count,
+            )
+        except Exception:
+            logger.exception("Error sending circuit open alert for %s", provider)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_send())
+    except RuntimeError:
+        pass  # No hay event loop, ignorar
