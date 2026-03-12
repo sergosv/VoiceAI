@@ -268,11 +268,13 @@ export function Billing() {
                   {purchasing === pkg.id + 'stripe' ? 'Procesando...' : 'Pagar con tarjeta'}
                 </button>
                 <button
-                  onClick={() => handlePurchase(pkg.id, 'mercadopago')}
-                  disabled={purchasing !== null}
-                  className="w-full bg-sky-500 text-white rounded-lg py-2 text-sm font-medium hover:bg-sky-600 disabled:opacity-50 cursor-pointer transition-colors"
+                  disabled
+                  className="w-full bg-sky-500/30 text-white/50 rounded-lg py-2 text-sm font-medium cursor-not-allowed transition-colors relative"
                 >
-                  {purchasing === pkg.id + 'mercadopago' ? 'Procesando...' : 'Mercado Pago / OXXO'}
+                  Mercado Pago / OXXO
+                  <span className="absolute -top-2 -right-2 bg-sky-500 text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold">
+                    Pronto
+                  </span>
                 </button>
               </div>
             </Card>
