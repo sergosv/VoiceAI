@@ -195,7 +195,6 @@
 
       room.on(lk.RoomEvent.TrackSubscribed, (track) => {
         if (track.kind === 'audio') {
-          // Remove previous audio element if any
           const prev = document.getElementById('vai-audio');
           if (prev) prev.remove();
           const el = track.attach();
@@ -203,6 +202,16 @@
           el.autoplay = true;
           el.style.display = 'none';
           document.body.appendChild(el);
+          // Navegadores bloquean autoplay en elementos dinámicos — forzar .play()
+          el.play().catch((err) => {
+            console.warn('[VoiceAI Widget] Audio autoplay blocked:', err.name);
+            // Reintentar en próximo click del usuario
+            const unlock = () => {
+              el.play().catch(() => {});
+              document.removeEventListener('click', unlock);
+            };
+            document.addEventListener('click', unlock);
+          });
         }
       });
 

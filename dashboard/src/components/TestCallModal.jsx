@@ -85,9 +85,13 @@ export function TestCallModal({ agentSlug, agentName, open, onClose }) {
 
         room.on(RoomEvent.TrackSubscribed, (track) => {
           if (track.kind === Track.Kind.Audio) {
+            const prev = document.getElementById('test-call-audio')
+            if (prev) prev.remove()
             const el = track.attach()
             el.id = 'test-call-audio'
+            el.autoplay = true
             document.body.appendChild(el)
+            el.play().catch(() => {})
           }
         })
 
