@@ -1,4 +1,4 @@
-"""Servicio de llamadas outbound — motor de campañas."""
+"""Servicio de llamadas outbound — motor de campañas con controles anti-abuso."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 from livekit.api import LiveKitAPI
 from livekit.api.sip_service import CreateSIPParticipantRequest
@@ -16,8 +17,75 @@ from api.deps import get_supabase
 
 logger = logging.getLogger(__name__)
 
+# ── Outbound safety limits ─────────────────────────────────────────
+# Configurables via env vars para ajustar sin redeploy
+DAILY_OUTBOUND_LIMIT = int(os.environ.get("OUTBOUND_DAILY_LIMIT", "200"))
+MIN_ANSWER_RATE = float(os.environ.get("OUTBOUND_MIN_ANSWER_RATE", "0.20"))
+MIN_CALLS_FOR_RATE_CHECK = int(os.environ.get("OUTBOUND_MIN_CALLS_RATE_CHECK", "15"))
+MIN_AVG_DURATION_SECONDS = int(os.environ.get("OUTBOUND_MIN_AVG_DURATION", "10"))
+
 # Mantener referencias a tasks de campañas para evitar GC prematuro
 _running_campaigns: set[asyncio.Task] = set()
+
+
+def _check_daily_outbound_limit(sb, client_id: str) -> None:
+    """Verifica que el cliente no exceda el límite diario de llamadas outbound."""
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ).isoformat()
+
+    result = (
+        sb.table("calls")
+        .select("id", count="exact")
+        .eq("client_id", client_id)
+        .eq("direction", "outbound")
+        .gte("started_at", today_start)
+        .execute()
+    )
+    count = result.count or 0
+    if count >= DAILY_OUTBOUND_LIMIT:
+        raise ValueError(
+            f"Límite diario de llamadas outbound alcanzado ({count}/{DAILY_OUTBOUND_LIMIT}). "
+            f"Intenta mañana o contacta al administrador."
+        )
+
+
+def _check_campaign_health(sb, campaign_id: str) -> str | None:
+    """Analiza la salud de una campaña en curso. Retorna razón de pausa o None si OK."""
+    calls = (
+        sb.table("campaign_calls")
+        .select("status, result_summary")
+        .eq("campaign_id", campaign_id)
+        .in_("status", ["completed", "failed", "no_answer", "busy"])
+        .execute()
+    )
+    finished = calls.data or []
+    total = len(finished)
+
+    if total < MIN_CALLS_FOR_RATE_CHECK:
+        return None  # Muy pocas llamadas para evaluar
+
+    # 1. Tasa de contestación — si nadie contesta, parece spam
+    answered = sum(1 for c in finished if c["status"] == "completed")
+    answer_rate = answered / total if total > 0 else 0
+
+    if answer_rate < MIN_ANSWER_RATE:
+        return (
+            f"Tasa de contestación muy baja ({answer_rate:.0%}, mínimo {MIN_ANSWER_RATE:.0%}). "
+            f"Solo {answered} de {total} llamadas fueron contestadas. "
+            f"Verifica que los contactos sean válidos."
+        )
+
+    # 2. Alta tasa de no_answer + busy — base de contactos de mala calidad
+    no_answer = sum(1 for c in finished if c["status"] in ("no_answer", "busy"))
+    no_answer_rate = no_answer / total if total > 0 else 0
+    if no_answer_rate > 0.70:
+        return (
+            f"Demasiadas llamadas sin respuesta ({no_answer_rate:.0%}). "
+            f"{no_answer} de {total} llamadas no fueron contestadas o estaban ocupadas."
+        )
+
+    return None
 
 
 async def start_campaign(campaign_id: str) -> dict:
@@ -46,8 +114,12 @@ async def start_campaign(campaign_id: str) -> dict:
     if not pending.count:
         raise ValueError("No hay contactos pendientes en esta campaña")
 
-    # Verificar créditos suficientes (estimado: 2 min por contacto)
     client_id = camp["client_id"]
+
+    # Verificar límite diario de outbound (protección anti-abuso)
+    _check_daily_outbound_limit(sb, client_id)
+
+    # Verificar créditos suficientes (estimado: 2 min por contacto)
     balance = sb.table("credit_balances").select("balance").eq("client_id", client_id).limit(1).execute()
     current_balance = float((balance.data[0]["balance"]) if balance.data else 0)
     estimated_cost = (pending.count or 0) * 2  # 2 créditos por contacto estimado
@@ -157,6 +229,51 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
             logger.info("Campaña %s ya no está running, deteniendo", campaign_id)
             break
 
+        # Health check: verificar tasa de contestación cada iteración
+        pause_reason = _check_campaign_health(sb, campaign_id)
+        if pause_reason:
+            logger.warning(
+                "Campaign %s auto-paused: %s", campaign_id, pause_reason
+            )
+            sb.table("campaigns").update({
+                "status": "paused",
+            }).eq("id", campaign_id).execute()
+            # Intentar notificar por email
+            try:
+                from api.services.email_service import send_email
+                # Obtener email del admin/owner del cliente
+                camp_full = (
+                    sb.table("campaigns")
+                    .select("client_id")
+                    .eq("id", campaign_id)
+                    .limit(1)
+                    .execute()
+                )
+                if camp_full.data:
+                    cid = camp_full.data[0]["client_id"]
+                    client_row = (
+                        sb.table("clients")
+                        .select("owner_email, name")
+                        .eq("id", cid)
+                        .limit(1)
+                        .execute()
+                    )
+                    owner_email = (client_row.data[0].get("owner_email") if client_row.data else None)
+                    admin_email = os.environ.get("ADMIN_ALERT_EMAIL")
+                    to_email = owner_email or admin_email
+                    if to_email:
+                        import asyncio as _aio
+                        _aio.create_task(send_email(
+                            to=to_email,
+                            subject=f"Campaña pausada automáticamente",
+                            html=f"<p>La campaña fue pausada por controles de seguridad:</p>"
+                                 f"<p><strong>{pause_reason}</strong></p>"
+                                 f"<p>Revisa los contactos y reanuda desde el dashboard.</p>",
+                        ))
+            except Exception:
+                pass  # No bloquear el flujo por fallo de email
+            break
+
         # Actualizar max_concurrent si cambió en DB
         new_max = camp.data[0].get("max_concurrent", current_max)
         if new_max != current_max:
@@ -185,7 +302,6 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
             await asyncio.sleep(5)
             continue
 
-        from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # Fetch pending calls OR retry calls whose retry time has passed
@@ -400,7 +516,6 @@ async def _place_outbound_call(
             current_attempt = call_entry.get("attempt", 0) + 1
 
             if current_attempt < max_retries:
-                from datetime import datetime, timedelta, timezone
                 delay = camp_data.data[0]["retry_delay_minutes"] if camp_data.data else 30
                 next_retry = datetime.now(timezone.utc) + timedelta(minutes=delay)
                 sb.table("campaign_calls").update({
@@ -442,7 +557,6 @@ def _update_campaign_counters(sb, campaign_id: str) -> None:
 
 def _complete_campaign(sb, campaign_id: str) -> None:
     """Marca una campaña como completada con contadores finales."""
-    from datetime import datetime, timezone
     _update_campaign_counters(sb, campaign_id)
     sb.table("campaigns").update({
         "status": "completed",
