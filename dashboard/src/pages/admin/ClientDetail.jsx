@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins, Database, AlertTriangle, Loader2 } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, UserPlus, Phone, PhoneCall, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins, Database, AlertTriangle, Loader2 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button'
 import { Input, Textarea, Select } from '../../components/ui/Input'
 import { Modal } from '../../components/ui/Modal'
 import { CallsTable } from '../../components/CallsTable'
+const TestCallModal = lazy(() => import('../../components/TestCallModal').then(m => ({ default: m.TestCallModal })))
 import { PageLoader } from '../../components/ui/Spinner'
 
 export function ClientDetail() {
@@ -50,6 +51,9 @@ export function ClientDetail() {
   const [giftForm, setGiftForm] = useState({ credits: 100, reason: '' })
   const [giftingCredits, setGiftingCredits] = useState(false)
   const [creditBalance, setCreditBalance] = useState(null)
+
+  // Test call
+  const [testCallAgent, setTestCallAgent] = useState(null)
 
   // Store creation
   const [creatingStore, setCreatingStore] = useState(false)
@@ -434,6 +438,16 @@ export function ClientDetail() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    {agent.slug && (
+                      <Button
+                        variant="secondary"
+                        className="!py-1 !px-2 text-xs hover:!text-green-400 hover:!border-green-400/30"
+                        onClick={(e) => { e.stopPropagation(); setTestCallAgent(agent) }}
+                        title="Llamada de prueba"
+                      >
+                        <PhoneCall size={12} />
+                      </Button>
+                    )}
                     {!agent.phone_number && (
                       <Button
                         variant="secondary"
@@ -730,6 +744,18 @@ export function ClientDetail() {
           </form>
         )}
       </Modal>
+
+      {/* Modal: Llamada de prueba (lazy-loaded para no bundlear livekit-client) */}
+      {testCallAgent && (
+        <Suspense fallback={null}>
+          <TestCallModal
+            agentSlug={testCallAgent.slug}
+            agentName={testCallAgent.name || ''}
+            open={true}
+            onClose={() => setTestCallAgent(null)}
+          />
+        </Suspense>
+      )}
 
       {/* Modal: Regalar créditos */}
       <Modal open={showGiftModal} onClose={() => setShowGiftModal(false)} title="Regalar creditos">

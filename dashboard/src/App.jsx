@@ -47,6 +47,8 @@ const AdminTemplates = lazy(() => import('./pages/admin/AdminTemplates').then(m 
 const AdminSystem = lazy(() => import('./pages/admin/AdminSystem').then(m => ({ default: m.AdminSystem })))
 const AdminApiKeys = lazy(() => import('./pages/admin/AdminApiKeys').then(m => ({ default: m.AdminApiKeys })))
 const AdminAuditLog = lazy(() => import('./pages/admin/AdminAuditLog').then(m => ({ default: m.AdminAuditLog })))
+const AdminPhones = lazy(() => import('./pages/admin/AdminPhones').then(m => ({ default: m.AdminPhones })))
+const AdminWebhookDLQ = lazy(() => import('./pages/admin/AdminWebhookDLQ').then(m => ({ default: m.AdminWebhookDLQ })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -102,6 +104,8 @@ export default function App() {
                 <Route path="/admin/system" element={<AdminRoute><AdminSystem /></AdminRoute>} />
                 <Route path="/admin/api-keys" element={<AdminRoute><AdminApiKeys /></AdminRoute>} />
                 <Route path="/admin/audit" element={<AdminRoute><AdminAuditLog /></AdminRoute>} />
+                <Route path="/admin/phones" element={<AdminRoute><AdminPhones /></AdminRoute>} />
+                <Route path="/admin/webhook-dlq" element={<AdminRoute><AdminWebhookDLQ /></AdminRoute>} />
               </Route>
 
               {/* Flow Builder — fullscreen sin sidebar */}

@@ -410,6 +410,169 @@ async def list_all_api_keys(
     }
 
 
+@router.get("/phone-numbers")
+async def list_phone_numbers(
+    admin: CurrentUser = Depends(require_admin),
+) -> list[dict[str, Any]]:
+    """Lista todos los numeros de telefono asignados a agentes (solo admin)."""
+    sb = get_supabase()
+
+    result = (
+        sb.table("agents")
+        .select("id, name, client_id, phone_number, phone_sid, livekit_sip_trunk_id, agent_type, is_active")
+        .neq("phone_number", "null")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    agents = result.data or []
+
+    # Filtrar los que realmente tienen phone_number (neq null puede no filtrar correctamente)
+    agents = [a for a in agents if a.get("phone_number")]
+
+    # Resolver nombres de clientes
+    client_ids = list({a["client_id"] for a in agents if a.get("client_id")})
+    client_names: dict[str, str] = {}
+    if client_ids:
+        clients_result = (
+            sb.table("clients")
+            .select("id, name")
+            .in_("id", client_ids)
+            .execute()
+        )
+        client_names = {str(c["id"]): c["name"] for c in (clients_result.data or [])}
+
+    return [
+        {
+            "agent_id": a["id"],
+            "agent_name": a.get("name", "Sin nombre"),
+            "client_id": a["client_id"],
+            "client_name": client_names.get(str(a["client_id"]), "Desconocido"),
+            "phone_number": a["phone_number"],
+            "phone_sid": a.get("phone_sid"),
+            "livekit_sip_trunk_id": a.get("livekit_sip_trunk_id"),
+            "agent_type": a.get("agent_type", "inbound"),
+            "is_active": a.get("is_active", True),
+        }
+        for a in agents
+    ]
+
+
+@router.get("/webhook-dlq")
+async def list_webhook_dlq(
+    admin: CurrentUser = Depends(require_admin),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+) -> dict[str, Any]:
+    """Lista entregas en dead letter queue de todos los clientes (solo admin)."""
+    sb = get_supabase()
+
+    offset = (page - 1) * per_page
+    result = (
+        sb.table("webhook_deliveries")
+        .select("id, event, endpoint_id, status_code, error, attempt, delivered_at, payload, webhook_endpoints!inner(url, client_id)", count="exact")
+        .eq("status", "dead_letter")
+        .order("delivered_at", desc=True)
+        .range(offset, offset + per_page - 1)
+        .execute()
+    )
+    deliveries = result.data or []
+
+    # Resolver nombres de clientes
+    client_ids = list({
+        d["webhook_endpoints"]["client_id"]
+        for d in deliveries
+        if d.get("webhook_endpoints", {}).get("client_id")
+    })
+    client_names: dict[str, str] = {}
+    if client_ids:
+        clients_result = (
+            sb.table("clients")
+            .select("id, name")
+            .in_("id", client_ids)
+            .execute()
+        )
+        client_names = {str(c["id"]): c["name"] for c in (clients_result.data or [])}
+
+    data = []
+    for d in deliveries:
+        ep = d.get("webhook_endpoints", {})
+        data.append({
+            "id": d["id"],
+            "event": d.get("event"),
+            "endpoint_url": ep.get("url"),
+            "client_id": ep.get("client_id"),
+            "client_name": client_names.get(str(ep.get("client_id", "")), "Desconocido"),
+            "status_code": d.get("status_code"),
+            "error": d.get("error"),
+            "attempt": d.get("attempt"),
+            "delivered_at": d.get("delivered_at"),
+        })
+
+    return {
+        "data": data,
+        "total": result.count or 0,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+@router.post("/webhook-dlq/{delivery_id}/retry")
+async def admin_retry_dead_letter(
+    delivery_id: str,
+    admin: CurrentUser = Depends(require_admin),
+) -> dict[str, bool]:
+    """Reintenta una entrega en dead letter queue (solo admin). No requiere client_id."""
+    import asyncio
+
+    sb = get_supabase()
+
+    # Obtener la entrega fallida
+    delivery = (
+        sb.table("webhook_deliveries")
+        .select("*")
+        .eq("id", delivery_id)
+        .eq("status", "dead_letter")
+        .limit(1)
+        .execute()
+    )
+    if not delivery.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Entrega no encontrada en DLQ",
+        )
+
+    dlv = delivery.data[0]
+
+    # Obtener el endpoint
+    ep = (
+        sb.table("webhook_endpoints")
+        .select("*")
+        .eq("id", dlv["endpoint_id"])
+        .limit(1)
+        .execute()
+    )
+    if not ep.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Endpoint no encontrado",
+        )
+
+    # Re-despachar el evento
+    from api.services.webhook_service import _deliver_webhook
+
+    asyncio.create_task(
+        _deliver_webhook(ep.data[0], dlv["event"], dlv["payload"])
+    )
+
+    # Marcar el original como reintentado
+    sb.table("webhook_deliveries").update({
+        "status": "retried",
+    }).eq("id", delivery_id).execute()
+
+    logger.info("Admin %s reintentó webhook delivery %s", admin.email, delivery_id)
+    return {"retried": True}
+
+
 @router.patch("/api-keys/{key_id}")
 async def admin_revoke_api_key(
     key_id: str,
