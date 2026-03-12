@@ -214,12 +214,11 @@ async def get_call_detail(
 
     # Generar presigned URL si hay recording_key
     if call.get("recording_key"):
-        try:
-            from api.services.recording_service import generate_presigned_url
+        from api.services.recording_service import generate_presigned_url
 
-            call["recording_url"] = generate_presigned_url(call["recording_key"])
-        except Exception:
-            pass  # recording_url se queda como estaba
+        url = generate_presigned_url(call["recording_key"])
+        if url:
+            call["recording_url"] = url
 
     # Construir desglose de costos con clasificación plataforma/externo
     bd = build_cost_breakdown(call)
@@ -265,6 +264,11 @@ async def get_recording_url(
         from api.services.recording_service import generate_presigned_url
 
         url = generate_presigned_url(call["recording_key"])
+        if not url:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Error generando URL de grabación",
+            )
         return {"url": url, "expires_in": 3600}
     elif call.get("recording_url"):
         return {"url": call["recording_url"], "expires_in": None}
@@ -312,10 +316,11 @@ async def delete_call_recording(
 
         delete_recording(call["recording_key"])
 
-    # Limpiar referencias en DB
+    # Limpiar referencias en DB y marcar como eliminada
     sb.table("calls").update({
         "recording_key": None,
         "recording_url": None,
         "recording_duration_seconds": None,
+        "recording_status": "deleted",
     }).eq("id", call_id).execute()
     return None

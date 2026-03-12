@@ -41,6 +41,7 @@ const QualityMonitor = lazy(() => import('./pages/QualityMonitor').then(m => ({ 
 const ConversationResults = lazy(() => import('./pages/ConversationResults').then(m => ({ default: m.ConversationResults })))
 const AuditLog = lazy(() => import('./pages/AuditLog').then(m => ({ default: m.AuditLog })))
 const Profile = lazy(() => import('./pages/Profile').then(m => ({ default: m.Profile })))
+const ProviderHealth = lazy(() => import('./pages/ProviderHealth').then(m => ({ default: m.ProviderHealth })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -90,6 +91,7 @@ export default function App() {
                 <Route path="/admin/clients/new" element={<AdminRoute><ClientCreate /></AdminRoute>} />
                 <Route path="/admin/clients/:id" element={<AdminRoute><ClientDetail /></AdminRoute>} />
                 <Route path="/admin/pricing" element={<AdminRoute><PricingConfig /></AdminRoute>} />
+                <Route path="/admin/providers" element={<AdminRoute><ProviderHealth /></AdminRoute>} />
               </Route>
 
               {/* Flow Builder — fullscreen sin sidebar */}

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from api.middleware.auth import CurrentUser, get_current_user
 from api.deps import get_supabase
@@ -68,6 +73,63 @@ async def get_result(
     if not result.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resultado no encontrado")
     return ConversationResultOut(**result.data[0])
+
+
+@router.get("/{client_id}/export/csv")
+async def export_results_csv(
+    client_id: str,
+    mode: str | None = Query(None),
+    agent_id: str | None = Query(None),
+    user: CurrentUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """Exporta resultados de conversaciones a CSV."""
+    _check_access(user, client_id)
+    sb = get_supabase()
+    query = (
+        sb.table("conversation_results")
+        .select("*")
+        .eq("client_id", client_id)
+        .order("created_at", desc=True)
+        .limit(5000)
+    )
+    if mode:
+        query = query.eq("mode", mode)
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+
+    result = query.execute()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Fecha", "Modo", "Agente ID", "Completado", "Score", "Max Score",
+        "Aprobado", "Contacto ID", "Respuestas",
+    ])
+    for row in result.data:
+        answers = row.get("answers") or []
+        answers_str = "; ".join(
+            f"Q: {a.get('question', '')[:50]} → A: {a.get('answer', '')[:50]}"
+            for a in answers[:10]
+        ) if isinstance(answers, list) else str(answers)[:200]
+        writer.writerow([
+            row.get("created_at", ""),
+            row.get("mode", ""),
+            row.get("agent_id", ""),
+            row.get("completed", False),
+            row.get("score", ""),
+            row.get("max_score", ""),
+            row.get("passed", ""),
+            row.get("contact_id", ""),
+            answers_str,
+        ])
+
+    output.seek(0)
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=resultados_{today_str}.csv"},
+    )
 
 
 @router.get("/{client_id}/stats/{agent_id}")

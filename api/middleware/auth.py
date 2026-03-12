@@ -104,7 +104,7 @@ async def get_current_user(
     sb = get_supabase()
     result = (
         sb.table("users")
-        .select("id, auth_user_id, email, role, client_id, is_active")
+        .select("id, auth_user_id, email, role, client_id, is_active, password_changed_at")
         .eq("auth_user_id", auth_uid)
         .limit(1)
         .execute()
@@ -122,6 +122,24 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario desactivado",
         )
+
+    # Invalidar tokens emitidos antes de un cambio de password
+    password_changed_at = user.get("password_changed_at")
+    if password_changed_at:
+        from datetime import datetime, timezone as tz
+
+        token_iat = payload.get("iat", 0)
+        try:
+            changed_ts = datetime.fromisoformat(
+                password_changed_at.replace("Z", "+00:00")
+            ).timestamp()
+            if token_iat < changed_ts:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Sesión invalidada por cambio de contraseña",
+                )
+        except (ValueError, TypeError):
+            pass  # Si no se puede parsear, no bloquear
 
     return CurrentUser(
         id=str(user["id"]),

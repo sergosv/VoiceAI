@@ -14,11 +14,14 @@ Admin:
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from api.audit import log_audit
 from api.deps import get_supabase
@@ -167,6 +170,51 @@ async def list_transactions(
         .execute()
     )
     return result.data or []
+
+
+@router.get("/transactions/export/csv")
+async def export_transactions_csv(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+) -> StreamingResponse:
+    """Exporta transacciones de créditos a CSV."""
+    sb = get_supabase()
+    effective_id = user.client_id if user.role == "client" else client_id
+    if not effective_id:
+        return StreamingResponse(io.StringIO(""), media_type="text/csv")
+
+    result = (
+        sb.table("credit_transactions")
+        .select("*")
+        .eq("client_id", effective_id)
+        .order("created_at", desc=True)
+        .limit(5000)
+        .execute()
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Fecha", "Tipo", "Créditos", "Razón", "Referencia", "Balance anterior", "Balance nuevo",
+    ])
+    for row in result.data:
+        writer.writerow([
+            row.get("created_at", ""),
+            row.get("type", ""),
+            row.get("credits", 0),
+            row.get("reason", ""),
+            row.get("reference_id", ""),
+            row.get("balance_before", ""),
+            row.get("balance_after", ""),
+        ])
+
+    output.seek(0)
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=transacciones_{today_str}.csv"},
+    )
 
 
 # ===== ENDPOINTS ADMIN =====

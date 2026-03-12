@@ -59,6 +59,7 @@ const adminGroup = {
   items: [
     { to: '/admin/clients', icon: Users, label: 'Clientes' },
     { to: '/admin/pricing', icon: DollarSign, label: 'Precios' },
+    { to: '/admin/providers', icon: Radio, label: 'Providers' },
   ],
 }
 

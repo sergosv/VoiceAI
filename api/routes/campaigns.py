@@ -78,9 +78,11 @@ class BulkContactsRequest(BaseModel):
 async def list_campaigns(
     user: CurrentUser = Depends(get_current_user),
     client_id: str | None = None,
-    limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    status_filter: str | None = Query(None, alias="status"),
 ) -> list[CampaignOut]:
-    """Lista campañas."""
+    """Lista campañas con paginación."""
     sb = get_supabase()
     query = sb.table("campaigns").select("*").order("created_at", desc=True)
 
@@ -91,7 +93,11 @@ async def list_campaigns(
     elif client_id:
         query = query.eq("client_id", client_id)
 
-    query = query.limit(limit)
+    if status_filter:
+        query = query.eq("status", status_filter)
+
+    offset = (page - 1) * per_page
+    query = query.range(offset, offset + per_page - 1)
 
     result = query.execute()
     return [CampaignOut(**row) for row in result.data]
@@ -274,9 +280,10 @@ async def list_campaign_calls(
     campaign_id: str,
     user: CurrentUser = Depends(get_current_user),
     status_filter: str | None = Query(None, alias="status"),
-    limit: int = Query(100, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
 ) -> list[CampaignCallOut]:
-    """Lista las llamadas de una campaña."""
+    """Lista las llamadas de una campaña con paginación."""
     sb = get_supabase()
 
     existing = sb.table("campaigns").select("client_id").eq("id", campaign_id).limit(1).execute()
@@ -294,7 +301,8 @@ async def list_campaign_calls(
     if status_filter:
         query = query.eq("status", status_filter)
 
-    query = query.limit(limit)
+    offset = (page - 1) * per_page
+    query = query.range(offset, offset + per_page - 1)
 
     result = query.execute()
     return [CampaignCallOut(**row) for row in result.data]

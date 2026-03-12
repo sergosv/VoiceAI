@@ -179,6 +179,29 @@ ALLOWED_CONTENT_TYPES = {
     "audio/ogg", "audio/webm", "audio/flac",
 }
 
+# Magic bytes para validar formato real del archivo
+_AUDIO_MAGIC = {
+    b"RIFF": "WAV",        # WAV (RIFF header)
+    b"\xff\xfb": "MP3",    # MP3 (frame sync)
+    b"\xff\xf3": "MP3",    # MP3 MPEG2 Layer3
+    b"\xff\xf2": "MP3",    # MP3 MPEG2.5 Layer3
+    b"ID3": "MP3",         # MP3 con ID3 tag
+    b"OggS": "OGG",        # OGG container
+    b"fLaC": "FLAC",       # FLAC
+    b"\x1aE\xdf\xa3": "WEBM",  # WebM/Matroska
+}
+
+
+def _validate_audio_magic(data: bytes) -> str | None:
+    """Valida los magic bytes del archivo y retorna el formato detectado o None."""
+    for magic, fmt in _AUDIO_MAGIC.items():
+        if data[:len(magic)] == magic:
+            return fmt
+    # MP4/M4A: buscar "ftyp" en bytes 4-8
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        return "MP4"
+    return None
+
 
 @router.post("/clone", response_model=ClonedVoiceOut, status_code=status.HTTP_201_CREATED)
 async def clone_voice(
@@ -196,7 +219,7 @@ async def clone_voice(
     if user.role == "client" and user.client_id != client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
 
-    # Validar content type
+    # Validar content type (primera capa)
     content_type = audio.content_type or ""
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -216,6 +239,14 @@ async def clone_voice(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Audio demasiado corto. Se necesitan al menos 3 segundos.",
+        )
+
+    # Validar magic bytes (segunda capa — anti-spoofing de Content-Type)
+    detected_format = _validate_audio_magic(audio_data)
+    if not detected_format:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo no es un audio válido. Los headers del archivo no corresponden a WAV, MP3, OGG, FLAC o WebM.",
         )
 
     # La clonación siempre usa las keys de la plataforma (env vars).

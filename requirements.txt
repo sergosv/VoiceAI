@@ -47,6 +47,9 @@ tzdata>=2024.1
 # Rate Limiting
 slowapi>=0.1.9
 
+# Error Tracking
+sentry-sdk[fastapi]>=2.0
+
 # Utilities
 python-dotenv>=1.0
 typer>=0.12

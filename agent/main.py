@@ -14,6 +14,7 @@ import os
 import signal
 from datetime import datetime, timezone
 
+import sentry_sdk
 from dotenv import load_dotenv
 from livekit import agents, rtc
 from livekit.agents import AgentSession, AgentServer, room_io
@@ -52,6 +53,17 @@ from agent.voice_quality import (
 )
 
 load_dotenv()
+
+# Sentry — error tracking para el agente de voz
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        environment=os.environ.get("SENTRY_ENV", "production"),
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.1")),
+        send_default_pii=False,
+        release=f"voiceai-agent@{os.environ.get('LIVEKIT_AGENT_VERSION', 'dev')}",
+    )
 
 logging.basicConfig(
     level=logging.INFO,
@@ -797,6 +809,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             )
 
         # Detener grabación de egress si estaba activa
+        recording_status: str | None = None
         if recording_egress_id:
             try:
                 from livekit.api import LiveKitAPI, StopEgressRequest
@@ -807,10 +820,32 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 )
                 logger.info("Recording stopped: %s", recording_egress_id)
                 await lk_api.aclose()
+
+                # Validar que el archivo se escribió en R2
+                if recording_key:
+                    await asyncio.sleep(2)  # Dar tiempo a R2 para finalizar escritura
+                    from api.services.recording_service import check_exists
+
+                    exists = await asyncio.to_thread(check_exists, recording_key)
+                    if exists:
+                        recording_status = "completed"
+                        logger.info("Recording verified in R2: %s", recording_key)
+                    else:
+                        recording_status = "failed"
+                        logger.warning(
+                            "Recording NOT found in R2 after egress stop: %s",
+                            recording_key,
+                        )
             except Exception:
                 logger.exception("Failed to stop recording egress")
+                recording_status = "failed"
+        elif recording_key:
+            # Egress nunca inició correctamente
+            recording_status = "failed"
 
-        await handler.finalize(status="completed")
+        await handler.finalize(
+            status="completed", recording_status=recording_status,
+        )
 
         # Quality scoring async (no bloquea el shutdown)
         if quality_cfg.enabled and len(handler._transcript) >= 2:
@@ -823,6 +858,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             )
             _bg_tasks.add(task)
             task.add_done_callback(_bg_tasks.discard)
+
+        # Limpiar MCP servers stdio (kill subprocesos huérfanos)
+        if mcp_servers:
+            for srv in mcp_servers:
+                try:
+                    if hasattr(srv, "close"):
+                        await srv.close()
+                    elif hasattr(srv, "shutdown"):
+                        await srv.shutdown()
+                except Exception:
+                    logger.warning("Error closing MCP server: %s", type(srv).__name__)
 
         # Limpiar registro de llamada activa
         try:

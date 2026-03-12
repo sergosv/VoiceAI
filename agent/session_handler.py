@@ -122,6 +122,7 @@ class SessionHandler:
         self,
         status: str = "completed",
         summary: str | None = None,
+        recording_status: str | None = None,
     ) -> None:
         """Finaliza la sesión: calcula costos y guarda en DB."""
         ended_at = datetime.now(timezone.utc)
@@ -180,6 +181,7 @@ class SessionHandler:
         if self._recording_key:
             call_data["recording_key"] = self._recording_key
             call_data["recording_duration_seconds"] = duration_seconds
+            call_data["recording_status"] = recording_status or "pending"
         if self._agent_turns:
             call_data["agent_turns"] = self._agent_turns
         if self._sentiment_summary:

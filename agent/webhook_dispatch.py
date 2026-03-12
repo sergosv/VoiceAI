@@ -88,7 +88,9 @@ async def _deliver(
 
     sb = get_supabase()
 
-    for attempt in range(len(RETRY_DELAYS) + 1):
+    max_attempts = len(RETRY_DELAYS) + 1
+
+    for attempt in range(max_attempts):
         status_code = 0
         error_msg = None
         try:
@@ -96,7 +98,6 @@ async def _deliver(
                 resp = await client.post(url, content=body, headers=headers)
                 status_code = resp.status_code
                 if 200 <= status_code < 300:
-                    # Log success
                     try:
                         sb.table("webhook_deliveries").insert(
                             {
@@ -106,6 +107,7 @@ async def _deliver(
                                 "status_code": status_code,
                                 "success": True,
                                 "attempt": attempt + 1,
+                                "status": "delivered",
                             }
                         ).execute()
                     except Exception:
@@ -115,7 +117,10 @@ async def _deliver(
         except Exception as e:
             error_msg = str(e)[:500]
 
-        # Log failed attempt
+        # Determinar status
+        is_last_attempt = attempt >= max_attempts - 1
+        delivery_status = "dead_letter" if is_last_attempt else "failed"
+
         try:
             sb.table("webhook_deliveries").insert(
                 {
@@ -126,10 +131,17 @@ async def _deliver(
                     "success": False,
                     "attempt": attempt + 1,
                     "error": error_msg,
+                    "status": delivery_status,
                 }
             ).execute()
         except Exception:
             pass
+
+        if is_last_attempt:
+            logger.warning(
+                "Webhook DLQ: endpoint=%s event=%s after %d attempts",
+                endpoint_id, event, attempt + 1,
+            )
 
         if attempt < len(RETRY_DELAYS):
             await asyncio.sleep(RETRY_DELAYS[attempt])

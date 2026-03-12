@@ -85,6 +85,32 @@ async def update_endpoint(
     return result
 
 
+@router.post("/{client_id}/{endpoint_id}/rotate-secret")
+async def rotate_secret(
+    client_id: str,
+    endpoint_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Rota el secret de un webhook endpoint. Retorna el nuevo secret (SOLO en esta respuesta)."""
+    _check_access(user, client_id)
+    import secrets
+
+    from api.deps import get_supabase
+
+    new_secret = secrets.token_hex(32)
+    sb = get_supabase()
+    result = (
+        sb.table("webhook_endpoints")
+        .update({"secret": new_secret})
+        .eq("id", endpoint_id)
+        .eq("client_id", client_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Webhook no encontrado")
+    return {"secret": new_secret, "message": "Secret rotado. Actualiza tu servidor con el nuevo secret."}
+
+
 @router.delete("/{client_id}/{endpoint_id}")
 async def delete_endpoint(
     client_id: str,
@@ -104,8 +130,86 @@ async def get_deliveries(
     client_id: str,
     endpoint_id: str,
     limit: int = Query(50, ge=1, le=200),
+    status_filter: str | None = Query(None, alias="status"),
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
-    """Lista entregas de un webhook endpoint."""
+    """Lista entregas de un webhook endpoint. Filtrar por status=dead_letter para ver DLQ."""
     _check_access(user, client_id)
-    return await list_deliveries(endpoint_id, limit)
+    return await list_deliveries(endpoint_id, limit, status_filter=status_filter)
+
+
+@router.get("/{client_id}/dead-letter")
+async def list_dead_letters(
+    client_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    user: CurrentUser = Depends(get_current_user),
+) -> list[dict]:
+    """Lista todas las entregas en dead letter queue del cliente."""
+    _check_access(user, client_id)
+    from api.deps import get_supabase
+
+    sb = get_supabase()
+    result = (
+        sb.table("webhook_deliveries")
+        .select("*, webhook_endpoints!inner(client_id, url)")
+        .eq("webhook_endpoints.client_id", client_id)
+        .eq("status", "dead_letter")
+        .order("delivered_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return result.data or []
+
+
+@router.post("/{client_id}/{endpoint_id}/deliveries/{delivery_id}/retry")
+async def retry_dead_letter(
+    client_id: str,
+    endpoint_id: str,
+    delivery_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Reintenta una entrega en dead letter queue."""
+    _check_access(user, client_id)
+    from api.deps import get_supabase
+
+    sb = get_supabase()
+
+    # Obtener la entrega fallida
+    delivery = (
+        sb.table("webhook_deliveries")
+        .select("*")
+        .eq("id", delivery_id)
+        .eq("endpoint_id", endpoint_id)
+        .eq("status", "dead_letter")
+        .limit(1)
+        .execute()
+    )
+    if not delivery.data:
+        raise HTTPException(status_code=404, detail="Entrega no encontrada en DLQ")
+
+    # Obtener el endpoint
+    ep = (
+        sb.table("webhook_endpoints")
+        .select("*")
+        .eq("id", endpoint_id)
+        .eq("client_id", client_id)
+        .limit(1)
+        .execute()
+    )
+    if not ep.data:
+        raise HTTPException(status_code=404, detail="Endpoint no encontrado")
+
+    # Re-despachar el evento
+    from api.services.webhook_service import _deliver_webhook
+
+    import asyncio
+    task = asyncio.create_task(
+        _deliver_webhook(ep.data[0], delivery.data[0]["event"], delivery.data[0]["payload"])
+    )
+
+    # Marcar el original como reintentado
+    sb.table("webhook_deliveries").update({
+        "status": "retried",
+    }).eq("id", delivery_id).execute()
+
+    return {"retried": True}

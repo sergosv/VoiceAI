@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import sentry_sdk
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +20,18 @@ from slowapi.util import get_remote_address
 from api.logging_config import RequestIdMiddleware, setup_logging
 
 load_dotenv()
+
+# Sentry — error tracking & performance monitoring
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        environment=os.environ.get("SENTRY_ENV", "production"),
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.2")),
+        profiles_sample_rate=float(os.environ.get("SENTRY_PROFILES_RATE", "0.1")),
+        send_default_pii=False,
+        release=f"voiceai-api@{os.environ.get('RAILWAY_GIT_COMMIT_SHA', 'dev')[:8]}",
+    )
 
 # Configurar logging estructurado (JSON en producción)
 setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
@@ -35,8 +48,23 @@ from api.services.conversation_cleanup import start_conversation_cleanup
 from api.services.proactive_worker import start_proactive_worker
 from api.services.call_evaluator import start_evaluation_worker
 
-# Rate limiter global
-limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+def _rate_limit_key(request: Request) -> str:
+    """Key function: usa client_id del JWT si existe, sino IP."""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        try:
+            import jwt as _jwt
+            payload = _jwt.decode(auth[7:], options={"verify_signature": False})
+            sub = payload.get("sub", "")
+            if sub:
+                return f"user:{sub}"
+        except Exception:
+            pass
+    return get_remote_address(request)
+
+
+# Rate limiter — per-client cuando hay JWT, per-IP cuando no
+limiter = Limiter(key_func=_rate_limit_key, default_limits=["120/minute"])
 
 
 @asynccontextmanager
@@ -141,6 +169,88 @@ async def health_check() -> dict:
         "service": "voice-ai-platform",
         "version": app.version,
         "circuits": circuits,
+    }
+
+
+@app.get("/api/admin/provider-health")
+async def provider_health() -> dict:
+    """Estado de salud de providers externos basado en llamadas recientes."""
+    from api.deps import get_supabase as _get_sb
+
+    sb = _get_sb()
+
+    # Últimas 200 llamadas para analizar tasa de éxito por provider
+    calls = (
+        sb.table("calls")
+        .select("status, metadata, started_at, duration_seconds")
+        .order("started_at", desc=True)
+        .limit(200)
+        .execute()
+    )
+
+    # Agrupar por provider
+    providers: dict[str, dict] = {}
+    for row in calls.data or []:
+        meta = row.get("metadata") or {}
+        for key in ("stt_provider", "llm_provider", "tts_provider"):
+            prov = meta.get(key)
+            if not prov:
+                continue
+            component = key.replace("_provider", "").upper()
+            label = f"{component}/{prov}"
+            if label not in providers:
+                providers[label] = {
+                    "component": component,
+                    "provider": prov,
+                    "total_calls": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "last_seen": None,
+                }
+            p = providers[label]
+            p["total_calls"] += 1
+            if row.get("status") == "completed":
+                p["successful"] += 1
+            else:
+                p["failed"] += 1
+            if not p["last_seen"] or (row.get("started_at") or "") > p["last_seen"]:
+                p["last_seen"] = row.get("started_at")
+
+    # Calcular health score y status
+    for label, p in providers.items():
+        total = p["total_calls"]
+        if total == 0:
+            p["health"] = "unknown"
+            p["success_rate"] = 0
+        else:
+            rate = p["successful"] / total
+            p["success_rate"] = round(rate * 100, 1)
+            if rate >= 0.95:
+                p["health"] = "healthy"
+            elif rate >= 0.8:
+                p["health"] = "degraded"
+            else:
+                p["health"] = "critical"
+
+    # Circuit breaker state (si está disponible en este proceso)
+    try:
+        from agent.circuit_breaker import get_all_circuits
+        circuits = get_all_circuits()
+    except Exception:
+        circuits = {}
+
+    # Fallback chains
+    try:
+        from agent.circuit_breaker import FALLBACK_CHAINS
+        fallbacks = {k: dict(v) for k, v in FALLBACK_CHAINS.items()}
+    except Exception:
+        fallbacks = {}
+
+    return {
+        "providers": list(providers.values()),
+        "circuits": circuits,
+        "fallback_chains": fallbacks,
+        "total_calls_analyzed": len(calls.data or []),
     }
 
 

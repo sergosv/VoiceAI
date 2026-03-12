@@ -142,13 +142,31 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
     logger.info("Campaign runner iniciado: %s (max_concurrent=%d)", campaign_id, max_concurrent)
 
     semaphore = asyncio.Semaphore(max_concurrent)
+    current_max = max_concurrent
 
     while True:
-        # Verificar que la campaña sigue running
-        camp = sb.table("campaigns").select("status").eq("id", campaign_id).limit(1).execute()
+        # Verificar que la campaña sigue running + leer max_concurrent dinámico
+        camp = (
+            sb.table("campaigns")
+            .select("status, max_concurrent")
+            .eq("id", campaign_id)
+            .limit(1)
+            .execute()
+        )
         if not camp.data or camp.data[0]["status"] != "running":
             logger.info("Campaña %s ya no está running, deteniendo", campaign_id)
             break
+
+        # Actualizar max_concurrent si cambió en DB
+        new_max = camp.data[0].get("max_concurrent", current_max)
+        if new_max != current_max:
+            logger.info(
+                "Campaign %s: max_concurrent cambiado %d → %d",
+                campaign_id, current_max, new_max,
+            )
+            # Recrear semáforo con nuevo límite
+            semaphore = asyncio.Semaphore(new_max)
+            current_max = new_max
 
         # Verificar si hay llamadas activas (calling)
         active = (
@@ -161,7 +179,7 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
         active_count = active.count or 0
 
         # Obtener siguiente batch de llamadas pendientes
-        slots_available = max(max_concurrent - active_count, 0)
+        slots_available = max(current_max - active_count, 0)
 
         if slots_available <= 0:
             await asyncio.sleep(5)

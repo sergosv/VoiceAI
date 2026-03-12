@@ -9,6 +9,8 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from supabase import create_client as create_supabase_client
 
+from datetime import datetime, timezone
+
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user, require_admin
 from api.schemas import MessageResponse, RegisterUserRequest, UserOut
@@ -120,6 +122,47 @@ async def update_profile(
 
     sb.table("users").update(updates).eq("id", user.id).execute()
     return {"ok": True}
+
+
+@router.post("/change-password", response_model=MessageResponse)
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+) -> MessageResponse:
+    """Cambia la contraseña del usuario e invalida sesiones previas."""
+    body = await request.json()
+    new_password = body.get("new_password", "")
+
+    if len(new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe tener al menos 8 caracteres",
+        )
+
+    # Actualizar password en Supabase Auth
+    sb_admin = create_supabase_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_KEY"],
+    )
+    try:
+        sb_admin.auth.admin.update_user_by_id(
+            user.auth_user_id,
+            {"password": new_password},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error actualizando contraseña: {e}",
+        )
+
+    # Marcar timestamp para invalidar tokens previos
+    sb = get_supabase()
+    sb.table("users").update({
+        "password_changed_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", user.id).execute()
+
+    return MessageResponse(message="Contraseña actualizada. Inicia sesión de nuevo.")
 
 
 @router.post("/register-user", response_model=UserOut, status_code=201)

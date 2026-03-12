@@ -17,9 +17,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY agent/ ./agent/
 COPY config/ ./config/
 
-
 # Pre-descargar modelos (silero VAD, turn detector)
 RUN python -m agent.main download-files
+
+# Crear usuario no-root
+RUN groupadd -r voiceai && useradd -r -g voiceai -d /app -s /sbin/nologin voiceai && \
+    chown -R voiceai:voiceai /app
+USER voiceai
 
 # Entrypoint
 CMD ["python", "-m", "agent.main", "start"]

@@ -118,6 +118,14 @@ async def _deliver_webhook(
         error = str(exc)[:500]
         logger.warning("Webhook delivery failed: %s -> %s (%s)", event, url, error)
 
+    # Determinar status de la entrega
+    if success:
+        delivery_status = "delivered"
+    elif attempt >= MAX_RETRIES:
+        delivery_status = "dead_letter"
+    else:
+        delivery_status = "failed"
+
     # Log la entrega
     sb.table("webhook_deliveries").insert({
         "endpoint_id": endpoint["id"],
@@ -128,7 +136,14 @@ async def _deliver_webhook(
         "attempt": attempt,
         "success": success,
         "error": error,
+        "status": delivery_status,
     }).execute()
+
+    if delivery_status == "dead_letter":
+        logger.warning(
+            "Webhook DLQ: %s -> %s after %d attempts (event=%s)",
+            endpoint.get("id"), url, attempt, event,
+        )
 
     # Reintentar si falló
     if not success and attempt < MAX_RETRIES:
@@ -206,15 +221,18 @@ async def delete_webhook_endpoint(endpoint_id: str, client_id: str) -> bool:
 async def list_deliveries(
     endpoint_id: str,
     limit: int = 50,
+    status_filter: str | None = None,
 ) -> list[dict]:
-    """Lista entregas de un webhook endpoint."""
+    """Lista entregas de un webhook endpoint, opcionalmente filtradas por status."""
     sb = get_supabase()
-    result = (
+    query = (
         sb.table("webhook_deliveries")
         .select("*")
         .eq("endpoint_id", endpoint_id)
         .order("delivered_at", desc=True)
         .limit(limit)
-        .execute()
     )
+    if status_filter:
+        query = query.eq("status", status_filter)
+    result = query.execute()
     return result.data or []
