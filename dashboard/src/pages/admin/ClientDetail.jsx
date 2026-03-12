@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, UserPlus, Phone, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins, Database, AlertTriangle, Loader2 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
@@ -50,6 +50,9 @@ export function ClientDetail() {
   const [giftForm, setGiftForm] = useState({ credits: 100, reason: '' })
   const [giftingCredits, setGiftingCredits] = useState(false)
   const [creditBalance, setCreditBalance] = useState(null)
+
+  // Store creation
+  const [creatingStore, setCreatingStore] = useState(false)
 
   // Orchestration state
   const [orchOpen, setOrchOpen] = useState(false)
@@ -132,6 +135,23 @@ export function ClientDetail() {
     }
   }
 
+  async function handleDeleteAgent(agent) {
+    const ok = await confirm({
+      title: 'Eliminar agente',
+      message: `Eliminar "${agent.name}"? Se borraran sus configuraciones, flujos y documentos asociados.`,
+      confirmText: 'Eliminar',
+      variant: 'danger',
+    })
+    if (!ok) return
+    try {
+      await api.delete(`/clients/${id}/agents/${agent.id}`)
+      setAgents(prev => prev.filter(a => a.id !== agent.id))
+      toast.success(`Agente "${agent.name}" eliminado`)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   async function handleCreateAgent(e) {
     e.preventDefault()
     setCreatingAgent(true)
@@ -171,6 +191,19 @@ export function ClientDetail() {
       toast.error(err.message)
     } finally {
       setGiftingCredits(false)
+    }
+  }
+
+  async function handleCreateStore() {
+    setCreatingStore(true)
+    try {
+      const updated = await api.post(`/clients/${id}/create-store`)
+      setClient(updated)
+      toast.success('FileSearchStore creado exitosamente')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setCreatingStore(false)
     }
   }
 
@@ -336,9 +369,32 @@ export function ClientDetail() {
               { value: 'false', label: 'Inactivo' },
             ]}
           />
-          <div className="text-xs text-text-muted space-y-1">
-            <p>Store: <span className="font-mono text-[10px]">{client.file_search_store_id || 'N/A'}</span></p>
-          </div>
+          {client.file_search_store_id ? (
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <Database size={12} className="text-green-400" />
+              <span>Store: <span className="font-mono text-[10px]">{client.file_search_store_id}</span></span>
+            </div>
+          ) : (
+            <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+              <div className="flex items-center gap-2 text-sm text-yellow-400 mb-2">
+                <AlertTriangle size={14} />
+                <span className="font-medium">Sin FileSearchStore</span>
+              </div>
+              <p className="text-xs text-text-muted mb-2">
+                El cliente no tiene base de conocimientos. Los agentes no podran buscar documentos.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleCreateStore}
+                disabled={creatingStore}
+              >
+                {creatingStore
+                  ? <><Loader2 size={12} className="animate-spin mr-1.5 inline" /> Creando...</>
+                  : <><Database size={12} className="mr-1.5 inline" /> Crear Store</>}
+              </Button>
+            </div>
+          )}
         </Card>
 
         {/* Agents list */}
@@ -387,6 +443,13 @@ export function ClientDetail() {
                         <Phone size={12} />
                       </Button>
                     )}
+                    <Button
+                      variant="secondary"
+                      className="!py-1 !px-2 text-xs hover:!text-danger hover:!border-danger/30"
+                      onClick={(e) => { e.stopPropagation(); handleDeleteAgent(agent) }}
+                    >
+                      <Trash2 size={12} />
+                    </Button>
                   </div>
                 </div>
               ))}

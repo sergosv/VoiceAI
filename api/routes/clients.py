@@ -451,6 +451,49 @@ async def assign_phone(
     return client_out_from_row(row)
 
 
+@router.post("/{client_id}/create-store", response_model=ClientOut)
+async def create_store(
+    client_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> ClientOut:
+    """Crea (o reintenta) el FileSearchStore de Gemini para un cliente sin store."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    sb = get_supabase()
+    client = sb.table("clients").select("id, slug, file_search_store_id").eq("id", client_id).limit(1).execute()
+    if not client.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+
+    if client.data[0].get("file_search_store_id"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El cliente ya tiene un FileSearchStore configurado",
+        )
+
+    slug = client.data[0]["slug"]
+    try:
+        store_id, store_name = await asyncio.to_thread(
+            create_gemini_store, slug, os.environ["GOOGLE_API_KEY"]
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error creando FileSearchStore: {e}",
+        )
+
+    result = sb.table("clients").update({
+        "file_search_store_id": store_id,
+        "file_search_store_name": store_name,
+    }).eq("id", client_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error actualizando cliente")
+
+    logger.info("FileSearchStore creado para cliente %s: %s", client_id, store_id)
+    return client_out_from_row(result.data[0])
+
+
 @router.delete("/{client_id}", response_model=MessageResponse)
 async def delete_client(
     client_id: str,

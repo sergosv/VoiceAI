@@ -45,6 +45,8 @@ const ProviderHealth = lazy(() => import('./pages/ProviderHealth').then(m => ({ 
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers').then(m => ({ default: m.AdminUsers })))
 const AdminTemplates = lazy(() => import('./pages/admin/AdminTemplates').then(m => ({ default: m.AdminTemplates })))
 const AdminSystem = lazy(() => import('./pages/admin/AdminSystem').then(m => ({ default: m.AdminSystem })))
+const AdminApiKeys = lazy(() => import('./pages/admin/AdminApiKeys').then(m => ({ default: m.AdminApiKeys })))
+const AdminAuditLog = lazy(() => import('./pages/admin/AdminAuditLog').then(m => ({ default: m.AdminAuditLog })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
 
 export default function App() {
@@ -98,6 +100,8 @@ export default function App() {
                 <Route path="/admin/users" element={<AdminRoute><AdminUsers /></AdminRoute>} />
                 <Route path="/admin/templates" element={<AdminRoute><AdminTemplates /></AdminRoute>} />
                 <Route path="/admin/system" element={<AdminRoute><AdminSystem /></AdminRoute>} />
+                <Route path="/admin/api-keys" element={<AdminRoute><AdminApiKeys /></AdminRoute>} />
+                <Route path="/admin/audit" element={<AdminRoute><AdminAuditLog /></AdminRoute>} />
               </Route>
 
               {/* Flow Builder — fullscreen sin sidebar */}

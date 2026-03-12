@@ -277,17 +277,26 @@ async def _resolve_sip_trunk(
         client_trunk_id = client_row.data[0]["livekit_sip_trunk_id"]
         client_phone = client_row.data[0].get("phone_number", "")
 
-    # Validar trunk del agente
+    # Validar trunk del agente (fuente de verdad para routing)
     if agent_trunk_id:
         if await _validate_trunk_exists(lk, agent_trunk_id):
+            if client_phone and agent_phone and client_phone != agent_phone:
+                logger.info(
+                    "Agent phone (%s) differs from client phone (%s) — using agent phone",
+                    agent_phone, client_phone,
+                )
             return agent_trunk_id, agent_phone
         logger.warning(
             "Trunk del agente '%s' no existe en LiveKit, usando fallback del cliente",
             agent_trunk_id,
         )
 
-    # Fallback: trunk del cliente
+    # Fallback: trunk del cliente (legacy, solo si agente no tiene trunk propio)
     if client_trunk_id:
+        logger.info(
+            "Agent %s sin trunk propio, usando trunk del cliente como fallback",
+            agent_id or "N/A",
+        )
         if await _validate_trunk_exists(lk, client_trunk_id):
             return client_trunk_id, client_phone
         logger.error(

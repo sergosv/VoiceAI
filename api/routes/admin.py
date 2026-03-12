@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from api.deps import get_supabase
@@ -277,3 +277,156 @@ async def system_overview(
         failed_webhooks=failed_webhooks,
         active_campaigns=active_campaigns,
     )
+
+
+@router.get("/audit-logs")
+async def list_admin_audit_logs(
+    admin: CurrentUser = Depends(require_admin),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+    user_id: str | None = None,
+    action: str | None = None,
+    resource_type: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any]:
+    """Lista global de audit logs para admin, con filtros y paginación."""
+    sb = get_supabase()
+
+    query = (
+        sb.table("audit_logs")
+        .select("*", count="exact")
+        .order("created_at", desc=True)
+    )
+
+    if user_id:
+        query = query.eq("user_id", user_id)
+    if action:
+        query = query.eq("action", action)
+    if resource_type:
+        query = query.eq("entity_type", resource_type)
+    if date_from:
+        query = query.gte("created_at", date_from)
+    if date_to:
+        # Incluir todo el día final
+        query = query.lte("created_at", date_to + "T23:59:59.999Z")
+
+    offset = (page - 1) * per_page
+    query = query.range(offset, offset + per_page - 1)
+    result = query.execute()
+    logs = result.data or []
+
+    # Resolver emails de usuarios
+    user_ids = list({log["user_id"] for log in logs if log.get("user_id")})
+    user_emails: dict[str, str] = {}
+    if user_ids:
+        users_result = (
+            sb.table("users")
+            .select("id, email")
+            .in_("id", user_ids)
+            .execute()
+        )
+        user_emails = {str(u["id"]): u["email"] for u in (users_result.data or [])}
+
+    # Resolver nombres de clientes
+    client_ids = list({log["client_id"] for log in logs if log.get("client_id")})
+    client_names: dict[str, str] = {}
+    if client_ids:
+        clients_result = (
+            sb.table("clients")
+            .select("id, name")
+            .in_("id", client_ids)
+            .execute()
+        )
+        client_names = {str(c["id"]): c["name"] for c in (clients_result.data or [])}
+
+    # Enriquecer logs con email y nombre de cliente
+    enriched = []
+    for log in logs:
+        entry = dict(log)
+        entry["user_email"] = user_emails.get(str(log.get("user_id", "")))
+        entry["client_name"] = client_names.get(str(log.get("client_id", "")))
+        enriched.append(entry)
+
+    return {
+        "data": enriched,
+        "total": result.count or 0,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+@router.get("/api-keys")
+async def list_all_api_keys(
+    admin: CurrentUser = Depends(require_admin),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+) -> dict[str, Any]:
+    """Lista todas las API keys de todos los clientes (solo admin)."""
+    sb = get_supabase()
+
+    offset = (page - 1) * per_page
+    result = (
+        sb.table("api_keys")
+        .select("id, client_id, name, key_prefix, scopes, is_active, last_used_at, created_at", count="exact")
+        .order("created_at", desc=True)
+        .range(offset, offset + per_page - 1)
+        .execute()
+    )
+    keys = result.data or []
+
+    # Resolver nombres de clientes
+    client_ids = list({k["client_id"] for k in keys if k.get("client_id")})
+    client_names: dict[str, str] = {}
+    if client_ids:
+        clients_result = (
+            sb.table("clients")
+            .select("id, name")
+            .in_("id", client_ids)
+            .execute()
+        )
+        client_names = {str(c["id"]): c["name"] for c in (clients_result.data or [])}
+
+    data = []
+    for k in keys:
+        prefix = k.get("key_prefix", "")
+        data.append({
+            "id": k["id"],
+            "client_id": k["client_id"],
+            "client_name": client_names.get(str(k["client_id"]), "Desconocido"),
+            "name": k.get("name"),
+            "key_prefix": (prefix[:8] + "...") if len(prefix) > 8 else prefix + "...",
+            "scopes": k.get("scopes", []),
+            "is_active": k.get("is_active", True),
+            "created_at": k.get("created_at"),
+            "last_used_at": k.get("last_used_at"),
+        })
+
+    return {
+        "data": data,
+        "total": result.count or 0,
+        "page": page,
+        "per_page": per_page,
+    }
+
+
+@router.patch("/api-keys/{key_id}")
+async def admin_revoke_api_key(
+    key_id: str,
+    admin: CurrentUser = Depends(require_admin),
+) -> dict[str, bool]:
+    """Revoca (desactiva) una API key (solo admin). No requiere client_id."""
+    sb = get_supabase()
+    result = (
+        sb.table("api_keys")
+        .update({"is_active": False})
+        .eq("id", key_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="API key no encontrada",
+        )
+    logger.info("Admin %s revocó API key %s", admin.email, key_id)
+    return {"revoked": True}

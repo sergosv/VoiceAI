@@ -28,23 +28,24 @@ class GenerateRequest(BaseModel):
 
 
 class CreateTemplateRequest(BaseModel):
-    vertical_slug: str
-    framework_slug: str
-    slug: str
     name: str
     description: Optional[str] = None
-    objective: str
-    direction: str
-    agent_role: str
+    vertical_slug: Optional[str] = None
+    framework_slug: Optional[str] = None
+    slug: Optional[str] = None
+    objective: Optional[str] = None
+    direction: str = "inbound"
+    agent_role: Optional[str] = None
     greeting: Optional[str] = None
     farewell: Optional[str] = None
-    qualification_steps: list
+    qualification_steps: Optional[list] = None
     scoring_tiers: Optional[list] = None
     rules: Optional[list] = None
     tone_description: Optional[str] = None
     outbound_opener: Optional[str] = None
     outbound_permission: Optional[str] = None
     tags: Optional[list[str]] = None
+    is_active: bool = True
 
 
 # ===== Wizard endpoints =====
@@ -176,11 +177,25 @@ async def create_template(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Crear un nuevo template de agente (admin)."""
+    import re
+    import uuid
+
     if user.role != "admin":
         raise HTTPException(403, "Solo admin puede crear templates")
 
     sb = get_supabase()
     data = template.model_dump(exclude_none=True)
+
+    # Generar slug si no viene
+    if "slug" not in data:
+        base = re.sub(r"[^a-z0-9]+", "_", template.name.lower()).strip("_")
+        data["slug"] = f"{base}_{uuid.uuid4().hex[:6]}"
+
+    # Defaults para campos requeridos en la tabla
+    data.setdefault("objective", template.name)
+    data.setdefault("agent_role", "Asistente virtual")
+    data.setdefault("qualification_steps", [])
+
     result = sb.table("agent_templates").insert(data).execute()
     if not result.data:
         raise HTTPException(500, "Error creando template")
@@ -214,6 +229,10 @@ class UpdateTemplateRequest(BaseModel):
     is_active: bool | None = None
     name: str | None = None
     description: str | None = None
+    vertical_slug: str | None = None
+    direction: str | None = None
+    objective: str | None = None
+    greeting: str | None = None
 
 
 @router.patch("/admin/templates/{template_id}")
