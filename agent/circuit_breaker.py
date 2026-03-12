@@ -142,6 +142,7 @@ def _notify_circuit_open(provider: str, failure_count: int) -> None:
 
     admin_email = os.environ.get("ADMIN_ALERT_EMAIL", "")
     if not admin_email:
+        logger.warning("ADMIN_ALERT_EMAIL not set — circuit open alert not sent for %s", provider)
         return
 
     async def _send() -> None:

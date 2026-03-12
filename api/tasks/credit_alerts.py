@@ -1,6 +1,6 @@
-"""Cron job para alertas de balance bajo.
+"""Worker para alertas de balance bajo.
 
-Ejecutar cada hora con cron, Supabase Edge Function, o similar.
+Corre como background task cada 60 minutos.
 
 Lógica:
 - Si balance < 20% del total comprado -> "warning"
@@ -12,10 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timezone
-
-from supabase import Client, create_client
 
 logger = logging.getLogger("credit_alerts")
 
@@ -46,13 +43,11 @@ async def _credit_alert_loop(interval_minutes: int = 60) -> None:
         await asyncio.sleep(interval_minutes * 60)
 
 
-def _get_supabase() -> Client:
-    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
-
-
 async def check_low_balances() -> None:
     """Revisa balances bajos y envía alertas por email."""
-    sb = _get_supabase()
+    from api.deps import get_supabase
+
+    sb = get_supabase()
 
     # Leer umbrales de la config
     config = (
@@ -91,6 +86,7 @@ async def check_low_balances() -> None:
 
         if alert_type and bal.get("last_alert_type") != alert_type:
             await send_credit_alert_email(
+                sb=sb,
                 client_id=bal["client_id"],
                 balance=bal["balance"],
                 alert_type=alert_type,
@@ -108,12 +104,10 @@ async def check_low_balances() -> None:
 
 
 async def send_credit_alert_email(
-    client_id: str, balance: float, alert_type: str,
+    sb, client_id: str, balance: float, alert_type: str,
 ) -> None:
     """Envía email de alerta de créditos bajos via Resend."""
     from api.services.email_service import send_low_balance_alert
-
-    sb = _get_supabase()
 
     # Obtener email y nombre del cliente
     client = (

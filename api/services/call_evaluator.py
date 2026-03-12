@@ -166,7 +166,7 @@ async def evaluate_call(call_id: str, sb=None) -> dict | None:
                 await send_quality_alert(
                     to=client_row.data[0]["email"],
                     client_name=client_row.data[0].get("name", "Cliente"),
-                    agent_name=agent["name"] if agent else "Agente",
+                    agent_name=agent.get("name", "Agente") if agent else "Agente",
                     call_id=call_id,
                     severity=alert["severity"],
                     score=analysis.overall_score,
