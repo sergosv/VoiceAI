@@ -7,12 +7,12 @@ import { Button } from '../../components/ui/Button'
 import { PageLoader } from '../../components/ui/Spinner'
 
 const PROVIDER_COSTS = [
-  { key: 'cost_twilio_per_min', label: 'Twilio (telefonía)' },
-  { key: 'cost_stt_per_min', label: 'Deepgram (STT)' },
-  { key: 'cost_llm_per_min', label: 'Gemini (LLM)' },
-  { key: 'cost_tts_per_min', label: 'Cartesia (TTS)' },
-  { key: 'cost_livekit_per_min', label: 'LiveKit Cloud' },
-  { key: 'cost_mcp_per_min', label: 'MCP / Tools (promedio)' },
+  { key: 'cost_livekit_per_min', label: 'LiveKit Cloud', hint: '~$0.004/min' },
+  { key: 'cost_twilio_per_min', label: 'Twilio (telefonía)', hint: '~$0.013/min MX' },
+  { key: 'cost_stt_per_min', label: 'Deepgram (STT)', hint: '~$0.0043/min' },
+  { key: 'cost_llm_per_min', label: 'Gemini (LLM)', hint: '~$0.003/min promedio' },
+  { key: 'cost_tts_per_min', label: 'Cartesia (TTS)', hint: '~$0.006/min promedio' },
+  { key: 'cost_mcp_per_min', label: 'MCP / Tools (promedio)', hint: 'opcional' },
 ]
 
 export function PricingConfig() {
@@ -152,6 +152,7 @@ export function PricingConfig() {
                 onChange={e => updateConfig(item.key, e.target.value)}
                 className="w-full bg-bg-primary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent transition-colors"
               />
+              {item.hint && <span className="text-[10px] text-text-muted/50 mt-0.5 block">{item.hint}</span>}
             </div>
           ))}
         </div>

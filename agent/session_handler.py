@@ -173,6 +173,15 @@ class SessionHandler:
         """Finaliza la sesión: calcula costos reales y guarda en DB."""
         ended_at = datetime.now(timezone.utc)
         duration_seconds = int((ended_at - self._started_at).total_seconds())
+
+        # Ignorar llamadas fantasma de menos de 2 segundos
+        if duration_seconds < 2:
+            logger.warning(
+                "Llamada descartada (duración %ds) para '%s/%s'",
+                duration_seconds, self._config.client.slug, self._config.agent.slug,
+            )
+            return
+
         duration_minutes = Decimal(duration_seconds) / Decimal(60)
 
         # Proveedores usados en esta llamada
