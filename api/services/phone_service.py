@@ -94,6 +94,11 @@ async def setup_livekit_sip(phone_number: str) -> tuple[str, str]:
                 )
             ),
             trunk_ids=[trunk_id],
+            room_config=lk_api.RoomConfiguration(
+                agents=[
+                    lk_api.RoomAgentDispatch(agent_name="voice-ai-platform"),
+                ],
+            ),
         )
     )
 

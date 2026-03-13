@@ -2031,19 +2031,24 @@ export function Settings() {
 
                   <div className="space-y-3">
                     <label className="text-xs font-medium text-text-secondary">Codigo de instalacion</label>
+                    {(() => {
+                      const PROD_API = 'https://voiceai-production-f4e4.up.railway.app/api'
+                      const envApi = import.meta.env.VITE_API_URL
+                      const apiUrl = (envApi && envApi.startsWith('http')) ? envApi : PROD_API
+                      const baseUrl = apiUrl.replace(/\/api$/, '')
+                      const slug = selectedAgent?.slug || 'tu-agente'
+                      return (
                     <div className="relative">
                       <pre className="bg-bg-primary border border-border rounded-lg p-4 text-xs text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
-{`<script src="${(import.meta.env.VITE_API_URL || '/api').replace(/\/api$/, '')}/widget.js"
-  data-agent="${selectedAgent?.slug || 'tu-agente'}"
-  data-api="${import.meta.env.VITE_API_URL || '/api'}">
+{`<script src="${baseUrl}/widget.js"
+  data-agent="${slug}"
+  data-api="${apiUrl}">
 </script>`}
                       </pre>
                       <button
                         type="button"
                         onClick={() => {
-                          const apiUrl = import.meta.env.VITE_API_URL || '/api'
-                          const base = apiUrl.replace(/\/api$/, '')
-                          const code = `<script src="${base}/widget.js"\n  data-agent="${selectedAgent?.slug || 'tu-agente'}"\n  data-api="${apiUrl}">\n</script>`
+                          const code = `<script src="${baseUrl}/widget.js"\n  data-agent="${slug}"\n  data-api="${apiUrl}">\n</script>`
                           navigator.clipboard.writeText(code)
                           toast.success('Codigo copiado al portapapeles')
                         }}
@@ -2053,6 +2058,8 @@ export function Settings() {
                         <Check size={14} className="text-text-muted" />
                       </button>
                     </div>
+                      )
+                    })()}
                   </div>
 
                   <div className="border border-border rounded-lg p-4 space-y-3">
