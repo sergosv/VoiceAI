@@ -177,7 +177,7 @@ def build_tts(config: AgentConfig, language: str):
 
     if provider == "elevenlabs":
         from livekit.plugins import elevenlabs
-        kwargs = {"model": "eleven_turbo_v2_5"}
+        kwargs = {"model": "eleven_multilingual_v2"}
         if voice_id:
             kwargs["voice_id"] = voice_id
         if api_key:
