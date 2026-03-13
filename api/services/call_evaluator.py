@@ -157,14 +157,14 @@ async def evaluate_call(call_id: str, sb=None) -> dict | None:
             # Obtener email del cliente
             client_row = (
                 sb.table("clients")
-                .select("name, email")
+                .select("name, owner_email")
                 .eq("id", call["client_id"])
                 .limit(1)
                 .execute()
             )
-            if client_row.data and client_row.data[0].get("email"):
+            if client_row.data and client_row.data[0].get("owner_email"):
                 await send_quality_alert(
-                    to=client_row.data[0]["email"],
+                    to=client_row.data[0]["owner_email"],
                     client_name=client_row.data[0].get("name", "Cliente"),
                     agent_name=agent.get("name", "Agente") if agent else "Agente",
                     call_id=call_id,
