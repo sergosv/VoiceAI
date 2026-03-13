@@ -9,6 +9,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.audit import log_audit
+from api.crypto import encrypt_value
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user, require_admin
 from api.schemas import (
@@ -351,10 +352,10 @@ async def update_client(
                 vc["provider"] = agent_updates["tts_provider"]
                 vc_changed = True
             if "tts_api_key" in agent_updates:
-                vc["api_key"] = agent_updates["tts_api_key"]
+                vc["api_key"] = encrypt_value(agent_updates["tts_api_key"])
                 vc_changed = True
             if "realtime_api_key" in agent_updates:
-                vc["realtime_api_key"] = agent_updates["realtime_api_key"]
+                vc["realtime_api_key"] = encrypt_value(agent_updates["realtime_api_key"])
                 vc_changed = True
             if "realtime_voice" in agent_updates:
                 vc["realtime_voice"] = agent_updates["realtime_voice"]
@@ -371,7 +372,7 @@ async def update_client(
                 lc["provider"] = agent_updates["llm_provider"]
                 lc_changed = True
             if "llm_api_key" in agent_updates:
-                lc["api_key"] = agent_updates["llm_api_key"]
+                lc["api_key"] = encrypt_value(agent_updates["llm_api_key"])
                 lc_changed = True
             if lc_changed:
                 a_updates["llm_config"] = lc
@@ -382,7 +383,7 @@ async def update_client(
                 sc["provider"] = agent_updates["stt_provider"]
                 sc_changed = True
             if "stt_api_key" in agent_updates:
-                sc["api_key"] = agent_updates["stt_api_key"]
+                sc["api_key"] = encrypt_value(agent_updates["stt_api_key"])
                 sc_changed = True
             if sc_changed:
                 a_updates["stt_config"] = sc
