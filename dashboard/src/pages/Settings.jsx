@@ -1002,6 +1002,15 @@ export function Settings() {
     setLoadingVoices(true)
     try {
       if (provider === 'elevenlabs' || provider === 'openai') {
+        // Solo intentar cargar voces BYOK si hay key guardada en el servidor
+        const vc = agentData?.voice_config || {}
+        const hasKey = vc.has_api_key || false
+        if (!hasKey) {
+          // Sin key guardada — mostrar placeholder, no fallback a Cartesia
+          setVoices([])
+          setLoadingVoices(false)
+          return
+        }
         const v = await api.get(`/voices/provider/${cid}?agent_id=${agentData.id}&provider=${provider}`)
         setVoices(v)
       } else {
@@ -1010,10 +1019,7 @@ export function Settings() {
       }
     } catch (err) {
       console.error('Error cargando voces:', err)
-      try {
-        const v = await api.get('/voices')
-        setVoices(v)
-      } catch { /* ignore */ }
+      setVoices([])
     } finally {
       setLoadingVoices(false)
     }
@@ -1156,6 +1162,11 @@ export function Settings() {
 
       // Limpiar keys del form
       setForm(f => ({ ...f, stt_api_key: '', llm_api_key: '', tts_api_key: '', realtime_api_key: '' }))
+
+      // Recargar voces si se guardó una API key de TTS (ej: ElevenLabs)
+      if (form.tts_api_key && (form.tts_provider === 'elevenlabs' || form.tts_provider === 'openai')) {
+        loadVoicesForAgent(updated, clientId, form.tts_provider)
+      }
 
       toast.success('Configuracion guardada')
     } catch (err) {
