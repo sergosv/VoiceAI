@@ -40,6 +40,7 @@ class VoiceAgent(Agent):
         mcp_servers: list | None = None,
         api_integrations: list[dict] | None = None,
         language_detector: LanguageDetector | None = None,
+        usage_metrics: Any | None = None,
     ) -> None:
         kwargs: dict = {"instructions": config.agent.system_prompt}
         if mcp_servers:
@@ -52,6 +53,8 @@ class VoiceAgent(Agent):
         # Datos de la llamada — se inyectan desde main.py antes de session.start()
         self._caller_phone: str = ""
         self._memory_contact_id: str | None = None
+        # Métricas de uso real (caracteres TTS, tokens LLM)
+        self._usage_metrics = usage_metrics
         # Soporte de cambio de idioma en vivo
         self._language_detector = language_detector
         self._current_language: str = config.client.language
@@ -105,6 +108,13 @@ class VoiceAgent(Agent):
             old_lang, new_lang, tts_lang,
         )
 
+    async def _metered_text(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
+        """Wrapper que cuenta caracteres TTS mientras pasan los chunks."""
+        async for chunk in text:
+            if self._usage_metrics and chunk:
+                self._usage_metrics.add_tts_text(chunk)
+            yield chunk
+
     def tts_node(
         self,
         text: AsyncIterable[str],
@@ -114,10 +124,11 @@ class VoiceAgent(Agent):
         | Coroutine[Any, Any, AsyncIterable[rtc.AudioFrame]]
         | Coroutine[Any, Any, None]
     ):
-        """Override del nodo TTS para usar TTS dinámico cuando hay cambio de idioma."""
+        """Override del nodo TTS para contar caracteres y usar TTS dinámico."""
+        metered = self._metered_text(text)
         if self._dynamic_tts is not None:
-            return self._dynamic_tts_node(text, model_settings)
-        return Agent.default.tts_node(self, text, model_settings)
+            return self._dynamic_tts_node(metered, model_settings)
+        return Agent.default.tts_node(self, metered, model_settings)
 
     async def _dynamic_tts_node(
         self,

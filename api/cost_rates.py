@@ -1,21 +1,32 @@
-"""Módulo centralizado de rates y clasificación de costos plataforma vs externo."""
+"""Módulo centralizado de rates y clasificación de costos plataforma vs externo.
+
+Los costos reales se calculan en el agente (session_handler.py) usando métricas
+de uso real (caracteres TTS, tokens LLM estimados, minutos de audio STT).
+Este módulo se usa para:
+1. Clasificar servicios como plataforma/externo en el dashboard
+2. Estimar costos a priori cuando no hay datos reales (estimador de precios)
+"""
 
 from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
 
-# Costos siempre cobrados por la plataforma (USD/min)
+# ── Rates reales por proveedor (USD) ─────────────────────────
+# Deben coincidir con los rates en agent/session_handler.py
+
+# Infra: cobran por minuto de conexión
 PLATFORM_RATES: dict[str, Decimal] = {
-    "livekit": Decimal("0.01"),
-    "telephony": Decimal("0.01"),
+    "livekit": Decimal("0.004"),       # LiveKit Cloud ~$0.004/min
+    "telephony": Decimal("0.013"),     # Twilio SIP ~$0.013/min (MX)
 }
 
-# Costos de servicios cuando están incluidos en la plataforma (USD/min)
+# Servicios incluidos: rates promedio por minuto (para estimaciones)
+# Los costos reales se calculan en el agente con métricas de uso
 SERVICE_RATES: dict[str, Decimal] = {
-    "stt": Decimal("0.005"),
-    "llm": Decimal("0.01"),
-    "tts": Decimal("0.01"),
+    "stt": Decimal("0.0043"),          # Deepgram Nova-3
+    "llm": Decimal("0.003"),           # Gemini Flash (promedio por minuto)
+    "tts": Decimal("0.006"),           # Cartesia Sonic-3 (promedio por minuto)
 }
 
 # Proveedores incluidos en la plataforma (usan nuestras API keys)
@@ -25,17 +36,17 @@ INCLUDED_PROVIDERS: dict[str, set[str]] = {
     "tts": {"cartesia"},
 }
 
-# Rates estimados por proveedor BYOK (USD/min)
+# Rates estimados por proveedor BYOK (USD/min equivalente)
 EXTERNAL_RATES: dict[str, Decimal] = {
     "deepgram": Decimal("0.0043"),
     "google_stt": Decimal("0.006"),
     "openai_stt": Decimal("0.006"),
-    "google_llm": Decimal("0.004"),
+    "google_llm": Decimal("0.003"),
     "openai_llm": Decimal("0.015"),
     "anthropic": Decimal("0.012"),
-    "cartesia": Decimal("0.010"),
-    "elevenlabs": Decimal("0.030"),
-    "openai_tts": Decimal("0.015"),
+    "cartesia": Decimal("0.006"),
+    "elevenlabs": Decimal("0.018"),    # ~150 chars/min × $0.12/1K
+    "openai_tts": Decimal("0.0023"),   # ~150 chars/min × $0.015/1K
 }
 
 # Labels legibles por servicio
@@ -60,8 +71,6 @@ def classify_service(service: str, provider: str | None) -> str:
 
 def _external_rate_key(service: str, provider: str) -> str:
     """Construye la key para buscar en EXTERNAL_RATES."""
-    # Para evitar ambigüedad, los providers que existen en múltiples servicios
-    # se buscan con sufijo: google_stt, google_llm, openai_stt, openai_tts, openai_llm
     ambiguous = {"google", "openai"}
     if provider in ambiguous:
         return f"{provider}_{service}"
@@ -75,8 +84,14 @@ def get_external_rate(service: str, provider: str) -> Decimal:
 
 
 def build_cost_breakdown(call: dict[str, Any]) -> dict[str, Any]:
-    """Construye el desglose de costos para una llamada con clasificación plataforma/externo."""
+    """Construye el desglose de costos para una llamada.
+
+    Los costos ya vienen calculados correctamente del agente usando métricas
+    reales (caracteres TTS, tokens LLM, minutos STT). Este método los lee
+    de la DB y los clasifica como plataforma/externo para el dashboard.
+    """
     meta = call.get("metadata") or {}
+    usage = meta.get("usage") or {}
     duration_min = (call.get("duration_seconds") or 0) / 60
 
     stt_provider = meta.get("stt_provider", "deepgram")
@@ -88,7 +103,7 @@ def build_cost_breakdown(call: dict[str, Any]) -> dict[str, Any]:
     external_total = Decimal("0")
 
     # Servicios de plataforma fijos (livekit, telephony)
-    for svc, rate in PLATFORM_RATES.items():
+    for svc in ("livekit", "telephony"):
         cost_field = f"cost_{svc}"
         amount = Decimal(str(call.get(cost_field, 0)))
         lines.append({
@@ -101,27 +116,43 @@ def build_cost_breakdown(call: dict[str, Any]) -> dict[str, Any]:
         })
         platform_total += amount
 
-    # Servicios variables (stt, llm, tts)
+    # Servicios variables (stt, llm, tts) — costos ya calculados por el agente
     providers = {"stt": stt_provider, "llm": llm_provider, "tts": tts_provider}
     for svc, provider in providers.items():
         cost_field = f"cost_{svc}"
         amount = Decimal(str(call.get(cost_field, 0)))
         classification = classify_service(svc, provider)
-        is_estimate = classification == "external"
+        is_estimate = False
 
-        if is_estimate and float(amount) == 0 and duration_min > 0:
-            # Si no hay costo registrado pero hay duración, estimar
-            amount = get_external_rate(svc, provider) * Decimal(str(duration_min))
-            amount = amount.quantize(Decimal("0.0001"))
+        # Fallback: si no hay costo registrado, estimar por duración
+        if float(amount) == 0 and duration_min > 0:
+            if classification == "platform":
+                rate = SERVICE_RATES.get(svc, Decimal("0.005"))
+            else:
+                rate = get_external_rate(svc, provider)
+            amount = (rate * Decimal(str(duration_min))).quantize(Decimal("0.0001"))
+            is_estimate = True
 
-        lines.append({
+        # Agregar detalle de uso si está disponible
+        detail = ""
+        if svc == "tts" and usage.get("tts_characters"):
+            detail = f"{usage['tts_characters']:,} chars"
+        elif svc == "llm" and usage.get("llm_input_tokens_est"):
+            total_tokens = usage["llm_input_tokens_est"] + usage.get("llm_output_tokens_est", 0)
+            detail = f"~{total_tokens:,} tokens"
+
+        entry: dict[str, Any] = {
             "service": svc,
             "label": SERVICE_LABELS.get(svc, svc),
             "amount": float(amount),
             "classification": classification,
             "provider": provider,
             "is_estimate": is_estimate,
-        })
+        }
+        if detail:
+            entry["detail"] = detail
+
+        lines.append(entry)
 
         if classification == "platform":
             platform_total += amount

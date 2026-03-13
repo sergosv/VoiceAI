@@ -40,15 +40,13 @@ class TestGetExternalRate:
     def test_known_providers(self):
         assert get_external_rate("stt", "deepgram") == Decimal("0.0043")
         assert get_external_rate("llm", "anthropic") == Decimal("0.012")
-        assert get_external_rate("tts", "elevenlabs") == Decimal("0.030")
+        assert get_external_rate("tts", "elevenlabs") == Decimal("0.018")
 
     def test_ambiguous_providers(self):
-        # google_stt vs google_llm
         assert get_external_rate("stt", "google") == Decimal("0.006")
-        assert get_external_rate("llm", "google") == Decimal("0.004")
-        # openai_stt vs openai_tts vs openai_llm
+        assert get_external_rate("llm", "google") == Decimal("0.003")
         assert get_external_rate("stt", "openai") == Decimal("0.006")
-        assert get_external_rate("tts", "openai") == Decimal("0.015")
+        assert get_external_rate("tts", "openai") == Decimal("0.0023")
         assert get_external_rate("llm", "openai") == Decimal("0.015")
 
     def test_unknown_provider_defaults(self):
@@ -60,15 +58,20 @@ class TestBuildCostBreakdown:
     def test_basic_call(self):
         call = {
             "duration_seconds": 120,
-            "cost_livekit": "0.02",
-            "cost_telephony": "0.02",
-            "cost_stt": "0.01",
-            "cost_llm": "0.02",
-            "cost_tts": "0.02",
+            "cost_livekit": "0.008",
+            "cost_telephony": "0.026",
+            "cost_stt": "0.0086",
+            "cost_llm": "0.0001",
+            "cost_tts": "0.008",
             "metadata": {
                 "stt_provider": "deepgram",
                 "llm_provider": "google",
                 "tts_provider": "cartesia",
+                "usage": {
+                    "tts_characters": 200,
+                    "llm_input_tokens_est": 300,
+                    "llm_output_tokens_est": 100,
+                },
             },
         }
         result = build_cost_breakdown(call)
@@ -76,7 +79,6 @@ class TestBuildCostBreakdown:
         assert "external_cost_estimate" in result
         assert "total" in result
         assert len(result["lines"]) == 5
-        # All included providers → all platform
         for line in result["lines"]:
             assert line["classification"] == "platform"
         assert result["external_cost_estimate"] == 0
@@ -84,9 +86,9 @@ class TestBuildCostBreakdown:
     def test_external_provider(self):
         call = {
             "duration_seconds": 60,
-            "cost_livekit": "0.01",
-            "cost_telephony": "0.01",
-            "cost_stt": "0.006",
+            "cost_livekit": "0.004",
+            "cost_telephony": "0.013",
+            "cost_stt": "0.0043",
             "cost_llm": "0",
             "cost_tts": "0",
             "metadata": {
@@ -99,6 +101,34 @@ class TestBuildCostBreakdown:
         external_lines = [l for l in result["lines"] if l["classification"] == "external"]
         assert len(external_lines) == 2  # llm + tts
         assert result["external_cost_estimate"] > 0
+
+    def test_usage_detail_in_lines(self):
+        """Verifica que el detalle de uso aparece cuando hay métricas."""
+        call = {
+            "duration_seconds": 120,
+            "cost_livekit": "0.008",
+            "cost_telephony": "0.026",
+            "cost_stt": "0.0086",
+            "cost_llm": "0.0001",
+            "cost_tts": "0.008",
+            "metadata": {
+                "stt_provider": "deepgram",
+                "llm_provider": "google",
+                "tts_provider": "cartesia",
+                "usage": {
+                    "tts_characters": 500,
+                    "llm_input_tokens_est": 400,
+                    "llm_output_tokens_est": 150,
+                },
+            },
+        }
+        result = build_cost_breakdown(call)
+        tts_line = [l for l in result["lines"] if l["service"] == "tts"][0]
+        llm_line = [l for l in result["lines"] if l["service"] == "llm"][0]
+        assert "detail" in tts_line
+        assert "500" in tts_line["detail"]
+        assert "detail" in llm_line
+        assert "550" in llm_line["detail"]  # 400 + 150
 
     def test_no_metadata(self):
         call = {"duration_seconds": 60, "metadata": None}
@@ -122,7 +152,6 @@ class TestEstimateCost:
     def test_external_providers(self):
         result = estimate_cost("openai", "openai", "elevenlabs", 1.0)
         assert result["external_cost_estimate"] > 0
-        # platform still has livekit + telephony
         assert result["platform_cost"] > 0
 
     def test_zero_minutes(self):
@@ -137,3 +166,10 @@ class TestEstimateCost:
     def test_has_note(self):
         result = estimate_cost("deepgram", "google", "cartesia", 1.0)
         assert "note" in result
+
+    def test_different_costs_per_service(self):
+        """Verifica que cada servicio tiene un costo diferente (no rates planos)."""
+        result = estimate_cost("deepgram", "google", "cartesia", 5.0)
+        amounts = [l["amount"] for l in result["lines"]]
+        # No todos los servicios deben tener el mismo costo
+        assert len(set(amounts)) > 1, "Todos los costos son iguales — rates incorrectos"

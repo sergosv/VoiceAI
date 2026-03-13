@@ -136,6 +136,9 @@ export function CallDetail() {
                     }`}>
                       {line.classification === 'platform' ? 'Plataforma' : 'Externo'}
                     </span>
+                    {line.detail && (
+                      <span className="text-[10px] text-text-muted/60 font-sans">{line.detail}</span>
+                    )}
                   </div>
                   <span className={line.is_estimate ? 'text-text-muted' : ''}>
                     {line.is_estimate ? '~' : ''}${line.amount.toFixed(4)}

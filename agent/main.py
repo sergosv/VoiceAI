@@ -500,6 +500,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if hasattr(voice_agent, "_caller_phone"):
         voice_agent._caller_phone = caller_number or ""
         voice_agent._memory_contact_id = memory.contact_id if memory else None
+    # Inyectar métricas de uso para conteo real de TTS/LLM
+    if hasattr(voice_agent, "_usage_metrics"):
+        voice_agent._usage_metrics = handler.usage
         logger.info(
             "Context inyectado al agente: phone=%s, contact_id=%s",
             voice_agent._caller_phone,

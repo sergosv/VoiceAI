@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -17,14 +18,58 @@ from agent.phone_utils import normalize_phone
 
 logger = logging.getLogger(__name__)
 
-# Rates por minuto (USD)
-RATES = {
-    "livekit": Decimal("0.01"),
-    "stt": Decimal("0.005"),
-    "llm": Decimal("0.01"),
-    "tts": Decimal("0.01"),
-    "telephony": Decimal("0.01"),
+# ── Rates reales por proveedor (USD) ─────────────────────────
+# LiveKit y telefonía: cobran por minuto de conexión
+RATE_LIVEKIT_PER_MIN = Decimal("0.004")       # LiveKit Cloud ~$0.004/min
+RATE_TELEPHONY_PER_MIN = Decimal("0.013")      # Twilio SIP ~$0.013/min (MX)
+
+# STT: cobran por minuto de audio
+STT_RATES_PER_MIN: dict[str, Decimal] = {
+    "deepgram": Decimal("0.0043"),             # Deepgram Nova-3 pay-as-you-go
+    "google": Decimal("0.006"),                # Google Cloud STT
+    "openai": Decimal("0.006"),                # OpenAI Whisper
 }
+
+# LLM: cobran por token (convertimos a USD por token)
+LLM_RATES: dict[str, dict[str, Decimal]] = {
+    "google": {                                # Gemini 2.5 Flash
+        "input_per_1m": Decimal("0.15"),       # $0.15/1M input tokens
+        "output_per_1m": Decimal("0.60"),      # $0.60/1M output tokens
+    },
+    "openai": {                                # GPT-4o-mini
+        "input_per_1m": Decimal("0.15"),
+        "output_per_1m": Decimal("0.60"),
+    },
+    "anthropic": {                             # Claude Haiku
+        "input_per_1m": Decimal("0.25"),
+        "output_per_1m": Decimal("1.25"),
+    },
+}
+
+# TTS: cobran por caracter
+TTS_RATES_PER_1K_CHARS: dict[str, Decimal] = {
+    "cartesia": Decimal("0.040"),              # Cartesia Sonic-3 ~$0.040/1K chars
+    "elevenlabs": Decimal("0.120"),            # ElevenLabs multilingual v2 ~$0.12/1K chars
+    "openai": Decimal("0.015"),                # OpenAI TTS ~$0.015/1K chars
+}
+
+# Estimación: ~4 caracteres por token para español
+CHARS_PER_TOKEN = 4
+
+
+@dataclass
+class UsageMetrics:
+    """Métricas de uso real acumuladas durante una llamada."""
+
+    tts_characters: int = 0
+    stt_audio_seconds: int = 0
+    # Se calculan del transcript al finalizar
+    llm_input_tokens_est: int = 0
+    llm_output_tokens_est: int = 0
+
+    def add_tts_text(self, text: str) -> None:
+        """Acumula caracteres enviados a TTS."""
+        self.tts_characters += len(text)
 
 
 def _get_supabase() -> Client:
@@ -64,6 +109,7 @@ class SessionHandler:
         self._sentiment_summary: dict | None = None
         self._intent_summary: dict | None = None
         self._mode_results: dict | None = None
+        self.usage = UsageMetrics()
         # Almacenar referencias a tareas fire-and-forget para evitar GC
         self._background_tasks: set[asyncio.Task] = set()
 
@@ -124,18 +170,58 @@ class SessionHandler:
         summary: str | None = None,
         recording_status: str | None = None,
     ) -> None:
-        """Finaliza la sesión: calcula costos y guarda en DB."""
+        """Finaliza la sesión: calcula costos reales y guarda en DB."""
         ended_at = datetime.now(timezone.utc)
         duration_seconds = int((ended_at - self._started_at).total_seconds())
         duration_minutes = Decimal(duration_seconds) / Decimal(60)
 
-        # Calcular costos
+        # Proveedores usados en esta llamada
+        stt_provider = self._config.agent.stt_provider or "deepgram"
+        llm_provider = self._config.agent.llm_provider or "google"
+        tts_provider = self._config.agent.tts_provider or "cartesia"
+
+        # ── Estimar tokens LLM del transcript ──
+        system_prompt_chars = len(self._config.agent.system_prompt or "")
+        user_chars = sum(len(t["text"]) for t in self._transcript if t["role"] == "user")
+        assistant_chars = sum(len(t["text"]) for t in self._transcript if t["role"] == "assistant")
+        # Input = system prompt + todos los mensajes (el contexto crece por turno)
+        # Aproximación: promedio de contexto acumulado ≈ prompt + 50% del total de mensajes
+        avg_input_chars = system_prompt_chars + (user_chars + assistant_chars) // 2
+        self.usage.llm_input_tokens_est = avg_input_chars // CHARS_PER_TOKEN
+        self.usage.llm_output_tokens_est = assistant_chars // CHARS_PER_TOKEN
+
+        # Si no se contaron caracteres TTS en tiempo real, estimar del transcript
+        if self.usage.tts_characters == 0 and assistant_chars > 0:
+            self.usage.tts_characters = assistant_chars
+
+        # ── Calcular costos reales por servicio ──
+        # LiveKit: por minuto de conexión
+        cost_livekit = duration_minutes * RATE_LIVEKIT_PER_MIN
+
+        # Telefonía: por minuto (solo si es llamada SIP, no widget)
+        is_phone = self._direction in ("inbound", "outbound") and self._caller_number
+        cost_telephony = duration_minutes * RATE_TELEPHONY_PER_MIN if is_phone else Decimal("0")
+
+        # STT: por minuto de audio
+        stt_rate = STT_RATES_PER_MIN.get(stt_provider, Decimal("0.005"))
+        cost_stt = duration_minutes * stt_rate
+
+        # LLM: por tokens (input + output)
+        llm_rates = LLM_RATES.get(llm_provider, LLM_RATES["google"])
+        cost_llm_input = (Decimal(self.usage.llm_input_tokens_est) / Decimal("1000000")) * llm_rates["input_per_1m"]
+        cost_llm_output = (Decimal(self.usage.llm_output_tokens_est) / Decimal("1000000")) * llm_rates["output_per_1m"]
+        cost_llm = cost_llm_input + cost_llm_output
+
+        # TTS: por caracteres
+        tts_rate = TTS_RATES_PER_1K_CHARS.get(tts_provider, Decimal("0.040"))
+        cost_tts = (Decimal(self.usage.tts_characters) / Decimal("1000")) * tts_rate
+
         costs = {
-            "livekit": duration_minutes * RATES["livekit"],
-            "stt": duration_minutes * RATES["stt"],
-            "llm": duration_minutes * RATES["llm"],
-            "tts": duration_minutes * RATES["tts"],
-            "telephony": duration_minutes * RATES["telephony"],
+            "livekit": cost_livekit.quantize(Decimal("0.000001")),
+            "stt": cost_stt.quantize(Decimal("0.000001")),
+            "llm": cost_llm.quantize(Decimal("0.000001")),
+            "tts": cost_tts.quantize(Decimal("0.000001")),
+            "telephony": cost_telephony.quantize(Decimal("0.000001")),
         }
         total_cost = sum(costs.values())
 
@@ -171,10 +257,18 @@ class SessionHandler:
             "ended_at": ended_at.isoformat(),
             "metadata": {
                 "voice_mode": self._config.agent.agent_mode,
-                "stt_provider": self._config.agent.stt_provider,
-                "llm_provider": self._config.agent.llm_provider,
-                "tts_provider": self._config.agent.tts_provider,
+                "stt_provider": stt_provider,
+                "llm_provider": llm_provider,
+                "tts_provider": tts_provider,
                 "agent_name": self._config.agent.name,
+                "usage": {
+                    "tts_characters": self.usage.tts_characters,
+                    "llm_input_tokens_est": self.usage.llm_input_tokens_est,
+                    "llm_output_tokens_est": self.usage.llm_output_tokens_est,
+                    "user_chars": user_chars,
+                    "assistant_chars": assistant_chars,
+                    "system_prompt_chars": system_prompt_chars,
+                },
             },
         }
         # Datos de grabación
