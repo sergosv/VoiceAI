@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones, Mic } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
@@ -66,6 +67,8 @@ const INTENT_RT_LABELS = {
 export function CallDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [call, setCall] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -122,51 +125,66 @@ export function CallDetail() {
             </div>
           </div>
 
-          <h2 className="text-sm font-semibold text-text-secondary pt-2">Costos</h2>
-          {call.cost_breakdown?.lines?.length > 0 ? (
-            <div className="space-y-1.5 text-sm font-mono">
-              {call.cost_breakdown.lines.map((line, i) => (
-                <div key={i} className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-text-muted truncate">{line.label}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-sans ${
-                      line.classification === 'platform'
-                        ? 'bg-accent/15 text-accent'
-                        : 'bg-bg-hover text-text-muted'
-                    }`}>
-                      {line.classification === 'platform' ? 'Plataforma' : 'Externo'}
+          <h2 className="text-sm font-semibold text-text-secondary pt-2">Consumo</h2>
+          {isAdmin ? (
+            /* Admin: desglose completo de costos internos */
+            call.cost_breakdown?.lines?.length > 0 ? (
+              <div className="space-y-1.5 text-sm font-mono">
+                {call.cost_breakdown.lines.map((line, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-text-muted truncate">{line.label}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-sans ${
+                        line.classification === 'platform'
+                          ? 'bg-accent/15 text-accent'
+                          : 'bg-bg-hover text-text-muted'
+                      }`}>
+                        {line.classification === 'platform' ? 'Plataforma' : 'Externo'}
+                      </span>
+                      {line.detail && (
+                        <span className="text-[10px] text-text-muted/60 font-sans">{line.detail}</span>
+                      )}
+                    </div>
+                    <span className={line.is_estimate ? 'text-text-muted' : ''}>
+                      {line.is_estimate ? '~' : ''}${line.amount.toFixed(4)}
                     </span>
-                    {line.detail && (
-                      <span className="text-[10px] text-text-muted/60 font-sans">{line.detail}</span>
-                    )}
                   </div>
-                  <span className={line.is_estimate ? 'text-text-muted' : ''}>
-                    {line.is_estimate ? '~' : ''}${line.amount.toFixed(4)}
-                  </span>
-                </div>
-              ))}
-              <div className="border-t border-border pt-1.5 space-y-1">
-                <div className="flex justify-between font-bold">
-                  <span className="text-accent">Plataforma</span>
-                  <span className="text-accent">${call.cost_breakdown.platform_cost.toFixed(4)}</span>
-                </div>
-                {call.cost_breakdown.external_cost_estimate > 0 && (
-                  <div className="flex justify-between text-text-muted text-xs">
-                    <span>APIs externas (est.)</span>
-                    <span>~${call.cost_breakdown.external_cost_estimate.toFixed(4)}</span>
+                ))}
+                <div className="border-t border-border pt-1.5 space-y-1">
+                  <div className="flex justify-between font-bold">
+                    <span className="text-accent">Costo total</span>
+                    <span className="text-accent">${call.cost_breakdown.platform_cost.toFixed(4)}</span>
                   </div>
-                )}
+                  {call.cost_breakdown.external_cost_estimate > 0 && (
+                    <div className="flex justify-between text-text-muted text-xs">
+                      <span>APIs externas (est.)</span>
+                      <span>~${call.cost_breakdown.external_cost_estimate.toFixed(4)}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-1 text-sm font-mono">
+                <div className="flex justify-between"><span className="text-text-muted">LiveKit</span><span>${Number(call.cost_livekit).toFixed(4)}</span></div>
+                <div className="flex justify-between"><span className="text-text-muted">STT</span><span>${Number(call.cost_stt).toFixed(4)}</span></div>
+                <div className="flex justify-between"><span className="text-text-muted">LLM</span><span>${Number(call.cost_llm).toFixed(4)}</span></div>
+                <div className="flex justify-between"><span className="text-text-muted">TTS</span><span>${Number(call.cost_tts).toFixed(4)}</span></div>
+                <div className="flex justify-between"><span className="text-text-muted">Telefonía</span><span>${Number(call.cost_telephony).toFixed(4)}</span></div>
+                <div className="flex justify-between border-t border-border pt-1 font-bold">
+                  <span>Costo total</span><span className="text-accent">${Number(call.cost_total).toFixed(4)}</span>
+                </div>
+              </div>
+            )
           ) : (
-            <div className="space-y-1 text-sm font-mono">
-              <div className="flex justify-between"><span className="text-text-muted">LiveKit</span><span>${Number(call.cost_livekit).toFixed(4)}</span></div>
-              <div className="flex justify-between"><span className="text-text-muted">STT</span><span>${Number(call.cost_stt).toFixed(4)}</span></div>
-              <div className="flex justify-between"><span className="text-text-muted">LLM</span><span>${Number(call.cost_llm).toFixed(4)}</span></div>
-              <div className="flex justify-between"><span className="text-text-muted">TTS</span><span>${Number(call.cost_tts).toFixed(4)}</span></div>
-              <div className="flex justify-between"><span className="text-text-muted">Telefonía</span><span>${Number(call.cost_telephony).toFixed(4)}</span></div>
-              <div className="flex justify-between border-t border-border pt-1 font-bold">
-                <span>Total</span><span className="text-accent">${Number(call.cost_total).toFixed(4)}</span>
+            /* Cliente: solo duración y créditos consumidos */
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-text-muted">Duracion</span>
+                <span className="font-mono">{Math.floor(call.duration_seconds / 60)}:{String(call.duration_seconds % 60).padStart(2, '0')} min</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Creditos consumidos</span>
+                <span className="font-mono font-bold text-accent">{(call.duration_seconds / 60).toFixed(2)}</span>
               </div>
             </div>
           )}

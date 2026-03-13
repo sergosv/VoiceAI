@@ -5,6 +5,7 @@ import {
   TrendingUp, Users, CreditCard, ArrowRight, Activity,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { StatsCard } from '../components/StatsCard'
 import { UsageChart } from '../components/UsageChart'
@@ -15,6 +16,8 @@ import { ClientSelector } from '../components/ClientSelector'
 import { OnboardingChecklist } from '../components/OnboardingChecklist'
 
 export function Dashboard() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const toast = useToast()
   const navigate = useNavigate()
   const [overview, setOverview] = useState(null)
@@ -101,16 +104,25 @@ export function Dashboard() {
           value={totalConvs}
           sub={`${waActive} WhatsApp · ${ghlActive} GHL`}
         />
-        <StatsCard
-          icon={DollarSign}
-          label="Costo plataforma hoy"
-          value={`$${overview?.platform_cost_today?.toFixed(2) ?? '0.00'}`}
-          sub={
-            overview?.external_cost_today > 0
-              ? `+~$${overview.external_cost_today.toFixed(2)} APIs ext.`
-              : `$${overview?.platform_cost_total?.toFixed(2) ?? '0.00'} total plataforma`
-          }
-        />
+        {isAdmin ? (
+          <StatsCard
+            icon={DollarSign}
+            label="Costo plataforma hoy"
+            value={`$${overview?.platform_cost_today?.toFixed(2) ?? '0.00'}`}
+            sub={
+              overview?.external_cost_today > 0
+                ? `+~$${overview.external_cost_today.toFixed(2)} APIs ext.`
+                : `$${overview?.platform_cost_total?.toFixed(2) ?? '0.00'} total plataforma`
+            }
+          />
+        ) : (
+          <StatsCard
+            icon={CreditCard}
+            label="Creditos usados hoy"
+            value={`${overview?.minutes_today?.toFixed(1) ?? 0}`}
+            sub={`${overview?.total_minutes?.toFixed(0) ?? 0} total acumulado`}
+          />
+        )}
       </div>
 
       {/* Row 2: Métricas de inteligencia */}

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Phone, PhoneOutgoing, Mic } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { Badge } from './ui/Badge'
 import { Table, Th, Td } from './ui/Table'
 
@@ -18,6 +19,8 @@ function formatDate(iso) {
 
 export function CallsTable({ calls = [] }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
 
   if (!calls.length) {
     return (
@@ -41,7 +44,7 @@ export function CallsTable({ calls = [] }) {
           <Th>Duración</Th>
           <Th>Estado</Th>
           <Th>Fecha</Th>
-          <Th>Costo</Th>
+          <Th>{isAdmin ? 'Costo' : 'Creditos'}</Th>
         </tr>
       </thead>
       <tbody>
@@ -68,7 +71,12 @@ export function CallsTable({ calls = [] }) {
             <Td className="font-mono">{formatDuration(call.duration_seconds)}</Td>
             <Td><Badge variant={call.status}>{call.status}</Badge></Td>
             <Td className="text-text-secondary text-xs">{formatDate(call.started_at)}</Td>
-            <Td className="font-mono text-xs">${Number(call.cost_total).toFixed(4)}</Td>
+            <Td className="font-mono text-xs">
+              {isAdmin
+                ? `$${Number(call.cost_total).toFixed(4)}`
+                : `${(call.duration_seconds / 60).toFixed(1)}`
+              }
+            </Td>
           </tr>
         ))}
       </tbody>
