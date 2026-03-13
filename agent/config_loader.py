@@ -32,11 +32,11 @@ def _decrypt_key(value: str | None) -> str | None:
             logger.error("ENCRYPTION_KEY not set — cannot decrypt BYOK key")
             return None
         try:
-            import base64
             from cryptography.fernet import Fernet
             f = Fernet(encryption_key.encode())
-            encrypted = base64.urlsafe_b64decode(value[4:])
-            return f.decrypt(encrypted).decode()
+            token = value[4:]  # Strip 'enc:' prefix
+            # Fernet token directo (formato actual)
+            return f.decrypt(token.encode()).decode()
         except Exception:
             logger.error("Failed to decrypt BYOK key — returning None")
             return None
