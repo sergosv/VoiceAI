@@ -10,6 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 
+from api.crypto import decrypt_value
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import ClonedVoiceOut, VoiceOut
@@ -80,7 +81,7 @@ async def list_provider_voices(
             if agent_result.data:
                 vc = agent_result.data[0].get("voice_config") or {}
                 provider = vc.get("provider", "cartesia")
-                api_key = vc.get("api_key")
+                api_key = decrypt_value(vc.get("api_key"))
 
         if not agent_id or not provider:
             result = (
@@ -96,7 +97,7 @@ async def list_provider_voices(
                 )
             client = result.data[0]
             provider = client.get("tts_provider", "cartesia")
-            api_key = client.get("tts_api_key")
+            api_key = decrypt_value(client.get("tts_api_key"))
     else:
         # Con provider override, aún necesitamos la API key del agente
         if agent_id:
@@ -105,7 +106,7 @@ async def list_provider_voices(
             )
             if agent_result.data:
                 vc = agent_result.data[0].get("voice_config") or {}
-                api_key = vc.get("api_key")
+                api_key = decrypt_value(vc.get("api_key"))
 
     if provider == "elevenlabs":
         if not api_key:
