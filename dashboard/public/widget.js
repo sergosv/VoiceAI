@@ -68,8 +68,12 @@
       animation: vai-pulse 1.5s infinite;
     }
     .vai-fab.connecting {
-      opacity: 0.7;
       cursor: wait;
+      animation: vai-connecting 1.2s ease-in-out infinite;
+    }
+    @keyframes vai-connecting {
+      0%, 100% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.1); opacity: 1; }
     }
     @keyframes vai-pulse {
       0%, 100% { box-shadow: 0 0 0 0 #ef444440; }
@@ -145,11 +149,25 @@
   statusEl.className = 'vai-status';
   document.body.appendChild(statusEl);
 
-  function showStatus(text) {
-    statusEl.innerHTML = `<span class="vai-dot"></span><span>${text}</span>`;
-    statusEl.classList.add('show');
+  let _connectingInterval = null;
+  function showStatus(text, animated) {
+    if (_connectingInterval) { clearInterval(_connectingInterval); _connectingInterval = null; }
+    if (animated) {
+      const msgs = ['Conectando...', 'Preparando asistente...', 'Casi listo...'];
+      let i = 0;
+      statusEl.innerHTML = `<span class="vai-dot"></span><span>${msgs[0]}</span>`;
+      statusEl.classList.add('show');
+      _connectingInterval = setInterval(() => {
+        i = (i + 1) % msgs.length;
+        statusEl.innerHTML = `<span class="vai-dot"></span><span>${msgs[i]}</span>`;
+      }, 2500);
+    } else {
+      statusEl.innerHTML = `<span class="vai-dot"></span><span>${text}</span>`;
+      statusEl.classList.add('show');
+    }
   }
   function hideStatus() {
+    if (_connectingInterval) { clearInterval(_connectingInterval); _connectingInterval = null; }
     statusEl.classList.remove('show');
   }
 
@@ -171,7 +189,7 @@
     state = 'connecting';
     fab.classList.add('connecting');
     fab.innerHTML = MIC_SVG;
-    showStatus('Conectando...');
+    showStatus('Conectando...', true);
 
     try {
       // 1. Get config + token

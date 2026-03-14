@@ -291,8 +291,18 @@ class SessionHandler:
             call_data["sentiment_realtime"] = self._sentiment_summary
         if self._intent_summary:
             call_data["intent_realtime"] = self._intent_summary
-        call_result = sb.table("calls").insert(call_data).execute()
-        call_id = call_result.data[0]["id"] if call_result.data else None
+        call_id: str | None = None
+        try:
+            call_result = sb.table("calls").insert(call_data).execute()
+            call_id = call_result.data[0]["id"] if call_result.data else None
+        except Exception:
+            logger.exception(
+                "CRITICAL: Error insertando call en DB para '%s/%s' — "
+                "datos de llamada perdidos (duración=%ds, costo=$%.4f)",
+                self._config.client.slug, self._config.agent.slug,
+                duration_seconds, total_cost,
+            )
+            # Continuar con call_id=None — el resto de finalize funciona parcialmente
 
         # Dispatch webhook: call.completed (fire-and-forget)
         try:

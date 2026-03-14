@@ -217,33 +217,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         config = await load_config_by_phone(called_number)
 
     if not config:
-        logger.warning(
-            "No se encontró agente para número '%s'. Usando config por defecto.",
-            called_number,
+        logger.error(
+            "No se encontró agente para número '%s' / widget_agent='%s' / outbound_agent='%s'. "
+            "Rechazando llamada — no se puede procesar sin config válida.",
+            called_number, widget_agent_id, outbound_agent_id,
         )
-        # Config por defecto para testing
-        config = ResolvedConfig(
-            agent=AgentConfig(
-                id="00000000-0000-0000-0000-000000000000",
-                client_id="00000000-0000-0000-0000-000000000000",
-                name="Asistente",
-                slug="test",
-                phone_number=None,
-                phone_sid=None,
-                livekit_sip_trunk_id=None,
-                system_prompt="Eres un asistente virtual de prueba. Responde en español de forma amable y concisa.",
-                greeting="Hola, soy un asistente virtual de prueba. ¿En qué puedo ayudarle?",
-                examples=None,
-            ),
-            client=SlimClientConfig(
-                id="00000000-0000-0000-0000-000000000000",
-                name="Test",
-                slug="test",
-                business_type="generic",
-                language="es",
-                file_search_store_id=None,
-            ),
-        )
+        return
 
     # ========= SIGTERM: rechazar llamadas si estamos en shutdown =========
     if _shutting_down:
@@ -500,9 +479,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if hasattr(voice_agent, "_caller_phone"):
         voice_agent._caller_phone = caller_number or ""
         voice_agent._memory_contact_id = memory.contact_id if memory else None
-    # Inyectar métricas de uso para conteo real de TTS/LLM
-    if hasattr(voice_agent, "_usage_metrics"):
-        voice_agent._usage_metrics = handler.usage
         logger.info(
             "Context inyectado al agente: phone=%s, contact_id=%s",
             voice_agent._caller_phone,
@@ -588,6 +564,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         memory_contact_id=memory.contact_id if memory else None,
         recording_key=recording_key,
     )
+
+    # Inyectar métricas de uso para conteo real de TTS/LLM
+    # (handler debe existir antes de esta línea)
+    if hasattr(voice_agent, "_usage_metrics"):
+        voice_agent._usage_metrics = handler.usage
+        logger.info("UsageMetrics inyectadas al agente para conteo de TTS/LLM")
 
     # ========= BILLING: Start tracking =========
     billing.start_tracking(
@@ -939,20 +921,28 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     ctx.add_shutdown_callback(on_shutdown)
 
-    # Iniciar sesión
-    await session.start(
-        room=ctx.room,
-        agent=voice_agent,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: (
-                    noise_cancellation.BVCTelephony()
-                    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                    else noise_cancellation.BVC()
+    # Iniciar sesión — envuelto en try/except para garantizar que on_shutdown se ejecute
+    try:
+        await session.start(
+            room=ctx.room,
+            agent=voice_agent,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    noise_cancellation=lambda params: (
+                        noise_cancellation.BVCTelephony()
+                        if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                        else noise_cancellation.BVC()
+                    ),
                 ),
             ),
-        ),
-    )
+        )
+    except Exception:
+        logger.exception(
+            "Error crítico en session.start() para '%s/%s'",
+            config.client.slug, config.agent.slug,
+        )
+        # on_shutdown se ejecutará vía ctx shutdown callback
+        return
 
     # Saludo inicial
     if outbound_mode:
