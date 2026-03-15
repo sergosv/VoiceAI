@@ -1136,6 +1136,7 @@ export function Settings() {
         language_detection_config: form.language_detection_config,
         quality_config: form.quality_config,
         proactive_config: form.proactive_config,
+        widget_channels: selectedAgent.widget_channels || ['voice'],
       }
 
       // Solo enviar API keys si se escribieron nuevas
