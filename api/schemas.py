@@ -216,6 +216,8 @@ class AgentUpdateRequest(BaseModel):
     language_detection_config: dict | None = None
     quality_config: dict | None = None
     proactive_config: dict | None = None
+    # Widget
+    widget_channels: list[str] | None = None
 
 
 # ── Conversation Results ─────────────────────────────
