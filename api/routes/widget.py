@@ -10,6 +10,7 @@ import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -29,7 +30,7 @@ async def widget_config(request: Request, agent_slug: str) -> dict:
     # Buscar agente por slug (activo)
     result = (
         sb.table("agents")
-        .select("id, name, slug, greeting, client_id")
+        .select("id, name, slug, greeting, client_id, widget_channels")
         .eq("slug", agent_slug)
         .eq("is_active", True)
         .limit(1)
@@ -54,6 +55,8 @@ async def widget_config(request: Request, agent_slug: str) -> dict:
 
     client = client_result.data[0]
 
+    channels = agent.get("widget_channels") or ["voice"]
+
     return {
         "agent_id": agent["id"],
         "agent_name": agent["name"],
@@ -62,6 +65,7 @@ async def widget_config(request: Request, agent_slug: str) -> dict:
         "client_name": client["name"],
         "language": client["language"],
         "livekit_url": os.environ.get("LIVEKIT_URL", ""),
+        "widget_channels": channels,
     }
 
 
@@ -161,3 +165,97 @@ async def widget_token(request: Request, agent_slug: str) -> dict:
         "room": room_name,
         "url": livekit_url,
     }
+
+
+# ── Chat widget (texto) ──────────────────────────────────────
+
+
+class WidgetChatRequest(BaseModel):
+    conversation_id: str | None = None
+    message: str = ""
+
+
+class WidgetChatResponse(BaseModel):
+    conversation_id: str
+    text: str
+    agent_name: str = ""
+
+
+@router.post("/chat/{agent_slug}", response_model=WidgetChatResponse)
+@limiter.limit("30/minute")
+async def widget_chat(
+    request: Request,
+    agent_slug: str,
+    req: WidgetChatRequest,
+) -> WidgetChatResponse:
+    """Endpoint público de chat para el widget embeddable. Sin auth."""
+    from agent.config_loader import load_api_integrations, load_config_by_slug, load_mcp_servers
+    from api.services.chat_service import build_chat_system_prompt, chat_turn, init_flow_state
+    from api.services.chat_store import MAX_TURNS, create_conversation, get_conversation
+
+    if req.conversation_id:
+        # ── Continuar conversación ──
+        conv = get_conversation(req.conversation_id)
+        if not conv:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversación expirada")
+        if conv.turn_count >= MAX_TURNS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Límite de mensajes alcanzado")
+
+        api_integrations = await load_api_integrations(
+            conv.config.client.id, conv.config.agent.id
+        )
+        mcp_servers = await load_mcp_servers(
+            conv.config.client.id, conv.config.agent.id
+        )
+
+        text, _ = await chat_turn(
+            conv, req.message,
+            api_integrations=api_integrations,
+            mcp_servers=mcp_servers or None,
+        )
+        return WidgetChatResponse(
+            conversation_id=conv.id,
+            text=text,
+            agent_name=conv.config.agent.name,
+        )
+
+    # ── Nueva conversación ──
+    config = await load_config_by_slug(agent_slug)
+    if not config:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agente no encontrado")
+
+    # Verificar que chat está habilitado
+    channels = config.agent.widget_channels or ["voice"]
+    if "chat" not in channels:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chat no habilitado para este agente")
+
+    api_integrations = await load_api_integrations(config.client.id, config.agent.id)
+    mcp_servers = await load_mcp_servers(config.client.id, config.agent.id)
+
+    system_prompt = build_chat_system_prompt(
+        config, None, None,
+        api_integrations=api_integrations,
+        mcp_servers=mcp_servers or None,
+    )
+    conv = create_conversation(config, system_prompt)
+    init_flow_state(conv)
+
+    # Si no hay mensaje, devolver greeting
+    if not req.message:
+        greeting = config.agent.greeting or f"Hola, soy {config.agent.name}. ¿En qué puedo ayudarte?"
+        return WidgetChatResponse(
+            conversation_id=conv.id,
+            text=greeting,
+            agent_name=config.agent.name,
+        )
+
+    text, _ = await chat_turn(
+        conv, req.message,
+        api_integrations=api_integrations,
+        mcp_servers=mcp_servers or None,
+    )
+    return WidgetChatResponse(
+        conversation_id=conv.id,
+        text=text,
+        agent_name=config.agent.name,
+    )

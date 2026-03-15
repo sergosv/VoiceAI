@@ -289,6 +289,21 @@ async def serve_widget_js() -> Response:
     )
 
 
+@app.get("/chat-widget.js")
+async def serve_chat_widget_js() -> Response:
+    widget_path = Path(__file__).parent.parent / "dashboard" / "dist" / "chat-widget.js"
+    if not widget_path.exists():
+        widget_path = Path(__file__).parent.parent / "dashboard" / "public" / "chat-widget.js"
+    if not widget_path.exists():
+        return Response(content="// chat widget not found", media_type="application/javascript")
+    content = widget_path.read_text(encoding="utf-8")
+    return Response(
+        content=content,
+        media_type="application/javascript",
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600"},
+    )
+
+
 # Rutas API
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(voices.router, prefix="/api/voices", tags=["voices"])

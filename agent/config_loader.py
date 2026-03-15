@@ -88,6 +88,8 @@ class AgentConfig:
     quality_config: dict | None = None
     # Proactive agent
     proactive_config: dict | None = None
+    # Widget channels habilitados
+    widget_channels: list[str] = field(default_factory=lambda: ["voice"])
 
     # Properties de conveniencia (compatibilidad con pipeline_builder)
     @property
@@ -297,6 +299,29 @@ async def load_config_by_agent_id(agent_id: str) -> ResolvedConfig | None:
     return _rows_to_resolved(result.data[0])
 
 
+async def load_config_by_slug(agent_slug: str) -> ResolvedConfig | None:
+    """Carga config por slug del agente."""
+    sb = _get_supabase()
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: sb.table("agents")
+                .select("*, clients(*)")
+                .eq("slug", agent_slug)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            ),
+            timeout=DB_QUERY_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logger.error("Timeout cargando config por slug: %s", agent_slug)
+        return None
+    if not result.data:
+        return None
+    return _rows_to_resolved(result.data[0])
+
+
 async def load_config_by_client_id(client_id: str) -> ResolvedConfig | None:
     """Carga config del primer agente activo del cliente."""
     sb = _get_supabase()
@@ -490,6 +515,7 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         language_detection_config=agent_row.get("language_detection_config"),
         quality_config=agent_row.get("quality_config"),
         proactive_config=agent_row.get("proactive_config"),
+        widget_channels=agent_row.get("widget_channels") or ["voice"],
     )
 
     client = SlimClientConfig(

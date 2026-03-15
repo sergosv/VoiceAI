@@ -2021,6 +2021,98 @@ export function Settings() {
             {/* ── Widget Tab ── */}
             {activeTab === 'widget' && selectedAgent && (
               <div className="space-y-6">
+                {/* Canales del widget */}
+                <Card className="space-y-4">
+                  <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                    <Globe size={16} className="text-cyan-400" />
+                    Canales del Widget
+                  </h2>
+                  <p className="text-xs text-text-muted">
+                    Selecciona que canales habilitar en el widget embeddable de este agente.
+                  </p>
+                  <div className="flex gap-4">
+                    {[
+                      { value: 'chat', label: 'Chat de texto', desc: 'Los visitantes escriben mensajes' },
+                      { value: 'voice', label: 'Llamada de voz', desc: 'Los visitantes hablan por microfono' },
+                    ].map(ch => {
+                      const channels = selectedAgent?.widget_channels || ['voice']
+                      const active = channels.includes(ch.value)
+                      return (
+                        <label key={ch.value} className={`flex-1 flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${active ? 'border-accent/40 bg-accent/5' : 'border-border hover:border-border/80'}`}>
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={async (e) => {
+                              let next = [...channels]
+                              if (e.target.checked) { if (!next.includes(ch.value)) next.push(ch.value) }
+                              else { next = next.filter(c => c !== ch.value) }
+                              if (next.length === 0) next = ['voice']
+                              try {
+                                const updated = await api.patch(`/clients/${clientId}/agents/${selectedAgent.id}`, { widget_channels: next })
+                                setSelectedAgent(prev => ({ ...prev, widget_channels: next }))
+                                setAgents(prev => prev.map(a => a.id === selectedAgent.id ? { ...a, widget_channels: next } : a))
+                                toast.success('Canales actualizados')
+                              } catch (err) { toast.error(err.message) }
+                            }}
+                            className="accent-accent mt-0.5"
+                          />
+                          <div>
+                            <span className="text-sm font-medium">{ch.label}</span>
+                            <p className="text-[11px] text-text-muted">{ch.desc}</p>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </Card>
+
+                {/* Chat widget code */}
+                {(selectedAgent?.widget_channels || ['voice']).includes('chat') && (
+                  <Card className="space-y-4">
+                    <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                      <MessageCircle size={16} className="text-green-400" />
+                      Widget de Chat
+                    </h2>
+                    <p className="text-xs text-text-muted">
+                      Widget de chat de texto para tu sitio web. Los visitantes escriben y el agente responde automaticamente.
+                    </p>
+                    <div className="space-y-3">
+                      <label className="text-xs font-medium text-text-secondary">Codigo de instalacion</label>
+                      {(() => {
+                        const PROD_API = 'https://voiceai-production-f4e4.up.railway.app/api'
+                        const envApi = import.meta.env.VITE_API_URL
+                        const apiUrl = (envApi && envApi.startsWith('http')) ? envApi : PROD_API
+                        const baseUrl = apiUrl.replace(/\/api$/, '')
+                        const slug = selectedAgent?.slug || 'tu-agente'
+                        return (
+                          <div className="relative">
+                            <pre className="bg-bg-primary border border-border rounded-lg p-4 text-xs text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
+{`<script src="${baseUrl}/chat-widget.js"
+  data-agent="${slug}"
+  data-api="${apiUrl}">
+</script>`}
+                            </pre>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const code = `<script src="${baseUrl}/chat-widget.js"\n  data-agent="${slug}"\n  data-api="${apiUrl}">\n</script>`
+                                navigator.clipboard.writeText(code)
+                                toast.success('Codigo copiado al portapapeles')
+                              }}
+                              className="absolute top-2 right-2 p-1.5 rounded bg-bg-hover hover:bg-border transition-colors"
+                              title="Copiar"
+                            >
+                              <Check size={14} className="text-text-muted" />
+                            </button>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Voice widget */}
+                {(selectedAgent?.widget_channels || ['voice']).includes('voice') && (<>
                 <Card className="space-y-4">
                   <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
                     <Globe size={16} className="text-cyan-400" />
@@ -2101,7 +2193,7 @@ export function Settings() {
                   </div>
                 </Card>
 
-                {/* Preview del widget */}
+                {/* Preview del widget de voz */}
                 <Card className="space-y-4">
                   <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
                     <Eye size={16} className="text-green-400" />
@@ -2162,6 +2254,7 @@ export function Settings() {
                     </div>
                   )}
                 </Card>
+                </>)}
               </div>
             )}
 
