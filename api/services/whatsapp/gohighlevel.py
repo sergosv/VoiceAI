@@ -57,19 +57,29 @@ class GoHighLevelProvider(WhatsAppProvider):
         """Resuelve canal usando messageType + contexto del payload.
 
         Si no hay messageType (ej. custom webhook de workflow), infiere
-        del contexto: sin phone → webchat, con phone → whatsapp.
+        del contexto. Soporta campo 'channel' explícito en el payload
+        para que workflows de GHL puedan indicar el canal directamente.
         """
-        channel = self._resolve_channel(payload)
-
-        # Si el channel fue inferido como default y no hay messageType,
-        # usar contexto para decidir mejor
+        # 1. Intentar resolución estándar por messageType/channel fields de GHL
         msg_type = payload.get("messageType", "").strip()
-        if not msg_type:
-            phone = payload.get("phone", "") or payload.get("contactPhone", "")
-            if not phone:
-                return "webchat"
+        if msg_type:
+            return self._resolve_channel(payload)
 
-        return channel
+        # 2. Custom webhook: buscar campo 'channel' explícito del workflow
+        explicit_channel = payload.get("conversationChannel", "").lower().strip()
+        if not explicit_channel:
+            explicit_channel = payload.get("messageChannel", "").lower().strip()
+        if explicit_channel and explicit_channel in self._CHANNEL_MAP:
+            return self._CHANNEL_MAP[explicit_channel]
+
+        # 3. Fallback: sin messageType y sin channel explícito,
+        #    default a webchat (los workflows custom de chat web
+        #    siempre incluyen phone del contacto, no se puede inferir por phone)
+        logger.info(
+            "GHL canal no explícito en payload — defaulting a webchat "
+            "(contactId=%s)", payload.get("contactId", "?"),
+        )
+        return "webchat"
 
     def parse_webhook(self, payload: dict) -> InboundMessage | None:
         """Parsea webhook InboundMessage de GHL.
