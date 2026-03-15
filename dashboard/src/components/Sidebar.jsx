@@ -8,9 +8,10 @@ import {
   Monitor, BookCopy, UserCog, ScrollText, Key, PhoneCall, AlertCircle,
 } from 'lucide-react'
 
+// clientOnly: true = solo visible para clientes (o admin impersonando)
 const navGroups = [
   {
-    label: null, // Sin label = grupo principal
+    label: null,
     items: [
       { to: '/', icon: LayoutDashboard, label: 'Inicio', end: true },
       { to: '/analytics', icon: BarChart3, label: 'Analytics' },
@@ -20,9 +21,9 @@ const navGroups = [
     label: 'Operaciones',
     items: [
       { to: '/calls', icon: Phone, label: 'Llamadas' },
-      { to: '/whatsapp', icon: MessageCircle, label: 'WhatsApp' },
-      { to: '/ghl', icon: Plug, label: 'GHL Inbox' },
-      { to: '/campaigns', icon: Megaphone, label: 'Campanas' },
+      { to: '/whatsapp', icon: MessageCircle, label: 'WhatsApp', clientOnly: true },
+      { to: '/ghl', icon: Plug, label: 'GHL Inbox', clientOnly: true },
+      { to: '/campaigns', icon: Megaphone, label: 'Campañas' },
     ],
   },
   {
@@ -34,6 +35,7 @@ const navGroups = [
   },
   {
     label: 'Configuracion',
+    clientOnly: true,
     items: [
       { to: '/create-agent', icon: Sparkles, label: 'Crear Agente' },
       { to: '/settings', icon: Bot, label: 'Agentes' },
@@ -50,7 +52,7 @@ const navGroups = [
     items: [
       { to: '/profile', icon: CircleUser, label: 'Mi Perfil' },
       { to: '/audit-log', icon: ClipboardList, label: 'Actividad' },
-      { to: '/billing', icon: CreditCard, label: 'Creditos' },
+      { to: '/billing', icon: CreditCard, label: 'Creditos', clientOnly: true },
     ],
   },
 ]
@@ -135,7 +137,7 @@ function NavGroup({ group, onClick, defaultOpen = true }) {
 }
 
 export function Sidebar() {
-  const { user, signOut } = useAuth()
+  const { user, signOut, impersonatingClientId } = useAuth()
   const navigate = useNavigate()
   const isAdmin = user?.role === 'admin'
   const [open, setOpen] = useState(false)
@@ -182,11 +184,17 @@ export function Sidebar() {
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {navGroups.map((group, i) => (
-            <NavGroup key={group.label || i} group={group} onClick={closeMobile} />
-          ))}
+          {navGroups.map((group, i) => {
+            const showClientOnly = !isAdmin || !!impersonatingClientId
+            // Grupo entero es clientOnly → ocultar para admin sin impersonar
+            if (group.clientOnly && !showClientOnly) return null
+            // Filtrar items individuales clientOnly
+            const filtered = { ...group, items: group.items.filter(item => !item.clientOnly || showClientOnly) }
+            if (filtered.items.length === 0) return null
+            return <NavGroup key={group.label || i} group={filtered} onClick={closeMobile} />
+          })}
 
-          {isAdmin && (
+          {isAdmin && !impersonatingClientId && (
             <NavGroup group={adminGroup} onClick={closeMobile} defaultOpen={false} />
           )}
         </nav>

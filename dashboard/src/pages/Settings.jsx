@@ -897,7 +897,7 @@ function WebhooksPanel({ clientId }) {
 
 export function Settings() {
   const { agentId: urlAgentId } = useParams()
-  const { user } = useAuth()
+  const { user, impersonatingClientId } = useAuth()
   const navigate = useNavigate()
   const toast = useToast()
   const confirm = useConfirm()
@@ -941,7 +941,7 @@ export function Settings() {
     has_realtime_api_key: false,
   })
 
-  const clientId = client?.id || user?.client_id
+  const clientId = client?.id || impersonatingClientId || user?.client_id
 
   /* ── Populate form from agent data ── */
   function populateForm(agentData) {
@@ -1042,10 +1042,11 @@ export function Settings() {
 
   /* ── Initial data load ── */
   useEffect(() => {
-    if (user?.role === 'admin') return setLoading(false)
-    if (!user?.client_id) return setLoading(false)
+    if (user?.role === 'admin' && !impersonatingClientId) return setLoading(false)
+    const effectiveClientId = impersonatingClientId || user?.client_id
+    if (!effectiveClientId) return setLoading(false)
 
-    const cid = user.client_id
+    const cid = effectiveClientId
     Promise.all([
       api.get(`/clients/${cid}`),
       api.get(`/clients/${cid}/agents`),
@@ -1263,7 +1264,7 @@ export function Settings() {
 
   /* ─────────────────────── Render: Admin redirect ──────────────── */
 
-  if (user?.role === 'admin') {
+  if (user?.role === 'admin' && !impersonatingClientId) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-bold flex items-center gap-2"><Bot size={24} /> Agentes</h1>

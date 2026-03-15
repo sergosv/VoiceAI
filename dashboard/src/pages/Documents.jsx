@@ -166,7 +166,7 @@ export function Documents() {
         </div>
       </div>
 
-      {user?.role === 'admin' && !clientId && (
+      {user?.role === 'admin' && !clientId && !sessionStorage.getItem('impersonateClientId') && (
         <p className="text-sm text-text-muted">Selecciona un cliente para subir documentos.</p>
       )}
 

@@ -19,8 +19,8 @@ function formatDate(iso) {
 
 export function CallsTable({ calls = [] }) {
   const navigate = useNavigate()
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const { user, impersonatingClientId } = useAuth()
+  const isAdmin = user?.role === 'admin' && !impersonatingClientId
 
   if (!calls.length) {
     return (

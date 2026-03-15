@@ -14,6 +14,8 @@ async function request(path, options = {}) {
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
+  const impersonateId = sessionStorage.getItem('impersonateClientId')
+  if (impersonateId) headers['X-Impersonate-Client'] = impersonateId
 
   const { signal, ...rest } = options
   const res = await fetch(`${BASE}${path}`, { ...rest, headers, signal })
@@ -37,6 +39,8 @@ async function downloadFile(path) {
   const token = await getToken()
   const headers = {}
   if (token) headers['Authorization'] = `Bearer ${token}`
+  const impersonateId = sessionStorage.getItem('impersonateClientId')
+  if (impersonateId) headers['X-Impersonate-Client'] = impersonateId
   const res = await fetch(`${BASE}${path}`, { headers })
   if (!res.ok) throw new Error(`Error ${res.status}`)
   const blob = await res.blob()

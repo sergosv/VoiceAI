@@ -30,9 +30,7 @@ async def list_documents(
     sb = get_supabase()
     query = sb.table("documents").select("*").order("uploaded_at", desc=True)
 
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)
@@ -50,7 +48,7 @@ async def upload_document(
 ) -> DocumentOut:
     """Sube un documento al FileSearchStore del cliente."""
     # Determinar client_id
-    effective_client_id = user.client_id if user.role == "client" else client_id
+    effective_client_id = user.client_id or client_id
     if not effective_client_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

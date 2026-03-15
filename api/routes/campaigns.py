@@ -86,9 +86,7 @@ async def list_campaigns(
     sb = get_supabase()
     query = sb.table("campaigns").select("*").order("created_at", desc=True)
 
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)

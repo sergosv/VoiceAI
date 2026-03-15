@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import jwt
 from jwt import PyJWK
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.deps import get_supabase
@@ -63,10 +63,12 @@ class CurrentUser:
     auth_user_id: str  # Supabase Auth uid
     email: str
     role: str  # 'admin' | 'client'
-    client_id: str | None  # NULL para admin
+    client_id: str | None  # NULL para admin, overridden durante impersonación
+    impersonating_client_id: str | None = None  # Solo se setea en impersonación
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> CurrentUser:
     """Decodifica JWT de Supabase y busca el usuario en nuestra tabla users."""
@@ -141,13 +143,39 @@ async def get_current_user(
         except (ValueError, TypeError):
             pass  # Si no se puede parsear, no bloquear
 
-    return CurrentUser(
+    base_user = CurrentUser(
         id=str(user["id"]),
         auth_user_id=str(user["auth_user_id"]),
         email=user["email"],
         role=user["role"],
         client_id=str(user["client_id"]) if user.get("client_id") else None,
     )
+
+    # Impersonación: admin puede ver el dashboard como un cliente
+    impersonate_id = request.headers.get("X-Impersonate-Client")
+    if impersonate_id and base_user.role == "admin":
+        # Validar que el cliente existe
+        client_result = (
+            sb.table("clients")
+            .select("id")
+            .eq("id", impersonate_id)
+            .limit(1)
+            .execute()
+        )
+        if client_result.data:
+            logger.info(
+                "Admin %s impersonando cliente %s", base_user.email, impersonate_id
+            )
+            return CurrentUser(
+                id=base_user.id,
+                auth_user_id=base_user.auth_user_id,
+                email=base_user.email,
+                role=base_user.role,
+                client_id=impersonate_id,
+                impersonating_client_id=impersonate_id,
+            )
+
+    return base_user
 
 
 async def require_admin(

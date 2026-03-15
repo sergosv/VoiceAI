@@ -13,10 +13,8 @@ router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
 
 def _apply_tenant_filter(query, user: CurrentUser, client_id: str | None = None):
-    """Aplica filtro multi-tenancy: client ve solo lo suyo, admin puede filtrar."""
-    if user.role == "client":
-        if not user.client_id:
-            return None  # Sin client_id, sin datos
+    """Aplica filtro multi-tenancy (soporta impersonación admin)."""
+    if user.client_id:
         return query.eq("client_id", user.client_id)
     elif client_id:
         return query.eq("client_id", client_id)

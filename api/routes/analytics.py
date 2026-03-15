@@ -16,7 +16,7 @@ logger = logging.getLogger("analytics")
 
 
 def _effective_cid(user: CurrentUser, client_id: str | None) -> str | None:
-    return user.client_id if user.role == "client" else client_id
+    return user.client_id or client_id
 
 
 @router.get("/summary")

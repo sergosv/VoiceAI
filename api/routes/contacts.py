@@ -44,10 +44,8 @@ async def list_contacts(
     sb = get_supabase()
     query = sb.table("contacts").select("*").order("created_at", desc=True)
 
-    # Multi-tenancy
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    # Multi-tenancy (soporta impersonación admin)
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)
@@ -81,9 +79,7 @@ async def export_contacts_csv(
     sb = get_supabase()
     query = sb.table("contacts").select("*").order("created_at", desc=True)
 
-    if user.role == "client":
-        if not user.client_id:
-            return StreamingResponse(io.StringIO(""), media_type="text/csv")
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)

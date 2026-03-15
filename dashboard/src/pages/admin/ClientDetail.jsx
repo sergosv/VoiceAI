@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, UserPlus, Phone, PhoneCall, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins, Database, AlertTriangle, Loader2 } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, UserPlus, Phone, PhoneCall, Search, ShoppingCart, Plus, Bot, Zap, ChevronDown, ChevronUp, Gift, Coins, Database, AlertTriangle, Loader2, Eye, CheckCircle2, Circle } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
@@ -16,7 +16,7 @@ import { PageLoader } from '../../components/ui/Spinner'
 export function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, startImpersonation } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
   const [client, setClient] = useState(null)
@@ -58,6 +58,10 @@ export function ClientDetail() {
   // Store creation
   const [creatingStore, setCreatingStore] = useState(false)
 
+  // Onboarding checklist
+  const [hasUsers, setHasUsers] = useState(false)
+  const [docCount, setDocCount] = useState(0)
+
   // Orchestration state
   const [orchOpen, setOrchOpen] = useState(false)
 
@@ -73,8 +77,12 @@ export function ClientDetail() {
     }).catch(() => navigate('/admin/clients'))
       .finally(() => setLoading(false))
 
-    // Cargar balance de créditos (no bloquea el loading principal)
+    // Datos extra para checklist (no bloquean el loading principal)
     api.get(`/billing/balance?client_id=${id}`).then(setCreditBalance).catch(() => {})
+    api.get(`/admin/users`).then(users => {
+      setHasUsers(users.some(u => u.client_id === id && u.role === 'client'))
+    }).catch(() => {})
+    api.get(`/documents?client_id=${id}`).then(docs => setDocCount(docs.length)).catch(() => {})
   }, [id])
 
   async function handleSave() {
@@ -132,6 +140,7 @@ export function ClientDetail() {
       toast.success(`Acceso creado para ${userForm.email}`)
       setShowUserModal(false)
       setUserForm({ email: '', password: '', display_name: '' })
+      setHasUsers(true)
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -292,6 +301,13 @@ export function ClientDetail() {
 
       {/* Action buttons */}
       <div className="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          className="!border-amber-500/30 !text-amber-400 hover:!bg-amber-500/10"
+          onClick={() => { startImpersonation(id, client.name); navigate('/') }}
+        >
+          <Eye size={16} className="mr-2 inline" /> Acceder como cliente
+        </Button>
         <Button variant="secondary" onClick={() => setShowUserModal(true)}>
           <UserPlus size={16} className="mr-2 inline" /> Crear acceso portal
         </Button>
@@ -302,6 +318,71 @@ export function ClientDetail() {
           <Gift size={16} className="mr-2 inline" /> Regalar creditos
         </Button>
       </div>
+
+      {/* Onboarding checklist */}
+      {(() => {
+        const hasPhone = agents.some(a => a.phone_number)
+        const hasStore = !!client.file_search_store_id
+        const hasCredits = creditBalance && (creditBalance.balance ?? 0) > 0
+        const hasCalls = calls.length > 0
+        const steps = [
+          { done: true, label: 'Cliente creado', hint: client.slug },
+          { done: agents.length > 0, label: 'Agente configurado', hint: agents.length ? `${agents.length} agente(s)` : null },
+          { done: hasStore, label: 'Base de conocimientos', hint: hasStore ? 'Store activo' : null,
+            action: !hasStore ? () => handleCreateStore() : null, actionLabel: 'Crear Store' },
+          { done: hasCredits, label: 'Creditos otorgados', hint: hasCredits ? `${Math.floor(creditBalance.balance)} disponibles` : null,
+            action: !hasCredits ? () => setShowGiftModal(true) : null, actionLabel: 'Regalar' },
+          { done: hasPhone, label: 'Telefono asignado', hint: hasPhone ? agents.find(a => a.phone_number)?.phone_number : null,
+            action: !hasPhone && agents[0] ? () => openPhoneModal(agents[0].id) : null, actionLabel: 'Asignar' },
+          { done: hasUsers, label: 'Acceso portal creado', hint: hasUsers ? 'Usuario activo' : null,
+            action: !hasUsers ? () => setShowUserModal(true) : null, actionLabel: 'Crear' },
+          { done: docCount > 0, label: 'Documentos subidos', hint: docCount > 0 ? `${docCount} doc(s)` : null,
+            action: docCount === 0 ? () => { startImpersonation(id, client.name); navigate('/documents') } : null, actionLabel: 'Subir' },
+          { done: hasCalls, label: 'Llamada de prueba', hint: hasCalls ? 'Verificada' : null,
+            action: !hasCalls && agents[0]?.slug ? () => setTestCallAgent(agents[0]) : null, actionLabel: 'Probar' },
+        ]
+        const completed = steps.filter(s => s.done).length
+        const total = steps.length
+        const allDone = completed === total
+        return (
+          <Card className="!p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-text-secondary">
+                Onboarding — {completed}/{total} completados
+              </h2>
+              {allDone && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium">Listo</span>
+              )}
+            </div>
+            <div className="w-full bg-bg-primary rounded-full h-1.5">
+              <div
+                className={`h-1.5 rounded-full transition-all duration-500 ${allDone ? 'bg-green-500' : 'bg-accent'}`}
+                style={{ width: `${(completed / total) * 100}%` }}
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {steps.map((step, i) => (
+                <div key={i} className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm ${step.done ? 'text-text-muted' : 'text-text-primary bg-bg-primary'}`}>
+                  {step.done
+                    ? <CheckCircle2 size={15} className="text-green-400 shrink-0" />
+                    : <Circle size={15} className="text-text-muted shrink-0" />
+                  }
+                  <span className={step.done ? 'line-through' : 'font-medium'}>{step.label}</span>
+                  {step.hint && <span className="text-[10px] text-text-muted ml-auto hidden sm:inline">{step.hint}</span>}
+                  {!step.done && step.action && (
+                    <button
+                      onClick={step.action}
+                      className="ml-auto text-[10px] px-2 py-0.5 rounded bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer font-medium"
+                    >
+                      {step.actionLabel}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
+        )
+      })()}
 
       {/* Credit balance card */}
       {creditBalance && (

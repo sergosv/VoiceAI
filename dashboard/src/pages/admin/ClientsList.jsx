@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Users, Power, PowerOff, Trash2, Pencil } from 'lucide-react'
+import { Plus, Users, Power, PowerOff, Trash2, Pencil, Eye } from 'lucide-react'
 import { api } from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { useConfirm } from '../../context/ConfirmContext'
 import { Card } from '../../components/ui/Card'
@@ -14,6 +15,7 @@ export function ClientsList() {
   const [clients, setClients] = useState([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+  const { startImpersonation } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -105,6 +107,13 @@ export function ClientsList() {
                   </Td>
                   <Td>
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startImpersonation(c.id, c.name); navigate('/') }}
+                        className="p-1.5 rounded-lg text-text-muted hover:text-amber-400 hover:bg-amber-400/10 transition-colors cursor-pointer"
+                        title="Acceder como"
+                      >
+                        <Eye size={15} />
+                      </button>
                       <button
                         onClick={(e) => handleToggleActive(e, c)}
                         className={`p-1.5 rounded-lg transition-colors cursor-pointer ${

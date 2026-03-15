@@ -103,9 +103,7 @@ async def list_clients(
     sb = get_supabase()
     query = sb.table("clients").select("*").order("created_at", desc=True)
 
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    if user.client_id:
         query = query.eq("id", user.client_id)
 
     result = query.execute()

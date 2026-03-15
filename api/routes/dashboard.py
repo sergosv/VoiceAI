@@ -22,7 +22,7 @@ async def get_overview(
 ) -> DashboardOverview:
     """Overview del dashboard: totales y datos de hoy."""
     sb = get_supabase()
-    effective_client_id = user.client_id if user.role == "client" else client_id
+    effective_client_id = user.client_id or client_id
 
     # Admin sin client_id explícito no debe ver datos de todos los clientes
     if user.role == "admin" and not effective_client_id:
@@ -117,7 +117,7 @@ async def get_usage(
 ) -> DashboardUsage:
     """Datos de uso diario para gráficas."""
     sb = get_supabase()
-    effective_client_id = user.client_id if user.role == "client" else client_id
+    effective_client_id = user.client_id or client_id
 
     # Admin sin client_id explícito no debe ver datos de todos los clientes
     if user.role == "admin" and not effective_client_id:

@@ -94,10 +94,8 @@ class SuiteRunRequest(BaseModel):
 
 
 def _resolve_client_id(user: CurrentUser, explicit_client_id: str | None = None) -> str | None:
-    """Resuelve el client_id efectivo según el rol."""
-    if user.role == "client":
-        return user.client_id
-    return explicit_client_id
+    """Resuelve el client_id efectivo (soporta impersonación admin)."""
+    return user.client_id or explicit_client_id
 
 
 def _check_own_persona(persona: dict, user: CurrentUser) -> None:
@@ -130,7 +128,7 @@ async def list_personas(
 
     query = sb.table("test_personas").select("*").order("created_at", desc=True)
 
-    if user.role == "client":
+    if user.client_id:
         # Templates + las del cliente — validar UUID antes de interpolar
         client_id_str = str(user.client_id)
         try:
@@ -141,7 +139,7 @@ async def list_personas(
                 detail="client_id inválido",
             )
         query = query.or_(f"is_template.eq.true,client_id.eq.{client_id_str}")
-    # Admin ve todas
+    # Admin sin impersonación ve todas
 
     if difficulty:
         query = query.eq("difficulty", difficulty)
@@ -469,10 +467,8 @@ async def list_runs(
         .order("created_at", desc=True)
     )
 
-    # Multi-tenancy
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    # Multi-tenancy (soporta impersonación admin)
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
 
     if agent_id:
@@ -592,9 +588,7 @@ async def list_suites(
         .order("created_at", desc=True)
     )
 
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
 
     result = query.execute()
@@ -813,16 +807,8 @@ async def get_stats(
         .limit(10000)
     )
 
-    # Multi-tenancy
-    if user.role == "client":
-        if not user.client_id:
-            return {
-                "total_runs": 0,
-                "avg_score": 0,
-                "runs_by_status": {},
-                "best_persona": None,
-                "worst_persona": None,
-            }
+    # Multi-tenancy (soporta impersonación admin)
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
 
     if agent_id:

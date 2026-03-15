@@ -37,10 +37,8 @@ async def list_calls(
         "started_at, ended_at, metadata, recording_url, recording_key"
     ).order("started_at", desc=True)
 
-    # Multi-tenancy
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    # Multi-tenancy (soporta impersonación admin)
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)
@@ -83,7 +81,7 @@ async def get_call_stats(
     sb = get_supabase()
 
     # Determinar el client_id efectivo
-    effective_client_id = user.client_id if user.role == "client" else client_id
+    effective_client_id = user.client_id or client_id
 
     # Obtener el total real usando count="exact"
     count_query = sb.table("calls").select("id", count="exact")
@@ -142,9 +140,7 @@ async def export_calls_csv(
         "cost_total, status, summary, sentimiento, resumen_ia, started_at, metadata"
     ).order("started_at", desc=True)
 
-    if user.role == "client":
-        if not user.client_id:
-            return StreamingResponse(io.StringIO(""), media_type="text/csv")
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)

@@ -32,10 +32,8 @@ async def list_appointments(
     sb = get_supabase()
     query = sb.table("appointments").select("*").order("start_time", desc=False)
 
-    # Multi-tenancy
-    if user.role == "client":
-        if not user.client_id:
-            return []
+    # Multi-tenancy (soporta impersonación admin)
+    if user.client_id:
         query = query.eq("client_id", user.client_id)
     elif client_id:
         query = query.eq("client_id", client_id)

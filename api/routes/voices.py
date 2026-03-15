@@ -279,7 +279,7 @@ async def clone_voice(
             raise RuntimeError("No se recibió ID de voz del provider")
 
     except Exception as e:
-        logger.error("Error en clonación de voz: %s", e)
+        logger.error("Error en clonación de voz: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error clonando voz: {e}",

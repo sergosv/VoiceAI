@@ -206,19 +206,19 @@ async def system_overview(
     since_30d = (now - timedelta(days=30)).isoformat()
     revenue_result = (
         sb.table("credit_transactions")
-        .select("amount")
+        .select("credits")
         .eq("type", "purchase")
         .gte("created_at", since_30d)
         .execute()
     )
     total_revenue_30d = sum(
-        float(r.get("amount", 0)) for r in (revenue_result.data or [])
+        float(r.get("credits", 0)) for r in (revenue_result.data or [])
     )
 
     # Pagos recientes (últimos 10 purchases con nombre de cliente)
     payments_result = (
         sb.table("credit_transactions")
-        .select("id, client_id, amount, created_at, description")
+        .select("id, client_id, credits, created_at, reason")
         .eq("type", "purchase")
         .order("created_at", desc=True)
         .limit(10)
@@ -243,9 +243,9 @@ async def system_overview(
             "id": p["id"],
             "client_id": p["client_id"],
             "client_name": payment_client_names.get(str(p["client_id"]), "Desconocido"),
-            "amount": float(p.get("amount", 0)),
+            "amount": float(p.get("credits", 0)),
             "created_at": p["created_at"],
-            "description": p.get("description"),
+            "description": p.get("reason"),
         }
         for p in payments
     ]

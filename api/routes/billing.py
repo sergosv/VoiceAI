@@ -43,7 +43,7 @@ async def get_balance(
 ) -> dict:
     """Balance actual de créditos del cliente."""
     sb = get_supabase()
-    effective_id = user.client_id if user.role == "client" else client_id
+    effective_id = user.client_id or client_id
     if not effective_id:
         return {"balance": 0, "total_purchased": 0, "total_consumed": 0, "total_gifted": 0}
 
@@ -157,7 +157,7 @@ async def list_transactions(
 ) -> list[dict]:
     """Historial de transacciones de créditos."""
     sb = get_supabase()
-    effective_id = user.client_id if user.role == "client" else client_id
+    effective_id = user.client_id or client_id
     if not effective_id:
         return []
 
@@ -179,7 +179,7 @@ async def export_transactions_csv(
 ) -> StreamingResponse:
     """Exporta transacciones de créditos a CSV."""
     sb = get_supabase()
-    effective_id = user.client_id if user.role == "client" else client_id
+    effective_id = user.client_id or client_id
     if not effective_id:
         return StreamingResponse(io.StringIO(""), media_type="text/csv")
 

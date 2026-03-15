@@ -8,6 +8,8 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [impersonatingClientId, setImpersonatingClientId] = useState(() => sessionStorage.getItem('impersonateClientId'))
+  const [impersonatingClientName, setImpersonatingClientName] = useState(() => sessionStorage.getItem('impersonateClientName'))
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -45,13 +47,32 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
+    stopImpersonation()
     await supabase.auth.signOut()
     setUser(null)
     setSession(null)
   }
 
+  function startImpersonation(clientId, clientName) {
+    sessionStorage.setItem('impersonateClientId', clientId)
+    sessionStorage.setItem('impersonateClientName', clientName)
+    setImpersonatingClientId(clientId)
+    setImpersonatingClientName(clientName)
+  }
+
+  function stopImpersonation() {
+    sessionStorage.removeItem('impersonateClientId')
+    sessionStorage.removeItem('impersonateClientName')
+    setImpersonatingClientId(null)
+    setImpersonatingClientName(null)
+  }
+
   return (
-    <AuthContext.Provider value={{ session, user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{
+      session, user, loading, signIn, signOut,
+      impersonatingClientId, impersonatingClientName,
+      startImpersonation, stopImpersonation,
+    }}>
       {children}
     </AuthContext.Provider>
   )

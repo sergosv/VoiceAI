@@ -16,8 +16,8 @@ import { ClientSelector } from '../components/ClientSelector'
 import { OnboardingChecklist } from '../components/OnboardingChecklist'
 
 export function Dashboard() {
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const { user, impersonatingClientId } = useAuth()
+  const isAdmin = user?.role === 'admin' && !impersonatingClientId
   const toast = useToast()
   const navigate = useNavigate()
   const [overview, setOverview] = useState(null)

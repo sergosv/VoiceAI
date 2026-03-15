@@ -67,8 +67,8 @@ const INTENT_RT_LABELS = {
 export function CallDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+  const { user, impersonatingClientId } = useAuth()
+  const isAdmin = user?.role === 'admin' && !impersonatingClientId
   const [call, setCall] = useState(null)
   const [loading, setLoading] = useState(true)
 
