@@ -82,6 +82,17 @@ async def webhook_evolution(request: Request) -> Response:
     except Exception:
         return Response(status_code=400)
 
+    # Loguear payload raw para debug (incluye LID y alt JID)
+    data = payload.get("data", {})
+    raw_key = data.get("key", {})
+    logger.info(
+        "Evolution webhook raw: remoteJid=%s remoteJidAlt=%s instance=%s event=%s",
+        raw_key.get("remoteJid", ""),
+        raw_key.get("remoteJidAlt", ""),
+        payload.get("instance", ""),
+        payload.get("event", ""),
+    )
+
     msg = _evo.parse_webhook(payload)
     if msg:
         logger.info("Evolution webhook: mensaje de %s (instance=%s)", msg.remote_phone, msg.evo_instance_id)

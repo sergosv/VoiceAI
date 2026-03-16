@@ -41,6 +41,24 @@ class EvolutionProvider(WhatsAppProvider):
             return None
 
         remote_jid = key.get("remoteJid", "")
+
+        # WhatsApp LID (Linked ID): algunos contactos llegan como
+        # "47223333253334@lid" en vez de "5212227690231@s.whatsapp.net".
+        # El número real está en remoteJidAlt.
+        if remote_jid.endswith("@lid"):
+            alt_jid = key.get("remoteJidAlt", "")
+            if alt_jid and "@s.whatsapp.net" in alt_jid:
+                logger.info(
+                    "Evolution: LID detectado (%s), usando alt JID: %s",
+                    remote_jid, alt_jid,
+                )
+                remote_jid = alt_jid
+            else:
+                logger.warning(
+                    "Evolution: LID sin remoteJidAlt válido — jid=%s alt=%s",
+                    remote_jid, alt_jid,
+                )
+
         # Extraer número del JID (formato: 5215551234567@s.whatsapp.net)
         remote_phone = remote_jid.split("@")[0] if "@" in remote_jid else remote_jid
 
@@ -89,6 +107,16 @@ class EvolutionProvider(WhatsAppProvider):
             return None
 
         clean_phone = to_phone.lstrip("+").replace(" ", "").replace("-", "")
+
+        # Si el número es sospechosamente largo (>13 dígitos), enviar como JID
+        # para evitar que Evolution falle al verificar existencia
+        if len(clean_phone) > 13:
+            logger.warning(
+                "Evolution: número largo (%d dígitos: %s), enviando como JID",
+                len(clean_phone), clean_phone,
+            )
+            clean_phone = f"{clean_phone}@s.whatsapp.net"
+
         headers = {"apikey": api_key, "Content-Type": "application/json"}
 
         # 1. Enviar "composing" (los tres puntitos de "escribiendo...")
