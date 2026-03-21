@@ -85,7 +85,7 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
                 "p_payment_provider": "stripe",
                 "p_payment_id": session["id"],
                 "p_amount_paid": amount_paid,
-                "p_currency": "USD",
+                "p_currency": "MXN",
                 "p_package_id": metadata.get("package_id"),
             }).execute()
             logger.info("Stripe: %d credits added to %s", credits, client_id)

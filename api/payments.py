@@ -32,24 +32,24 @@ async def create_stripe_checkout(
     client_id: str,
     package_id: str,
     package_name: str,
-    price_usd: float,
+    price_mxn: float,
     credits: int,
     success_url: str,
     cancel_url: str,
 ) -> dict[str, str]:
-    """Crea sesión de Stripe Checkout. Retorna URL de pago."""
+    """Crea sesión de Stripe Checkout en MXN. Acepta tarjeta y OXXO."""
     stripe = _get_stripe()
     try:
         session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
+            payment_method_types=["card", "oxxo"],
             line_items=[{
                 "price_data": {
-                    "currency": "usd",
+                    "currency": "mxn",
                     "product_data": {
                         "name": f"Créditos: {package_name}",
                         "description": f"{credits} minutos de agente IA",
                     },
-                    "unit_amount": int(round(price_usd * 100)),  # Stripe usa centavos
+                    "unit_amount": int(round(price_mxn * 100)),  # Stripe usa centavos
                 },
                 "quantity": 1,
             }],

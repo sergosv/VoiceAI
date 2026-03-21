@@ -109,7 +109,7 @@ async def purchase_credits(
             client_id=purchase.client_id,
             package_id=purchase.package_id,
             package_name=pkg["name"],
-            price_usd=float(pkg["price_usd"]),
+            price_mxn=float(pkg["price_mxn"]),
             credits=pkg["credits"],
             success_url=f"{base_url}/billing?status=success",
             cancel_url=f"{base_url}/billing?status=cancelled",
