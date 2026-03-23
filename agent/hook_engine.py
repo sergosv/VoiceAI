@@ -37,6 +37,7 @@ class HookAction(str, Enum):
     NOTIFY = "notify"
     CLOSE_SESSION = "close_session"
     REPLACE_TOOL = "replace_tool"
+    REGENERATE = "regenerate"  # Evaluator-optimizer: pedir al agente que regenere
 
 
 @dataclass
@@ -221,6 +222,8 @@ class HookEngine:
             return self._eval_notify(hook, ctx, base)
         elif hook.hook_type == "prompt":
             return await self._eval_prompt(hook, ctx, base)
+        elif hook.hook_type == "evaluator":
+            return await self._eval_evaluator(hook, ctx, base)
         else:
             logger.warning("Tipo de hook desconocido: %s", hook.hook_type)
             return base
@@ -370,6 +373,88 @@ class HookEngine:
             logger.exception("Error en prompt hook '%s' — permitiendo", hook.name)
 
         return base
+
+    async def _eval_evaluator(
+        self, hook: HookDefinition, ctx: HookContext, base: HookResult
+    ) -> HookResult:
+        """Evalúa un hook tipo 'evaluator' — patrón evaluator-optimizer de Anthropic.
+
+        Un segundo LLM evalúa la respuesta del agente contra criterios específicos.
+        Si no pasa, retorna REGENERATE con feedback para que el agente regenere.
+
+        Config esperada:
+            criteria: str — criterios de evaluación (ej: "No debe contener diagnósticos médicos")
+            max_retries: int — máximo intentos de regeneración (default 1)
+            feedback_prefix: str — prefijo del feedback (default "Corrige tu respuesta:")
+        """
+        criteria = hook.config.get("criteria", "")
+        feedback_prefix = hook.config.get("feedback_prefix", "Corrige tu respuesta:")
+
+        if not criteria or not ctx.response_text:
+            return base
+
+        try:
+            evaluation = await asyncio.wait_for(
+                self._call_evaluator_llm(criteria, ctx),
+                timeout=5.0,
+            )
+            if not evaluation["passed"]:
+                base.action = HookAction.REGENERATE
+                base.message = f"{feedback_prefix} {evaluation['feedback']}"
+                logger.info(
+                    "Evaluator hook '%s' rechazó respuesta: %s",
+                    hook.name, evaluation["feedback"][:100],
+                )
+        except asyncio.TimeoutError:
+            logger.warning("Timeout en evaluator hook '%s' — permitiendo", hook.name)
+        except Exception:
+            logger.exception("Error en evaluator hook '%s' — permitiendo", hook.name)
+
+        return base
+
+    @staticmethod
+    async def _call_evaluator_llm(criteria: str, ctx: HookContext) -> dict:
+        """Llama a un LLM rápido para evaluar una respuesta contra criterios.
+
+        Returns:
+            {"passed": bool, "feedback": str}
+        """
+        try:
+            from google import genai
+
+            client = genai.Client()
+            eval_prompt = (
+                f"Eres un evaluador de calidad. Evalúa la siguiente respuesta de un agente "
+                f"contra los criterios dados.\n\n"
+                f"## Criterios\n{criteria}\n\n"
+                f"## Respuesta del agente\n{ctx.response_text}\n\n"
+                f"## Contexto\n"
+                f"- Mensaje del usuario: {ctx.user_text or 'N/A'}\n"
+                f"- Canal: {ctx.channel}\n\n"
+                f"Responde en formato:\n"
+                f"RESULTADO: APROBADO o RECHAZADO\n"
+                f"FEEDBACK: [si rechazado, explica qué corregir en 1-2 frases]\n"
+            )
+
+            response = await asyncio.to_thread(
+                lambda: client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=eval_prompt,
+                )
+            )
+
+            text = (response.text or "").strip()
+            passed = "APROBADO" in text.upper()
+            # Extraer feedback
+            feedback = ""
+            if "FEEDBACK:" in text:
+                feedback = text.split("FEEDBACK:", 1)[1].strip()
+
+            return {"passed": passed, "feedback": feedback}
+
+        except Exception:
+            logger.exception("Error en evaluator LLM")
+            return {"passed": True, "feedback": ""}
 
     # ── Helpers ────────────────────────────────────────
 

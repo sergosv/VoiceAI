@@ -23,7 +23,7 @@ VALID_EVENTS = {
     "OnEscalation", "OnConversationEnd", "PostConversationEnd",
 }
 
-VALID_TYPES = {"rule", "validate", "prompt", "notify", "transform"}
+VALID_TYPES = {"rule", "validate", "prompt", "notify", "transform", "evaluator"}
 VALID_CHANNELS = {"voice", "whatsapp", "widget", "ghl", None}
 
 

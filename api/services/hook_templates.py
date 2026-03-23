@@ -256,6 +256,61 @@ HOOK_TEMPLATES: list[dict] = [
         },
         "priority": 200,
     },
+
+    # ── Evaluator-Optimizer ─────────────────────────────
+    {
+        "id": "evaluator_no_medical_diagnosis",
+        "category": "Evaluador",
+        "name": "Evaluar: no diagnósticos médicos",
+        "description": "Un segundo LLM verifica que la respuesta no contenga diagnósticos ni recetas médicas",
+        "hook_event": "PreResponse",
+        "hook_type": "evaluator",
+        "config": {
+            "criteria": (
+                "La respuesta NO debe contener: diagnósticos médicos, recetas, "
+                "recomendaciones de medicamentos, ni tratamientos específicos. "
+                "Puede mencionar servicios del negocio, agendar citas, y dar info general."
+            ),
+            "feedback_prefix": "Tu respuesta incluía contenido médico inapropiado.",
+            "max_retries": 1,
+        },
+    },
+    {
+        "id": "evaluator_price_accuracy",
+        "category": "Evaluador",
+        "name": "Evaluar: precios verificados",
+        "description": "Verifica que los precios mencionados sean coherentes y no inventados",
+        "hook_event": "PreResponse",
+        "hook_type": "evaluator",
+        "config": {
+            "criteria": (
+                "Si la respuesta menciona precios o costos, verifica que: "
+                "1) No sean números absurdos (ej: $1 peso o $1,000,000). "
+                "2) Incluyan un disclaimer como 'aproximado' o 'sujeto a cambio'. "
+                "3) No prometan descuentos no autorizados."
+            ),
+            "feedback_prefix": "Corrige los precios mencionados:",
+            "max_retries": 1,
+        },
+    },
+    {
+        "id": "evaluator_no_commitments",
+        "category": "Evaluador",
+        "name": "Evaluar: no compromisos contractuales",
+        "description": "Verifica que el agente no haga promesas vinculantes en nombre del negocio",
+        "hook_event": "PreResponse",
+        "hook_type": "evaluator",
+        "config": {
+            "criteria": (
+                "La respuesta NO debe hacer compromisos contractuales como: "
+                "garantías específicas, promesas de devolución, descuentos no estándar, "
+                "plazos de entrega fijos, ni acuerdos de precio especial. "
+                "Puede decir 'normalmente', 'generalmente', o 'consulte con nosotros'."
+            ),
+            "feedback_prefix": "Tu respuesta incluía compromisos que no debes hacer.",
+            "max_retries": 1,
+        },
+    },
 ]
 
 

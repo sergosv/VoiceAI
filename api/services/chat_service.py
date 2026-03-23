@@ -744,10 +744,40 @@ async def chat_turn(
                         user_text=user_message,
                     )
                     pre_results = await hook_engine.evaluate("PreResponse", hctx)
+                    should_regenerate = False
+                    regenerate_feedback = ""
                     for pr in pre_results:
                         if pr.action == HookAction.BLOCK and pr.message:
                             text = pr.message  # Reemplazar respuesta
+                            should_regenerate = False
                             break
+                        if pr.action == HookAction.REGENERATE and pr.message:
+                            should_regenerate = True
+                            regenerate_feedback = pr.message
+                    # Evaluator-optimizer: regenerar con feedback
+                    if should_regenerate and regenerate_feedback:
+                        logger.info("Evaluator rechazó respuesta, regenerando con feedback")
+                        # Agregar feedback como instrucción y regenerar
+                        conversation.history.append(
+                            types.Content(
+                                role="user",
+                                parts=[types.Part.from_text(
+                                    text=f"[SISTEMA] {regenerate_feedback} Reformula tu respuesta."
+                                )],
+                            )
+                        )
+                        regen = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=conversation.history,
+                            config=types.GenerateContentConfig(
+                                system_instruction=conversation.system_prompt,
+                                temperature=0.7,
+                            ),
+                        )
+                        if regen.candidates and regen.candidates[0].content:
+                            regen_parts = regen.candidates[0].content.parts
+                            text = "".join(p.text for p in regen_parts if p.text) or text
+                            conversation.history.append(regen.candidates[0].content)
                     # Aplicar transforms (append, etc.)
                     transforms = hook_engine.collect_transforms(pre_results)
                     if transforms and transforms.get("append"):

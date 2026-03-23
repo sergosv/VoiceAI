@@ -142,6 +142,16 @@ class VoiceAgent(Agent):
                             self._usage_metrics.add_tts_text(r.message)
                         yield r.message
                         return
+                    if r.action == HookAction.REGENERATE and r.message:
+                        # Evaluator-optimizer: inyectar feedback para siguiente respuesta
+                        # En streaming no podemos regenerar, pero inyectamos el feedback
+                        # para que la PRÓXIMA respuesta sea correcta
+                        if hasattr(self, "_instructions"):
+                            self._instructions = self.instructions + (
+                                f"\n\n## CORRECCIÓN URGENTE\n{r.message}\n"
+                                f"Aplica esta corrección en tu próxima respuesta."
+                            )
+                        logger.info("Evaluator inyectó feedback: %s", r.message[:100])
                 # Aplicar append de transforms
                 transforms = self._hook_engine.collect_transforms(results)
                 append_text = transforms.get("append") if transforms else None
@@ -354,7 +364,11 @@ class VoiceAgent(Agent):
 
         store_id = self._config.client.file_search_store_id
         if not store_id:
-            return "No hay base de conocimientos configurada."
+            return (
+                "No hay base de conocimientos configurada para este negocio. "
+                "Responde con lo que sepas del system prompt. Si no tienes la información, "
+                "dile al usuario que con gusto le pueden dar más detalles llamando directamente."
+            )
 
         logger.info("File Search query para '%s': %s", self._config.client.slug, query)
         return await search_knowledge_base(query, store_id)
@@ -448,7 +462,11 @@ class VoiceAgent(Agent):
             description: Descripción o motivo de la cita.
         """
         if not self._tool_enabled("schedule_appointment"):
-            return "La función de agendar citas no está habilitada."
+            return (
+                "La función de citas no está habilitada. "
+                "Dile al usuario que anotes sus datos y que el negocio le confirmará la cita. "
+                "Pídele nombre, fecha preferida y teléfono para que lo contacten."
+            )
 
         # Hook: PreToolCall
         tool_input = {
@@ -497,7 +515,11 @@ class VoiceAgent(Agent):
             message: Texto del mensaje a enviar.
         """
         if not self._tool_enabled("send_whatsapp"):
-            return "El envío de WhatsApp no está habilitado."
+            return (
+                "WhatsApp no está habilitado para este agente. "
+                "Ofrece al usuario darle la información de otra forma: "
+                "dictarle los datos, o decirle que el negocio se los enviará."
+            )
 
         # Hook: PreToolCall
         tool_input = {"phone_number": phone_number, "message": message}
@@ -508,7 +530,11 @@ class VoiceAgent(Agent):
         # Cargar config de WhatsApp desde whatsapp_configs (por agente)
         wa_config = await load_whatsapp_config_by_agent_id(self._config.agent.id)
         if not wa_config:
-            return "WhatsApp no está configurado para este agente."
+            return (
+                "WhatsApp no está configurado todavía. "
+                "Dile al usuario que por el momento no puedes enviar mensajes, "
+                "pero que le puedes dictar la información que necesite."
+            )
 
         provider = wa_config.get("provider")
         if provider == "evolution":
@@ -516,7 +542,11 @@ class VoiceAgent(Agent):
             evo_key = wa_config.get("evo_api_key")
             evo_instance = wa_config.get("evo_instance_id")
             if not evo_url or not evo_key or not evo_instance:
-                return "La configuración de Evolution API está incompleta."
+                return (
+                    "La configuración de WhatsApp está incompleta — falta URL o API key. "
+                    "Dile al usuario que no puedes enviar el mensaje en este momento, "
+                    "pero que puedes dictarle la información."
+                )
             result = await send_whatsapp_message(
                 api_url=evo_url,
                 api_key=evo_key,
@@ -554,11 +584,18 @@ class VoiceAgent(Agent):
             notes: Notas o comentarios sobre el contacto.
         """
         if not self._tool_enabled("save_contact"):
-            return "La captura de contactos no está habilitada."
+            return (
+                "La captura de contactos no está habilitada. "
+                "Continúa la conversación normalmente. Los datos del usuario "
+                "se guardarán automáticamente al finalizar la llamada."
+            )
 
         contact_phone = phone or self._caller_phone
         if not contact_phone:
-            return "No tengo un número de teléfono para guardar el contacto."
+            return (
+                "No tengo el teléfono del contacto para guardarlo. "
+                "Pídele su número de teléfono al usuario antes de guardar."
+            )
 
         return await save_contact(
             client_id=self._config.client.id,
@@ -583,7 +620,11 @@ class VoiceAgent(Agent):
             notes: Las notas a guardar sobre el contacto.
         """
         if not self._tool_enabled("save_contact"):
-            return "La función de notas no está habilitada."
+            return (
+                "La función de notas no está habilitada. "
+                "Continúa la conversación. Las notas se capturarán "
+                "automáticamente en el resumen al final."
+            )
 
         caller_phone = self._caller_phone
         if not caller_phone:
@@ -611,7 +652,10 @@ class VoiceAgent(Agent):
         """
         contact_id = self._memory_contact_id or ""
         if not contact_id:
-            return "No tengo historial previo de este contacto."
+            return (
+                "No hay historial previo de este contacto — es la primera interacción. "
+                "Trata al usuario como nuevo y pregúntale lo que necesites saber."
+            )
 
         return await recall_memory_search(
             query=query,
@@ -638,11 +682,18 @@ class VoiceAgent(Agent):
             channel: Canal del recordatorio: "call" para llamada, "whatsapp" para mensaje.
         """
         if not self._tool_enabled("schedule_reminder"):
-            return "La función de recordatorios no está habilitada."
+            return (
+                "Los recordatorios no están habilitados. "
+                "Dile al usuario que anote la fecha y que el negocio "
+                "se encargará de recordarle directamente."
+            )
 
         caller_phone = self._caller_phone
         if not caller_phone:
-            return "No tengo un número de teléfono para programar el recordatorio."
+            return (
+                "No tengo el teléfono del usuario para programar el recordatorio. "
+                "Pídele su número antes de intentar agendar el recordatorio."
+            )
 
         contact_id = self._memory_contact_id
 
@@ -673,12 +724,22 @@ class VoiceAgent(Agent):
             parameters: JSON string con los parámetros requeridos por la API.
         """
         if not self._api_integrations:
-            return "No hay integraciones API configuradas."
+            return (
+                "No hay APIs externas configuradas para este negocio. "
+                "Responde con la información que tengas disponible. "
+                "Si el usuario necesita datos de un sistema externo, "
+                "dile que se comunique directamente con el negocio."
+            )
 
         integ = self._api_integrations.get(integration_name)
         if not integ:
             available = ", ".join(self._api_integrations.keys())
-            return f"Integración '{integration_name}' no encontrada. Disponibles: {available}"
+            return (
+                f"La integración '{integration_name}' no existe. "
+                f"Las APIs disponibles son: {available}. "
+                f"Usa el nombre exacto. Si ninguna sirve, dile al usuario "
+                f"que esa consulta no está disponible por este canal."
+            )
 
         import json
         try:
@@ -702,9 +763,18 @@ class VoiceAgent(Agent):
         status_code, response_text = await execute_api_call(integ, params)
 
         if status_code == 0:
-            result = f"Error al llamar a la API: {response_text}"
+            result = (
+                f"No se pudo conectar con la API '{integration_name}': {response_text}. "
+                f"Dile al usuario que no puedes consultar esa información en este momento "
+                f"y ofrece una alternativa (llamar directamente, intentar después)."
+            )
         elif status_code >= 400:
-            result = f"La API respondió con error (HTTP {status_code}): {response_text}"
+            result = (
+                f"La API '{integration_name}' respondió con error (HTTP {status_code}). "
+                f"Detalle: {response_text[:200]}. "
+                f"Informa al usuario que hubo un problema técnico consultando esa información "
+                f"y que puede intentar más tarde o contactar directamente al negocio."
+            )
         else:
             result = response_text
 
@@ -1082,14 +1152,19 @@ TOOL_INSTRUCTIONS = {
 
 
 def _build_tool_instructions(enabled_tools: list[str]) -> str:
-    """Genera instrucciones automáticas según las herramientas habilitadas."""
+    """Genera instrucciones automáticas según las herramientas habilitadas.
+
+    NOTA: Desde Phase 25, las tool descriptions ya están en los docstrings de
+    @function_tool(). Solo agregamos hints mínimos sobre cuándo ofrecer cada tool
+    al usuario, NO repetimos lo que el LLM ya ve en el tool schema.
+    """
     lines = []
     for tool_name in enabled_tools:
         if tool_name in TOOL_INSTRUCTIONS:
             lines.append(f"- {TOOL_INSTRUCTIONS[tool_name]}")
     if not lines:
         return ""
-    return "\n\n## Herramientas disponibles\n" + "\n".join(lines)
+    return "\n\n## Capacidades\n" + "\n".join(lines)
 
 
 def _build_api_instructions(api_integrations: list[dict]) -> str:
@@ -1227,16 +1302,48 @@ def build_agent(
             config, memory_context, mcp_servers, api_integrations
         )
 
-    # Inyectar contexto temporal + memoria + reglas de voz + instrucciones de herramientas
+    # Progressive Context Disclosure (Anthropic best practice):
+    # Core prompt = personalidad + contexto temporal + reglas de voz (compactas)
+    # Just-in-time = memory, API instructions, examples (se cargan cuando se necesitan)
     tool_instructions = _build_tool_instructions(config.client.enabled_tools)
-    api_instructions = _build_api_instructions(api_integrations or [])
     augmented_prompt = config.agent.system_prompt
+    augmented_prompt += _voice_rules(config) + tool_instructions
+
+    # Memory: solo resumen corto en prompt, detalle vía recall_memory tool
     if memory_context:
-        augmented_prompt += "\n" + memory_context
-    augmented_prompt += _voice_rules(config) + tool_instructions + api_instructions
-    # Agregar ejemplos de conversación si existen
+        # Extraer solo las primeras 2 líneas como hint
+        memory_lines = memory_context.strip().split("\n")
+        if len(memory_lines) > 3:
+            memory_hint = "\n".join(memory_lines[:3])
+            augmented_prompt += (
+                f"\n\n## Contexto del contacto\n{memory_hint}\n"
+                f"(Usa la herramienta recall_memory para más detalles si los necesitas.)"
+            )
+        else:
+            augmented_prompt += f"\n\n## Contexto del contacto\n{memory_context}"
+
+    # API instructions: solo si hay pocas. Si hay muchas, se cargan just-in-time
+    api_instructions = _build_api_instructions(api_integrations or [])
+    if api_instructions and len(api_instructions) < 500:
+        augmented_prompt += api_instructions
+    elif api_instructions:
+        # Demasiado largo — solo hint, el agente ve las APIs en call_api tool
+        api_names = [i.get("name", "") for i in (api_integrations or [])]
+        augmented_prompt += (
+            f"\n\n## APIs externas\nTienes acceso a estas APIs vía call_api: "
+            f"{', '.join(api_names)}. Usa call_api con el nombre de la integración."
+        )
+
+    # Examples: solo si son cortos (< 500 chars)
     if config.agent.examples:
-        augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
+        if len(config.agent.examples) < 500:
+            augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
+        else:
+            augmented_prompt += (
+                "\n\n## Estilo de conversación\n"
+                "Tienes ejemplos de conversación configurados. "
+                "Sigue el tono y estilo que ya conoces del negocio."
+            )
     # Crear copia con prompt aumentado
     updated_agent = replace(config.agent, system_prompt=augmented_prompt)
     config = ResolvedConfig(agent=updated_agent, client=config.client)

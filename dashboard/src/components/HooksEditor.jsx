@@ -39,6 +39,7 @@ const HOOK_TYPES = [
   { value: 'transform', label: 'Transformar', icon: Code, description: 'Modifica el input o output' },
   { value: 'notify', label: 'Notificar', icon: Bell, description: 'Envía notificación sin bloquear' },
   { value: 'prompt', label: 'Prompt (LLM)', icon: AlertTriangle, description: 'Un segundo LLM evalúa si es correcto' },
+  { value: 'evaluator', label: 'Evaluador', icon: Eye, description: 'Evalúa y regenera la respuesta si no cumple criterios' },
 ]
 
 const CHANNELS = [
@@ -649,6 +650,31 @@ function HookConfigEditor({ hookType, config, onChange }) {
           onChange={(e) => update('template', e.target.value)}
           placeholder="Llamada de {{caller_name}}: {{summary}}"
         />
+      </div>
+    )
+  }
+
+  if (hookType === 'evaluator') {
+    return (
+      <div className="space-y-3">
+        <Textarea
+          label="Criterios de evaluación"
+          value={config.criteria || ''}
+          onChange={(e) => update('criteria', e.target.value)}
+          rows={4}
+          placeholder="La respuesta NO debe contener diagnósticos médicos, recetas, ni recomendaciones de medicamentos..."
+        />
+        <Input
+          label="Prefijo del feedback (cuando rechaza)"
+          value={config.feedback_prefix || 'Corrige tu respuesta:'}
+          onChange={(e) => update('feedback_prefix', e.target.value)}
+          placeholder="Corrige tu respuesta:"
+        />
+        <p className="text-xs text-gray-500">
+          Un segundo LLM evalúa cada respuesta del agente contra estos criterios.
+          Si no pasa, el agente regenera su respuesta automáticamente (solo en texto).
+          En voz, inyecta el feedback para la siguiente respuesta.
+        </p>
       </div>
     )
   }
