@@ -2196,7 +2196,80 @@ export function Settings() {
 
             {/* ── GoHighLevel Tab ── */}
             {activeTab === 'ghl' && clientId && selectedAgent && (
-              <GHLConfig clientId={clientId} agentId={selectedAgent.id} />
+              <div className="space-y-6">
+                <GHLConfig clientId={clientId} agentId={selectedAgent.id} />
+                {/* Text Rules para GHL */}
+                <Card className="space-y-4">
+                  <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                    <Zap size={16} className="text-purple-400" />
+                    Formato de Respuestas (GoHighLevel)
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    Controla cómo se formatean las respuestas del agente en los canales de GoHighLevel.
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Longitud maxima (caracteres)</label>
+                      <input
+                        type="number"
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.text_rules?.ghl?.max_length ?? form.voice_config?.text_rules?.max_length ?? 600}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            text_rules: {
+                              ...(f.voice_config?.text_rules || {}),
+                              ghl: { ...(f.voice_config?.text_rules?.ghl || {}), max_length: parseInt(e.target.value) || 600 },
+                            },
+                          },
+                        }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Tono</label>
+                      <select
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.text_rules?.ghl?.tone ?? form.voice_config?.text_rules?.tone ?? 'friendly'}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            text_rules: {
+                              ...(f.voice_config?.text_rules || {}),
+                              ghl: { ...(f.voice_config?.text_rules?.ghl || {}), tone: e.target.value },
+                            },
+                          },
+                        }))}
+                      >
+                        <option value="friendly">Amigable</option>
+                        <option value="professional">Profesional</option>
+                        <option value="neutral">Neutral</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.text_rules?.ghl?.allow_emojis ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), ghl: { ...(f.voice_config?.text_rules?.ghl || {}), allow_emojis: e.target.checked } } },
+                        }))}
+                      />
+                      Permitir emojis
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.text_rules?.ghl?.allow_links ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), ghl: { ...(f.voice_config?.text_rules?.ghl || {}), allow_links: e.target.checked } } },
+                        }))}
+                      />
+                      Permitir links
+                    </label>
+                  </div>
+                </Card>
+              </div>
             )}
 
             {/* ── Inteligencia Tab ── */}
@@ -2449,6 +2522,89 @@ export function Settings() {
                   )}
                 </Card>
                 </>)}
+
+                {/* Text Rules para Widget Chat */}
+                {(selectedAgent?.widget_channels || ['voice']).includes('chat') && (
+                  <Card className="space-y-4">
+                    <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                      <Globe size={16} className="text-cyan-400" />
+                      Formato de Respuestas (Widget Chat)
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      Controla cómo se formatean las respuestas del agente en el chat del widget.
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Longitud maxima (caracteres)</label>
+                        <input
+                          type="number"
+                          className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                          value={form.voice_config?.text_rules?.widget?.max_length ?? form.voice_config?.text_rules?.max_length ?? 800}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            voice_config: {
+                              ...(f.voice_config || {}),
+                              text_rules: {
+                                ...(f.voice_config?.text_rules || {}),
+                                widget: { ...(f.voice_config?.text_rules?.widget || {}), max_length: parseInt(e.target.value) || 800 },
+                              },
+                            },
+                          }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Tono</label>
+                        <select
+                          className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                          value={form.voice_config?.text_rules?.widget?.tone ?? form.voice_config?.text_rules?.tone ?? 'professional'}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            voice_config: {
+                              ...(f.voice_config || {}),
+                              text_rules: {
+                                ...(f.voice_config?.text_rules || {}),
+                                widget: { ...(f.voice_config?.text_rules?.widget || {}), tone: e.target.value },
+                              },
+                            },
+                          }))}
+                        >
+                          <option value="friendly">Amigable</option>
+                          <option value="professional">Profesional</option>
+                          <option value="neutral">Neutral</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                        <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                          checked={form.voice_config?.text_rules?.widget?.allow_emojis ?? false}
+                          onChange={e => setForm(f => ({
+                            ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), widget: { ...(f.voice_config?.text_rules?.widget || {}), allow_emojis: e.target.checked } } },
+                          }))}
+                        />
+                        Permitir emojis
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                        <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                          checked={form.voice_config?.text_rules?.widget?.allow_markdown ?? true}
+                          onChange={e => setForm(f => ({
+                            ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), widget: { ...(f.voice_config?.text_rules?.widget || {}), allow_markdown: e.target.checked } } },
+                          }))}
+                        />
+                        Permitir markdown (negritas, listas)
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                        <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                          checked={form.voice_config?.text_rules?.widget?.allow_links ?? true}
+                          onChange={e => setForm(f => ({
+                            ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), widget: { ...(f.voice_config?.text_rules?.widget || {}), allow_links: e.target.checked } } },
+                          }))}
+                        />
+                        Permitir links
+                      </label>
+                    </div>
+                  </Card>
+                )}
               </div>
             )}
 
