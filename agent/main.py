@@ -24,6 +24,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent, build_orchestrated_agent
 from agent.billing import CallBilling
+from agent.hook_engine import HookAction, HookContext, HookEngine, load_hooks_for_agent
 from agent.guardrails import GuardrailsConfig, GuardrailsEngine
 from agent.intent import IntentConfig, RealtimeIntentExtractor
 from agent.language_detect import LanguageDetectionConfig, LanguageDetector
@@ -365,6 +366,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             config.client.slug, config.agent.slug, len(api_integrations),
         )
 
+    # Cargar lifecycle hooks para este agente
+    hook_defs = await load_hooks_for_agent(config.agent.id)
+    hook_engine: HookEngine | None = None
+    if hook_defs:
+        hook_engine = HookEngine(hook_defs)
+        logger.info(
+            "Hooks cargados para '%s/%s': %d hook(s)",
+            config.client.slug, config.agent.slug, len(hook_defs),
+        )
+
     # Memoria de largo plazo: identificar contacto y cargar contexto
     memory_context = ""
     memory: AgentMemory | None = None
@@ -388,6 +399,34 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         except Exception:
             logger.exception("Error cargando memoria, continuando sin contexto")
             memory = None
+
+    # Hook: OnConversationStart — evaluar antes de construir el agente
+    if hook_engine and hook_engine.has_hooks_for("OnConversationStart"):
+        try:
+            hctx = HookContext(
+                event="OnConversationStart",
+                channel="voice",
+                agent_id=config.agent.id,
+                client_id=config.client.id,
+                caller_phone=caller_number,
+                contact_name=memory.contact.get("name") if memory and memory.contact else None,
+                metadata={
+                    "direction": "outbound" if outbound_mode else "inbound",
+                    "widget_mode": widget_mode,
+                },
+            )
+            start_results = await hook_engine.evaluate("OnConversationStart", hctx)
+            for r in start_results:
+                if r.action == HookAction.BLOCK:
+                    logger.info("Hook OnConversationStart bloqueó la llamada: %s", r.message)
+                    return
+            # Inyectar contexto extra al memory_context
+            extra = hook_engine.collect_context(start_results)
+            if extra:
+                memory_context = (memory_context + "\n\n" + extra).strip()
+                logger.info("Hook OnConversationStart inyectó contexto adicional")
+        except Exception:
+            logger.exception("Error en hooks OnConversationStart")
 
     # Sentimiento en tiempo real
     sentiment_cfg = SentimentConfig.from_dict(config.agent.sentiment_config)
@@ -474,6 +513,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             mcp_servers=mcp_servers, api_integrations=api_integrations,
             language_detector=language_detector,
         )
+
+    # Inyectar hook engine al agente para PreToolCall/PostToolCall
+    if hook_engine and hasattr(voice_agent, "_hook_engine"):
+        voice_agent._hook_engine = hook_engine
+        voice_agent._hook_channel = "voice"
+        logger.info("Hook engine inyectado al agente de voz")
 
     # Inyectar datos de la llamada al agente para que los tools accedan vía self
     if hasattr(voice_agent, "_caller_phone"):
@@ -663,6 +708,88 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             if ev.new_state in ("thinking", "speaking"):
                 _cancel_backchannel()
 
+    # ── Inactivity timer (hooks OnInactivity) ─────────────────
+    _inactivity_task: asyncio.Task | None = None
+
+    if hook_engine and hook_engine.has_hooks_for("OnInactivity"):
+        # Extraer umbrales de silencio de los hooks configurados
+        _inactivity_thresholds: list[float] = []
+        for h in hook_engine.hooks:
+            if h.hook_event == "OnInactivity" and (h.channel is None or h.channel == "voice"):
+                for cond in h.config.get("conditions", []):
+                    if cond.get("field") in ("silence_seconds", "inactive_minutes"):
+                        try:
+                            val = float(cond.get("value", 0))
+                            if cond["field"] == "inactive_minutes":
+                                val *= 60
+                            if val > 0:
+                                _inactivity_thresholds.append(val)
+                        except (ValueError, TypeError):
+                            pass
+        # Fallback: si no hay umbrales explícitos, usar 5s
+        if not _inactivity_thresholds:
+            _inactivity_thresholds = [5.0]
+        _inactivity_thresholds.sort()
+        _min_threshold = _inactivity_thresholds[0]
+
+        async def _check_inactivity_progressive() -> None:
+            """Timer progresivo que evalúa hooks en cada umbral de silencio."""
+            elapsed = 0.0
+            try:
+                for threshold in _inactivity_thresholds:
+                    wait = threshold - elapsed
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    elapsed = threshold
+
+                    hctx = HookContext(
+                        event="OnInactivity",
+                        channel="voice",
+                        agent_id=config.agent.id,
+                        client_id=config.client.id,
+                        silence_seconds=elapsed,
+                        caller_phone=caller_number,
+                        transcript=list(handler._transcript),
+                    )
+                    results = await hook_engine.evaluate("OnInactivity", hctx)
+                    should_close = False
+                    for r in results:
+                        if r.action == HookAction.SPEAK and r.message:
+                            await session.generate_reply(
+                                instructions=f"Dile al usuario: {r.message}"
+                            )
+                        elif r.action == HookAction.CLOSE_SESSION and r.message:
+                            await session.generate_reply(
+                                instructions=f"Despídete diciendo: {r.message}"
+                            )
+                            await asyncio.sleep(3)
+                            should_close = True
+                    if should_close:
+                        break
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Error en hooks OnInactivity")
+
+        def _reset_inactivity_timer() -> None:
+            nonlocal _inactivity_task
+            if _inactivity_task and not _inactivity_task.done():
+                _inactivity_task.cancel()
+            _inactivity_task = asyncio.ensure_future(_check_inactivity_progressive())
+
+        @session.on("user_input_transcribed")
+        def _on_input_reset_inactivity(ev) -> None:
+            if ev.is_final:
+                _reset_inactivity_timer()
+
+        @session.on("agent_state_changed")
+        def _on_agent_reset_inactivity(ev) -> None:
+            if ev.new_state == "speaking":
+                _reset_inactivity_timer()
+
+        # Iniciar timer al comenzar la sesión
+        _reset_inactivity_timer()
+
     # ── Registrar transcripción ─────────────────────────────
     @session.on("user_input_transcribed")
     def on_user_input(ev) -> None:
@@ -675,6 +802,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     logger.warning(
                         "Prompt injection detectado: %s", injection.violations
                     )
+                    # Hook: OnGuardrailHit
+                    if hook_engine and hook_engine.has_hooks_for("OnGuardrailHit"):
+                        task = asyncio.ensure_future(_eval_guardrail_hit_hooks(
+                            ev.transcript, injection.violations
+                        ))
+                        _bg_tasks.add(task)
+                        task.add_done_callback(_bg_tasks.discard)
+            # Hook: OnUserMessage — evaluar reglas sobre input del usuario
+            if hook_engine and hook_engine.has_hooks_for("OnUserMessage"):
+                task = asyncio.ensure_future(_eval_user_message_hooks(ev.transcript))
+                _bg_tasks.add(task)
+                task.add_done_callback(_bg_tasks.discard)
             # Analizar sentimiento, intent y idioma en background
             if sentiment_analyzer or intent_extractor or language_detector:
                 task = asyncio.ensure_future(_analyze_user_turn(ev.transcript))
@@ -682,6 +821,57 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     lambda t: t.exception() and logger.error("_analyze_user_turn failed: %s", t.exception())
                     if not t.cancelled() and t.exception() else None
                 )
+
+    async def _eval_user_message_hooks(text: str) -> None:
+        """Evalúa hooks OnUserMessage y aplica acciones."""
+        if not hook_engine:
+            return
+        try:
+            hctx = HookContext(
+                event="OnUserMessage",
+                channel="voice",
+                agent_id=config.agent.id,
+                client_id=config.client.id,
+                user_text=text,
+                caller_phone=caller_number,
+                transcript=list(handler._transcript),
+            )
+            results = await hook_engine.evaluate("OnUserMessage", hctx)
+            # Inyectar contexto adicional al prompt del agente
+            extra_ctx = hook_engine.collect_context(results)
+            if extra_ctx and hasattr(voice_agent, "_instructions"):
+                base = voice_agent.instructions
+                # Agregar contexto temporal (se limpia en el siguiente turno)
+                voice_agent._instructions = base + f"\n\n## Contexto hooks:\n{extra_ctx}"
+                logger.info("Hook OnUserMessage inyectó contexto al prompt")
+        except Exception:
+            logger.exception("Error en hooks OnUserMessage")
+
+    async def _eval_guardrail_hit_hooks(text: str, violations: list) -> None:
+        """Evalúa hooks OnGuardrailHit cuando se detecta una violación."""
+        if not hook_engine:
+            return
+        try:
+            hctx = HookContext(
+                event="OnGuardrailHit",
+                channel="voice",
+                agent_id=config.agent.id,
+                client_id=config.client.id,
+                user_text=text,
+                caller_phone=caller_number,
+                metadata={"violations": violations},
+            )
+            results = await hook_engine.evaluate("OnGuardrailHit", hctx)
+            extra = hook_engine.collect_context(results)
+            if extra and hasattr(voice_agent, "_instructions"):
+                voice_agent._instructions = voice_agent.instructions + f"\n\n{extra}"
+            notifications = hook_engine.collect_notifications(results)
+            for notif in notifications:
+                task = asyncio.ensure_future(_send_hook_notification(notif))
+                _bg_tasks.add(task)
+                task.add_done_callback(_bg_tasks.discard)
+        except Exception:
+            logger.exception("Error en hooks OnGuardrailHit")
 
     async def _analyze_user_turn(text: str) -> None:
         """Analiza sentimiento, intent e idioma del turno del usuario."""
@@ -716,10 +906,28 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Language detection: si se decidió un switch, aplicar cambio de idioma
         if "language" in result_map and result_map["language"]:
             detected_lang = result_map["language"]
+            previous_lang = voice_agent.current_language if hasattr(voice_agent, "current_language") else None
             logger.info(
                 "Switch de idioma detectado: %s → actualizando pipeline",
                 detected_lang,
             )
+            # Hook: OnLanguageSwitch
+            if hook_engine and hook_engine.has_hooks_for("OnLanguageSwitch"):
+                try:
+                    hctx = HookContext(
+                        event="OnLanguageSwitch",
+                        channel="voice",
+                        agent_id=config.agent.id,
+                        client_id=config.client.id,
+                        language=detected_lang,
+                        previous_language=previous_lang,
+                        user_text=text,
+                        caller_phone=caller_number,
+                    )
+                    await hook_engine.evaluate("OnLanguageSwitch", hctx)
+                except Exception:
+                    logger.exception("Error en hooks OnLanguageSwitch")
+
             # Aplicar switch de TTS + prompt override via VoiceAgent
             if hasattr(voice_agent, "switch_language"):
                 voice_agent.switch_language(detected_lang)
@@ -736,6 +944,29 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         sentiment = result_map.get("sentiment")
         if not sentiment_analyzer or sentiment is None:
             return
+
+        # Hook: OnSentimentShift
+        if hook_engine and hook_engine.has_hooks_for("OnSentimentShift"):
+            try:
+                prev = sentiment_analyzer.previous_sentiment if hasattr(sentiment_analyzer, "previous_sentiment") else None
+                hctx = HookContext(
+                    event="OnSentimentShift",
+                    channel="voice",
+                    agent_id=config.agent.id,
+                    client_id=config.client.id,
+                    sentiment=str(sentiment),
+                    previous_sentiment=str(prev) if prev else None,
+                    sentiment_score=sentiment_analyzer.current_score if hasattr(sentiment_analyzer, "current_score") else None,
+                    user_text=text,
+                    caller_phone=caller_number,
+                )
+                sent_results = await hook_engine.evaluate("OnSentimentShift", hctx)
+                extra = hook_engine.collect_context(sent_results)
+                if extra and hasattr(voice_agent, "_instructions"):
+                    voice_agent._instructions = voice_agent.instructions + f"\n\n{extra}"
+            except Exception:
+                logger.exception("Error en hooks OnSentimentShift")
+
         directive = sentiment_analyzer.get_empathy_directive()
 
         # Inyectar directiva emocional al agente si cambió
@@ -772,8 +1003,53 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 return
             if msg.role == "assistant" and msg.text_content:
                 handler.add_transcript_entry("assistant", msg.text_content)
+                # Hook: PostResponse — evaluar reglas sobre respuesta del agente
+                if hook_engine and hook_engine.has_hooks_for("PostResponse"):
+                    task = asyncio.ensure_future(_eval_post_response_hooks(msg.text_content))
+                    _bg_tasks.add(task)
+                    task.add_done_callback(_bg_tasks.discard)
         except Exception:
             logger.exception("Error procesando conversation_item_added")
+
+    async def _eval_post_response_hooks(text: str) -> None:
+        """Evalúa hooks PostResponse (notificaciones, logging, etc.)."""
+        if not hook_engine:
+            return
+        try:
+            hctx = HookContext(
+                event="PostResponse",
+                channel="voice",
+                agent_id=config.agent.id,
+                client_id=config.client.id,
+                response_text=text,
+                caller_phone=caller_number,
+                transcript=list(handler._transcript),
+            )
+            results = await hook_engine.evaluate("PostResponse", hctx)
+            # Procesar notificaciones en background
+            notifications = hook_engine.collect_notifications(results)
+            for notif in notifications:
+                task = asyncio.ensure_future(_send_hook_notification(notif))
+                _bg_tasks.add(task)
+                task.add_done_callback(_bg_tasks.discard)
+        except Exception:
+            logger.exception("Error en hooks PostResponse")
+
+    async def _send_hook_notification(notif_config: dict) -> None:
+        """Envía una notificación generada por un hook (WhatsApp, webhook, email)."""
+        try:
+            from api.services.hook_notifier import send_hook_notification
+            await send_hook_notification(notif_config)
+        except ImportError:
+            # En contexto de agente sin api module completo — fallback básico
+            logger.info(
+                "Hook notification [%s] via %s: %s",
+                notif_config.get("hook_name"),
+                notif_config.get("channel", "webhook"),
+                notif_config.get("template"),
+            )
+        except Exception:
+            logger.exception("Error enviando hook notification")
 
     # Cleanup al terminar
     async def on_shutdown() -> None:
@@ -828,6 +1104,26 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         elif recording_key:
             # Egress nunca inició correctamente
             recording_status = "failed"
+
+        # Hook: OnConversationEnd — ejecutar antes de finalizar
+        if hook_engine and hook_engine.has_hooks_for("OnConversationEnd"):
+            try:
+                hctx = HookContext(
+                    event="OnConversationEnd",
+                    channel="voice",
+                    agent_id=config.agent.id,
+                    client_id=config.client.id,
+                    caller_phone=caller_number,
+                    transcript=list(handler._transcript),
+                )
+                results = await hook_engine.evaluate("OnConversationEnd", hctx)
+                notifications = hook_engine.collect_notifications(results)
+                for notif in notifications:
+                    task = asyncio.ensure_future(_send_hook_notification(notif))
+                    _bg_tasks.add(task)
+                    task.add_done_callback(_bg_tasks.discard)
+            except Exception:
+                logger.exception("Error en hooks OnConversationEnd")
 
         await handler.finalize(
             status="completed", recording_status=recording_status,
@@ -944,8 +1240,37 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # on_shutdown se ejecutará vía ctx shutdown callback
         return
 
+    # Hook: OnGreeting — personalizar saludo según contexto
+    greeting_override: str | None = None
+    if hook_engine and hook_engine.has_hooks_for("OnGreeting"):
+        try:
+            hctx = HookContext(
+                event="OnGreeting",
+                channel="voice",
+                agent_id=config.agent.id,
+                client_id=config.client.id,
+                caller_phone=caller_number,
+                contact_name=memory.contact.get("name") if memory and memory.contact else None,
+                metadata={
+                    "direction": "outbound" if outbound_mode else "inbound",
+                    "is_returning": bool(memory and memory.contact_id and not memory._is_new_contact),
+                },
+            )
+            greeting_results = await hook_engine.evaluate("OnGreeting", hctx)
+            for r in greeting_results:
+                if r.action == HookAction.SPEAK and r.message:
+                    greeting_override = r.message
+                    break
+            extra = hook_engine.collect_context(greeting_results)
+            if extra:
+                greeting_override = extra  # Usar contexto como override de greeting
+        except Exception:
+            logger.exception("Error en hooks OnGreeting")
+
     # Saludo inicial
-    if outbound_mode:
+    if greeting_override:
+        await session.generate_reply(instructions=f"Saluda al usuario con: {greeting_override}")
+    elif outbound_mode:
         await session.generate_reply(
             instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
         )

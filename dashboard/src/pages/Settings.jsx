@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Save, Volume2, Zap, RefreshCw, Eye, FileText, Bot, Plus, Trash2, Mic,
   Brain, Key, ChevronDown, ChevronUp, Check, Phone, MessageCircle, Settings2,
-  Shield, Globe, Star, Bell, Clock,
+  Shield, Globe, Star, Bell, Clock, Webhook,
 } from 'lucide-react'
+import HooksEditor from '../components/HooksEditor'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -73,6 +74,7 @@ const TABS = [
   { key: 'intelligence', label: 'Inteligencia', icon: Brain },
   { key: 'api', label: 'API', icon: Key },
   { key: 'widget', label: 'Widget', icon: Globe },
+  { key: 'hooks', label: 'Reglas', icon: Webhook },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
 
@@ -2257,6 +2259,14 @@ export function Settings() {
                 </Card>
                 </>)}
               </div>
+            )}
+
+            {/* ── Hooks (Reglas) Tab ── */}
+            {activeTab === 'hooks' && selectedAgent && (
+              <HooksEditor
+                clientId={clientId}
+                agentId={selectedAgent.id}
+              />
             )}
 
             {/* ── Avanzado Tab ── */}

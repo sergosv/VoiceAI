@@ -8,6 +8,7 @@ from dataclasses import replace
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from agent.config_loader import load_api_integrations, load_config_by_agent_id, load_mcp_servers
+from agent.hook_engine import HookEngine, load_hooks_for_agent
 from api.middleware.auth import CurrentUser, get_current_user
 from api.schemas import ChatMessageRequest, ChatMessageResponse, ChatResetResponse
 from api.services.chat_service import build_chat_system_prompt, chat_turn, init_flow_state
@@ -55,10 +56,14 @@ async def chat_with_agent(
             conv.config.client.id, conv.config.agent.id
         )
 
+        hook_defs = await load_hooks_for_agent(conv.config.agent.id)
+        _hook_engine = HookEngine(hook_defs) if hook_defs else None
         text, tool_calls = await chat_turn(
             conv, req.message,
             api_integrations=api_integrations,
             mcp_servers=mcp_servers or None,
+            hook_engine=_hook_engine,
+            hook_channel="widget",
         )
         return ChatMessageResponse(
             conversation_id=conv.id,
@@ -116,10 +121,14 @@ async def chat_with_agent(
         )
 
     # Mensaje inicial con contenido
+    hook_defs = await load_hooks_for_agent(config.agent.id)
+    _hook_engine = HookEngine(hook_defs) if hook_defs else None
     text, tool_calls = await chat_turn(
         conv, req.message,
         api_integrations=api_integrations,
         mcp_servers=mcp_servers or None,
+        hook_engine=_hook_engine,
+        hook_channel="widget",
     )
     return ChatMessageResponse(
         conversation_id=conv.id,

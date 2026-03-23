@@ -190,6 +190,7 @@ async def widget_chat(
 ) -> WidgetChatResponse:
     """Endpoint público de chat para el widget embeddable. Sin auth."""
     from agent.config_loader import load_api_integrations, load_config_by_slug, load_mcp_servers
+    from agent.hook_engine import HookEngine, load_hooks_for_agent
     from api.services.chat_service import build_chat_system_prompt, chat_turn, init_flow_state
     from api.services.chat_store import MAX_TURNS, create_conversation, get_conversation
 
@@ -207,11 +208,15 @@ async def widget_chat(
         mcp_servers = await load_mcp_servers(
             conv.config.client.id, conv.config.agent.id
         )
+        hook_defs = await load_hooks_for_agent(conv.config.agent.id)
+        _hook_engine = HookEngine(hook_defs) if hook_defs else None
 
         text, _ = await chat_turn(
             conv, req.message,
             api_integrations=api_integrations,
             mcp_servers=mcp_servers or None,
+            hook_engine=_hook_engine,
+            hook_channel="widget",
         )
         return WidgetChatResponse(
             conversation_id=conv.id,
@@ -249,10 +254,15 @@ async def widget_chat(
             agent_name=config.agent.name,
         )
 
+    hook_defs = await load_hooks_for_agent(config.agent.id)
+    _hook_engine = HookEngine(hook_defs) if hook_defs else None
+
     text, _ = await chat_turn(
         conv, req.message,
         api_integrations=api_integrations,
         mcp_servers=mcp_servers or None,
+        hook_engine=_hook_engine,
+        hook_channel="widget",
     )
     return WidgetChatResponse(
         conversation_id=conv.id,

@@ -60,6 +60,9 @@ class VoiceAgent(Agent):
         self._current_language: str = config.client.language
         self._dynamic_tts: tts.TTS | None = None
         self._tts_cache: dict[str, tts.TTS] = {}  # Cache TTS por idioma
+        # Lifecycle hooks — inyectado desde main.py
+        self._hook_engine: Any | None = None
+        self._hook_channel: str = "voice"
 
     @property
     def config(self) -> ResolvedConfig:
@@ -109,11 +112,72 @@ class VoiceAgent(Agent):
         )
 
     async def _metered_text(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
-        """Wrapper que cuenta caracteres TTS mientras pasan los chunks."""
-        async for chunk in text:
-            if self._usage_metrics and chunk:
-                self._usage_metrics.add_tts_text(chunk)
-            yield chunk
+        """Wrapper que cuenta caracteres TTS y evalúa hooks PreResponse."""
+        # Si hay hooks PreResponse, acumular el primer segmento para evaluar
+        if self._hook_engine and self._hook_engine.has_hooks_for("PreResponse"):
+            full_text = ""
+            chunks: list[str] = []
+            async for chunk in text:
+                chunks.append(chunk)
+                full_text += chunk
+                # Evaluar después de acumular suficiente texto (primera oración)
+                if len(full_text) > 20 and any(c in full_text for c in ".!?"):
+                    break
+
+            # Evaluar hooks PreResponse con el texto acumulado
+            try:
+                from agent.hook_engine import HookAction, HookContext
+                hctx = HookContext(
+                    event="PreResponse",
+                    channel=self._hook_channel,
+                    agent_id=self._config.agent.id,
+                    client_id=self._config.client.id,
+                    response_text=full_text,
+                )
+                results = await self._hook_engine.evaluate("PreResponse", hctx)
+                for r in results:
+                    if r.action == HookAction.BLOCK and r.message:
+                        # Reemplazar toda la respuesta
+                        if self._usage_metrics:
+                            self._usage_metrics.add_tts_text(r.message)
+                        yield r.message
+                        return
+                # Aplicar append de transforms
+                transforms = self._hook_engine.collect_transforms(results)
+                append_text = transforms.get("append") if transforms else None
+                # Pasar contexto inyectado (se agrega al prompt para la siguiente respuesta)
+                extra = self._hook_engine.collect_context(results)
+                if extra and hasattr(self, "_instructions"):
+                    base = self.instructions
+                    if "## Contexto hooks:" not in base:
+                        self._instructions = base + f"\n\n## Contexto hooks:\n{extra}"
+            except Exception:
+                logger.exception("Error en hooks PreResponse (voz)")
+                append_text = None
+
+            # Emitir chunks acumulados
+            for c in chunks:
+                if self._usage_metrics and c:
+                    self._usage_metrics.add_tts_text(c)
+                yield c
+
+            # Continuar con el resto del stream
+            async for chunk in text:
+                if self._usage_metrics and chunk:
+                    self._usage_metrics.add_tts_text(chunk)
+                yield chunk
+
+            # Append al final si hay
+            if append_text:
+                if self._usage_metrics:
+                    self._usage_metrics.add_tts_text(f" {append_text}")
+                yield f" {append_text}"
+        else:
+            # Sin hooks — flujo normal
+            async for chunk in text:
+                if self._usage_metrics and chunk:
+                    self._usage_metrics.add_tts_text(chunk)
+                yield chunk
 
     def tts_node(
         self,
@@ -187,6 +251,92 @@ class VoiceAgent(Agent):
             [t.id for t in filtered],
         )
 
+    # ── Hook helpers para tools ─────────────────────────────
+
+    async def _run_pre_tool_hooks(
+        self, tool_name: str, tool_input: dict
+    ) -> tuple[bool, str, dict]:
+        """Evalúa hooks PreToolCall antes de ejecutar una tool.
+
+        Returns:
+            (allowed, message, updated_input):
+                allowed: True si la tool puede ejecutarse.
+                message: Mensaje de bloqueo o contexto adicional.
+                updated_input: Input modificado por transforms.
+        """
+        if not self._hook_engine:
+            return True, "", tool_input
+
+        from agent.hook_engine import HookAction, HookContext
+
+        hctx = HookContext(
+            event="PreToolCall",
+            channel=self._hook_channel,
+            agent_id=self._config.agent.id,
+            client_id=self._config.client.id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            caller_phone=self._caller_phone,
+        )
+
+        results = await self._hook_engine.evaluate("PreToolCall", hctx)
+        for r in results:
+            if r.action == HookAction.BLOCK:
+                logger.info("Hook PreToolCall bloqueó '%s': %s", tool_name, r.message)
+                return False, r.message or "Acción no permitida.", tool_input
+
+        # Aplicar transformaciones
+        transforms = self._hook_engine.collect_transforms(results)
+        if transforms:
+            merged = {**tool_input, **transforms}
+            return True, "", merged
+
+        return True, "", tool_input
+
+    async def _run_post_tool_hooks(
+        self, tool_name: str, tool_input: dict, result: str
+    ) -> None:
+        """Evalúa hooks PostToolCall después de ejecutar una tool."""
+        if not self._hook_engine:
+            return
+
+        from agent.hook_engine import HookContext
+
+        hctx = HookContext(
+            event="PostToolCall",
+            channel=self._hook_channel,
+            agent_id=self._config.agent.id,
+            client_id=self._config.client.id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_result={"text": result},
+            caller_phone=self._caller_phone,
+        )
+
+        try:
+            results = await self._hook_engine.evaluate("PostToolCall", hctx)
+            notifications = self._hook_engine.collect_notifications(results)
+            for notif in notifications:
+                # Fire-and-forget notification
+                asyncio.ensure_future(self._fire_hook_notification(notif))
+        except Exception:
+            logger.exception("Error en hooks PostToolCall para '%s'", tool_name)
+
+    async def _fire_hook_notification(self, notif_config: dict) -> None:
+        """Envía notificación de hook (best-effort)."""
+        try:
+            from api.services.hook_notifier import send_hook_notification
+            await send_hook_notification(notif_config)
+        except ImportError:
+            logger.info(
+                "Hook notification [%s] via %s: %s",
+                notif_config.get("hook_name"),
+                notif_config.get("channel", "webhook"),
+                notif_config.get("template"),
+            )
+        except Exception:
+            logger.exception("Error enviando hook notification")
+
     # ── Herramientas del agente ─────────────────────────────
 
     @function_tool()
@@ -219,6 +369,36 @@ class VoiceAgent(Agent):
         Args:
             reason: Motivo de la transferencia.
         """
+        # Hook: PreToolCall
+        tool_input = {"reason": reason}
+        allowed, msg, tool_input = await self._run_pre_tool_hooks("transfer_to_human", tool_input)
+        if not allowed:
+            return msg
+
+        # Hook: OnEscalation — disparar antes de transferir
+        if self._hook_engine:
+            try:
+                from agent.hook_engine import HookAction, HookContext
+                hctx = HookContext(
+                    event="OnEscalation",
+                    channel=self._hook_channel,
+                    agent_id=self._config.agent.id,
+                    client_id=self._config.client.id,
+                    tool_name="transfer_to_human",
+                    tool_input=tool_input,
+                    caller_phone=self._caller_phone,
+                )
+                esc_results = await self._hook_engine.evaluate("OnEscalation", hctx)
+                for r in esc_results:
+                    if r.action == HookAction.BLOCK:
+                        return r.message or "No se puede transferir en este momento."
+                # Disparar notificaciones (ej: avisar al humano que va a recibir transfer)
+                notifications = self._hook_engine.collect_notifications(esc_results)
+                for notif in notifications:
+                    asyncio.ensure_future(self._fire_hook_notification(notif))
+            except Exception:
+                logger.exception("Error en hooks OnEscalation")
+
         # Flow mode puede setear un número de transferencia por nodo
         transfer_number = (
             getattr(self, "_flow_transfer_number", None)
@@ -235,11 +415,15 @@ class VoiceAgent(Agent):
             self._config.agent.slug,
             reason,
         )
-        return (
+        result = (
             f"Transferencia solicitada al número {transfer_number}. "
             f"Motivo: {reason}. "
             "Informa al cliente que lo estás transfiriendo."
         )
+
+        # Hook: PostToolCall
+        await self._run_post_tool_hooks("transfer_to_human", tool_input, result)
+        return result
 
     @function_tool()
     async def schedule_appointment(
@@ -266,19 +450,35 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("schedule_appointment"):
             return "La función de agendar citas no está habilitada."
 
+        # Hook: PreToolCall
+        tool_input = {
+            "patient_name": patient_name,
+            "date": date,
+            "time": time,
+            "duration_minutes": duration_minutes,
+            "description": description,
+        }
+        allowed, msg, tool_input = await self._run_pre_tool_hooks("schedule_appointment", tool_input)
+        if not allowed:
+            return msg
+
         caller_phone = self._caller_phone
 
-        return await schedule_appointment(
+        result = await schedule_appointment(
             client_id=self._config.client.id,
             caller_phone=caller_phone,
-            patient_name=patient_name,
-            date=date,
-            time=time,
-            duration_minutes=duration_minutes,
-            description=description,
+            patient_name=tool_input.get("patient_name", patient_name),
+            date=tool_input.get("date", date),
+            time=tool_input.get("time", time),
+            duration_minutes=tool_input.get("duration_minutes", duration_minutes),
+            description=tool_input.get("description", description),
             google_calendar_id=self._config.client.google_calendar_id,
             google_service_account_key=self._config.client.google_service_account_key,
         )
+
+        # Hook: PostToolCall
+        await self._run_post_tool_hooks("schedule_appointment", tool_input, result)
+        return result
 
     @function_tool()
     async def send_whatsapp(
@@ -299,6 +499,12 @@ class VoiceAgent(Agent):
         if not self._tool_enabled("send_whatsapp"):
             return "El envío de WhatsApp no está habilitado."
 
+        # Hook: PreToolCall
+        tool_input = {"phone_number": phone_number, "message": message}
+        allowed, msg, tool_input = await self._run_pre_tool_hooks("send_whatsapp", tool_input)
+        if not allowed:
+            return msg
+
         # Cargar config de WhatsApp desde whatsapp_configs (por agente)
         wa_config = await load_whatsapp_config_by_agent_id(self._config.agent.id)
         if not wa_config:
@@ -311,17 +517,21 @@ class VoiceAgent(Agent):
             evo_instance = wa_config.get("evo_instance_id")
             if not evo_url or not evo_key or not evo_instance:
                 return "La configuración de Evolution API está incompleta."
-            return await send_whatsapp_message(
+            result = await send_whatsapp_message(
                 api_url=evo_url,
                 api_key=evo_key,
                 instance_id=evo_instance,
-                phone_number=phone_number,
-                message=message,
+                phone_number=tool_input.get("phone_number", phone_number),
+                message=tool_input.get("message", message),
             )
         elif provider == "gohighlevel":
-            return "El envío de WhatsApp vía GoHighLevel aún no está disponible como herramienta."
+            result = "El envío de WhatsApp vía GoHighLevel aún no está disponible como herramienta."
         else:
-            return "Proveedor de WhatsApp no soportado."
+            result = "Proveedor de WhatsApp no soportado."
+
+        # Hook: PostToolCall
+        await self._run_post_tool_hooks("send_whatsapp", tool_input, result)
+        return result
 
     @function_tool()
     async def save_contact_info(
@@ -476,6 +686,12 @@ class VoiceAgent(Agent):
         except json.JSONDecodeError:
             params = {}
 
+        # Hook: PreToolCall
+        tool_input = {"integration_name": integration_name, "parameters": params}
+        allowed, msg, tool_input = await self._run_pre_tool_hooks("call_api", tool_input)
+        if not allowed:
+            return msg
+
         from agent.api_executor import execute_api_call
 
         logger.info(
@@ -486,11 +702,15 @@ class VoiceAgent(Agent):
         status_code, response_text = await execute_api_call(integ, params)
 
         if status_code == 0:
-            return f"Error al llamar a la API: {response_text}"
-        if status_code >= 400:
-            return f"La API respondió con error (HTTP {status_code}): {response_text}"
+            result = f"Error al llamar a la API: {response_text}"
+        elif status_code >= 400:
+            result = f"La API respondió con error (HTTP {status_code}): {response_text}"
+        else:
+            result = response_text
 
-        return response_text
+        # Hook: PostToolCall
+        await self._run_post_tool_hooks("call_api", tool_input, result)
+        return result
 
 
 class FlowVoiceAgent(VoiceAgent):

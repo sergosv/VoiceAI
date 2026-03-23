@@ -56,7 +56,7 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 from api.routes import (
     admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, calls, campaigns,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
-    documents, evaluations, evolution, flow_builder, ghl, looptalk, mcp, proactive,
+    documents, evaluations, evolution, flow_builder, ghl, hooks, looptalk, mcp, proactive,
     templates, v1, voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks,
     widget,
 )
@@ -309,6 +309,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(voices.router, prefix="/api/voices", tags=["voices"])
 app.include_router(clients.router, prefix="/api/clients", tags=["clients"])
 app.include_router(agents.router, prefix="/api/clients", tags=["agents"])
+app.include_router(hooks.router, prefix="/api/clients", tags=["hooks"])
 app.include_router(calls.router, prefix="/api/calls", tags=["calls"])
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
 app.include_router(contacts.router, prefix="/api/contacts", tags=["contacts"])

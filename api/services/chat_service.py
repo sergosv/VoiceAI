@@ -638,6 +638,8 @@ async def chat_turn(
     user_message: str,
     api_integrations: list[dict] | None = None,
     mcp_servers: list[dict[str, Any]] | None = None,
+    hook_engine: Any | None = None,
+    hook_channel: str = "widget",
 ) -> tuple[str, list[dict]]:
     """Ejecuta un turno de chat. Retorna (agent_text, tool_calls)."""
     client = _get_gemini()
@@ -652,6 +654,26 @@ async def chat_turn(
     # Avanzar flow con el input del usuario (si aplica y no es action node)
     if conversation.turn_count > 0 and not is_action_node:
         _advance_flow(conversation, user_message)
+
+    # Hook: OnUserMessage — evaluar reglas sobre input del usuario
+    if hook_engine:
+        try:
+            from agent.hook_engine import HookAction, HookContext
+
+            hctx = HookContext(
+                event="OnUserMessage",
+                channel=hook_channel,
+                agent_id=config.agent.id,
+                client_id=config.client.id,
+                user_text=user_message,
+            )
+            results = await hook_engine.evaluate("OnUserMessage", hctx)
+            # Inyectar contexto adicional al system prompt temporalmente
+            extra_ctx = hook_engine.collect_context(results)
+            if extra_ctx:
+                conversation.system_prompt += f"\n\n## Contexto hooks:\n{extra_ctx}"
+        except Exception:
+            logger.exception("Error en hooks OnUserMessage (chat)")
 
     # Agregar mensaje del usuario al historial
     conversation.history.append(
@@ -707,6 +729,32 @@ async def chat_turn(
             # Respuesta de texto normal — fin del turno
             conversation.history.append(candidate.content)
             text = "".join(p.text for p in parts if p.text)
+
+            # Hook: PreResponse — evaluar reglas sobre la respuesta antes de enviar
+            if hook_engine and text:
+                try:
+                    from agent.hook_engine import HookAction, HookContext as _HC
+
+                    hctx = _HC(
+                        event="PreResponse",
+                        channel=hook_channel,
+                        agent_id=config.agent.id,
+                        client_id=config.client.id,
+                        response_text=text,
+                        user_text=user_message,
+                    )
+                    pre_results = await hook_engine.evaluate("PreResponse", hctx)
+                    for pr in pre_results:
+                        if pr.action == HookAction.BLOCK and pr.message:
+                            text = pr.message  # Reemplazar respuesta
+                            break
+                    # Aplicar transforms (append, etc.)
+                    transforms = hook_engine.collect_transforms(pre_results)
+                    if transforms and transforms.get("append"):
+                        text = text.rstrip() + " " + transforms["append"]
+                except Exception:
+                    logger.exception("Error en hooks PreResponse (chat)")
+
             conversation.turn_count += 1
 
             # Si era un action node, ahora avanzar el flow con el resultado de la tool
@@ -745,11 +793,64 @@ async def chat_turn(
             tool_args = dict(fc.args) if fc.args else {}
 
             logger.info("Chat tool call: %s(%s)", tool_name, tool_args)
-            result = await _execute_tool(
-                tool_name, tool_args, config,
-                api_integrations=api_integrations,
-                mcp_servers=mcp_servers,
-            )
+
+            # Hook: PreToolCall
+            hook_blocked = False
+            if hook_engine:
+                try:
+                    from agent.hook_engine import HookAction, HookContext
+
+                    hctx = HookContext(
+                        event="PreToolCall",
+                        channel=hook_channel,
+                        agent_id=config.agent.id,
+                        client_id=config.client.id,
+                        tool_name=tool_name,
+                        tool_input=tool_args,
+                    )
+                    hook_results = await hook_engine.evaluate("PreToolCall", hctx)
+                    for hr in hook_results:
+                        if hr.action == HookAction.BLOCK:
+                            result = hr.message or "Acción no permitida."
+                            hook_blocked = True
+                            break
+                except Exception:
+                    logger.exception("Error en hooks PreToolCall (chat)")
+
+            if not hook_blocked:
+                result = await _execute_tool(
+                    tool_name, tool_args, config,
+                    api_integrations=api_integrations,
+                    mcp_servers=mcp_servers,
+                )
+            else:
+                result = result  # ya asignado por el hook
+
+            # Hook: PostToolCall
+            if hook_engine and not hook_blocked:
+                try:
+                    from agent.hook_engine import HookContext as _HC2
+
+                    hctx = _HC2(
+                        event="PostToolCall",
+                        channel=hook_channel,
+                        agent_id=config.agent.id,
+                        client_id=config.client.id,
+                        tool_name=tool_name,
+                        tool_input=tool_args,
+                        tool_result={"text": result},
+                    )
+                    post_results = await hook_engine.evaluate("PostToolCall", hctx)
+                    # Disparar notificaciones en background
+                    notifications = hook_engine.collect_notifications(post_results)
+                    for notif in notifications:
+                        try:
+                            from api.services.hook_notifier import send_hook_notification
+                            asyncio.create_task(send_hook_notification(notif))
+                        except Exception:
+                            pass
+                except Exception:
+                    logger.exception("Error en hooks PostToolCall (chat)")
 
             # Trackear resultado de la última tool para action nodes
             last_tool_result = result

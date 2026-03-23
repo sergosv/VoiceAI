@@ -16,6 +16,7 @@ from agent.config_loader import (
     load_api_integrations,
     load_mcp_servers,
 )
+from agent.hook_engine import HookEngine, load_hooks_for_agent
 from api.services.chat_service import chat_turn
 from api.services.chat_store import Conversation
 from api.services.whatsapp.history import deserialize_history, serialize_history
@@ -266,10 +267,14 @@ async def _process_locked(sb: Client, config: dict, msg: InboundMessage) -> None
 
     # Chat turn
     try:
+        hook_defs = await load_hooks_for_agent(resolved.agent.id)
+        _hook_engine = HookEngine(hook_defs) if hook_defs else None
         agent_text, tool_calls = await chat_turn(
             conversation, msg.text,
             api_integrations=api_integrations,
             mcp_servers=mcp_servers or None,
+            hook_engine=_hook_engine,
+            hook_channel="ghl",
         )
     except Exception as e:
         logger.error("GHL: error en chat_turn — %s", e, exc_info=True)
@@ -425,6 +430,33 @@ async def _get_or_create_conversation(
             now = datetime.now(timezone.utc)
             elapsed = (now - last_dt).total_seconds() / 60
             if elapsed > timeout_minutes:
+                # Hook: OnInactivity para GHL
+                agent_id = config.get("agent_id")
+                if agent_id:
+                    try:
+                        hook_defs = await load_hooks_for_agent(agent_id)
+                        if hook_defs:
+                            from agent.hook_engine import HookAction, HookContext
+                            _he = HookEngine(hook_defs)
+                            if _he.has_hooks_for("OnInactivity"):
+                                hctx = HookContext(
+                                    event="OnInactivity",
+                                    channel="ghl",
+                                    agent_id=agent_id,
+                                    client_id=config.get("client_id", ""),
+                                    inactive_minutes=elapsed,
+                                )
+                                results = await _he.evaluate("OnInactivity", hctx)
+                                for r in results:
+                                    if r.action in (HookAction.SPEAK, HookAction.CLOSE_SESSION) and r.message:
+                                        try:
+                                            await _send_ghl(config, msg, r.message)
+                                            logger.info("GHL: hook OnInactivity envió mensaje de cierre")
+                                        except Exception:
+                                            logger.exception("GHL: error enviando msg de inactividad")
+                    except Exception:
+                        logger.exception("GHL: error evaluando hooks OnInactivity")
+
                 sb.table("ghl_conversations").update(
                     {"status": "expired"}
                 ).eq("id", conv["id"]).execute()

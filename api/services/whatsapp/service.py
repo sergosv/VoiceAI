@@ -17,6 +17,7 @@ from agent.config_loader import (
     load_mcp_servers,
     load_whatsapp_config_by_evo_instance,
 )
+from agent.hook_engine import HookEngine, load_hooks_for_agent
 from api.services.chat_service import chat_turn
 from api.services.chat_store import Conversation
 from api.services.whatsapp.history import deserialize_history, serialize_history
@@ -281,10 +282,14 @@ async def _process_locked(
 
     # 7. Ejecutar chat_turn
     try:
+        hook_defs = await load_hooks_for_agent(resolved.agent.id)
+        _hook_engine = HookEngine(hook_defs) if hook_defs else None
         agent_text, tool_calls = await chat_turn(
             conversation, msg.text,
             api_integrations=api_integrations,
             mcp_servers=mcp_servers or None,
+            hook_engine=_hook_engine,
+            hook_channel="whatsapp",
         )
     except Exception as e:
         logger.error("WA: error en chat_turn — %s", e, exc_info=True)
@@ -443,6 +448,36 @@ async def _get_or_create_conversation(
             elapsed_minutes = (now - last_dt).total_seconds() / 60
 
             if elapsed_minutes > timeout_minutes:
+                # Hook: OnInactivity para WhatsApp — evaluar antes de cerrar
+                agent_id = wa_config.get("agent_id")
+                if agent_id:
+                    try:
+                        hook_defs = await load_hooks_for_agent(agent_id)
+                        if hook_defs:
+                            from agent.hook_engine import HookAction, HookContext
+                            _he = HookEngine(hook_defs)
+                            if _he.has_hooks_for("OnInactivity"):
+                                hctx = HookContext(
+                                    event="OnInactivity",
+                                    channel="whatsapp",
+                                    agent_id=agent_id,
+                                    client_id=wa_config.get("client_id", ""),
+                                    inactive_minutes=elapsed_minutes,
+                                )
+                                results = await _he.evaluate("OnInactivity", hctx)
+                                for r in results:
+                                    if r.action in (HookAction.SPEAK, HookAction.CLOSE_SESSION) and r.message:
+                                        # Enviar mensaje de despedida
+                                        try:
+                                            from api.services.whatsapp.router import get_provider
+                                            provider = get_provider(wa_config["provider"])
+                                            await provider.send_text(wa_config, remote_phone, r.message)
+                                            logger.info("WA: hook OnInactivity envió mensaje de cierre")
+                                        except Exception:
+                                            logger.exception("WA: error enviando msg de inactividad")
+                    except Exception:
+                        logger.exception("WA: error evaluando hooks OnInactivity")
+
                 # Sesión expirada — cerrar y crear nueva
                 sb.table("whatsapp_conversations").update(
                     {"status": "expired"}
