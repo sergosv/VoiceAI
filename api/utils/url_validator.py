@@ -6,6 +6,9 @@ import socket
 from urllib.parse import urlparse
 
 
+_DNS_TIMEOUT_S = 3.0
+
+
 def validate_url_not_private(url: str) -> bool:
     """Returns True if URL points to a public IP, False if private/internal."""
     try:
@@ -18,8 +21,12 @@ def validate_url_not_private(url: str) -> bool:
             return False
         if hostname.endswith(".internal") or hostname.endswith(".local"):
             return False
-        # Resolve and check IP
-        ip = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)[0][4][0]
+        # Resolve with timeout to prevent hanging on slow DNS
+        socket.setdefaulttimeout(_DNS_TIMEOUT_S)
+        try:
+            ip = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)[0][4][0]
+        finally:
+            socket.setdefaulttimeout(None)
         addr = ipaddress.ip_address(ip)
         if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
             return False

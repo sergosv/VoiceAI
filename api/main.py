@@ -53,6 +53,7 @@ if _sentry_dsn:
 # Configurar logging estructurado (JSON en producción)
 setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 
+from api.middleware.auth import CurrentUser, require_admin
 from api.routes import (
     admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, calls, campaigns,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
@@ -122,7 +123,12 @@ _origins = [
 ]
 _extra = os.environ.get("ALLOWED_ORIGINS", "")
 if _extra:
-    _origins.extend(o.strip() for o in _extra.split(",") if o.strip())
+    for o in _extra.split(","):
+        origin = o.strip()
+        if origin and origin.startswith(("http://", "https://")):
+            _origins.append(origin)
+        elif origin:
+            logging.getLogger("api").warning("ALLOWED_ORIGINS: ignorando origen inválido '%s'", origin)
 
 # Cloudflare Pages: aceptar deployment-specific URLs (hash.project.pages.dev)
 _cf_pages_domain = os.environ.get("CF_PAGES_DOMAIN", "")
@@ -192,7 +198,9 @@ async def health_check() -> dict:
 
 
 @app.get("/api/admin/provider-health")
-async def provider_health() -> dict:
+async def provider_health(
+    admin: CurrentUser = Depends(require_admin),
+) -> dict:
     """Estado de salud de providers externos basado en llamadas recientes."""
     from api.deps import get_supabase as _get_sb
 

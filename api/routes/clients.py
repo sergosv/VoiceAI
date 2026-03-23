@@ -596,6 +596,43 @@ async def delete_client(
     )
 
 
+@router.post("/{client_id}/request-deletion", response_model=MessageResponse)
+async def request_account_deletion(
+    client_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> MessageResponse:
+    """GDPR: Solicitar eliminación de cuenta.
+
+    Los clientes pueden solicitar la eliminación de su propia cuenta.
+    Esto marca la cuenta como pendiente de eliminación y notifica al admin.
+    El admin tiene 30 días para procesar la solicitud.
+    """
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=403, detail="Solo puedes solicitar eliminar tu propia cuenta")
+
+    sb = get_supabase()
+
+    # Marcar cuenta como pending deletion
+    sb.table("clients").update({
+        "is_active": False,
+    }).eq("id", client_id).execute()
+
+    log_audit(
+        "client.deletion_requested",
+        user_id=user.id,
+        client_id=client_id,
+        resource_type="client",
+        resource_id=client_id,
+        details={"requested_by": user.email},
+    )
+
+    logger.info("GDPR: Deletion requested for client %s by user %s", client_id, user.id)
+
+    return MessageResponse(
+        message="Solicitud de eliminación recibida. Tu cuenta será eliminada en un plazo de 30 días."
+    )
+
+
 @router.post("/{client_id}/test-calendar", response_model=MessageResponse)
 async def test_calendar(
     client_id: str,

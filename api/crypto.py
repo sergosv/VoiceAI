@@ -18,6 +18,13 @@ _ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 def _get_fernet() -> Fernet | None:
     """Retorna instancia Fernet si ENCRYPTION_KEY está configurada."""
     if not _ENCRYPTION_KEY:
+        # En producción, ENCRYPTION_KEY es obligatoria
+        env = os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("SENTRY_ENV") or ""
+        if env in ("production", "prod"):
+            raise RuntimeError(
+                "ENCRYPTION_KEY is REQUIRED in production. "
+                "Generate with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            )
         logger.warning("ENCRYPTION_KEY not set — API keys stored WITHOUT encryption")
         return None
     try:

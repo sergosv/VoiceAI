@@ -22,6 +22,48 @@ class RequestIdFilter(logging.Filter):
         return True
 
 
+import re as _re
+
+# Patrones de PII a enmascarar en logs
+_PHONE_PATTERN = _re.compile(r"(?<!\d)(\+?\d{10,15})(?!\d)")
+_EMAIL_PATTERN = _re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+
+
+class PIIMaskFilter(logging.Filter):
+    """Enmascara números de teléfono y emails en logs de producción."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = _PHONE_PATTERN.sub(self._mask_phone, record.msg)
+            record.msg = _EMAIL_PATTERN.sub(self._mask_email, record.msg)
+        if record.args and isinstance(record.args, tuple):
+            record.args = tuple(
+                self._mask_arg(a) for a in record.args
+            )
+        return True
+
+    @staticmethod
+    def _mask_phone(match: _re.Match) -> str:
+        digits = match.group(0)
+        return f"***{digits[-4:]}"
+
+    @staticmethod
+    def _mask_email(match: _re.Match) -> str:
+        email = match.group(0)
+        local, domain = email.split("@", 1)
+        return f"{local[0]}***@{domain}" if local else f"***@{domain}"
+
+    @staticmethod
+    def _mask_arg(arg: object) -> object:
+        if isinstance(arg, str):
+            arg = _PHONE_PATTERN.sub(lambda m: f"***{m.group(0)[-4:]}", arg)
+            arg = _EMAIL_PATTERN.sub(
+                lambda m: f"{m.group(0).split('@')[0][0]}***@{m.group(0).split('@')[1]}" if "@" in m.group(0) else "***",
+                arg,
+            )
+        return arg
+
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
     """Middleware que genera un request_id por petición y lo loguea."""
 
@@ -53,6 +95,7 @@ def setup_logging(*, json_format: bool = False) -> None:
 
     handler = logging.StreamHandler()
     handler.addFilter(RequestIdFilter())
+    handler.addFilter(PIIMaskFilter())
     handler.setFormatter(logging.Formatter(fmt))
 
     root = logging.getLogger()

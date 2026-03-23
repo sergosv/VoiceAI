@@ -78,9 +78,30 @@ async def upload_document(
             detail="Cliente no tiene FileSearchStore configurado",
         )
 
+    # Validar tipo MIME
+    ALLOWED_MIMES = {
+        "application/pdf", "text/plain", "text/csv", "text/markdown",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    }
+    ALLOWED_EXTENSIONS = {".pdf", ".txt", ".csv", ".md", ".doc", ".docx", ".xlsx", ".xls"}
+    suffix = Path(file.filename or "doc").suffix.lower()
+
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tipo de archivo no permitido: {suffix}. Formatos aceptados: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+    if file.content_type and file.content_type not in ALLOWED_MIMES and file.content_type != "application/octet-stream":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"MIME type no permitido: {file.content_type}",
+        )
+
     # Leer y validar tamaño (máx 50 MB)
     MAX_FILE_SIZE = 50 * 1024 * 1024
-    suffix = Path(file.filename or "doc").suffix
     file_content = await file.read()
     file_size = len(file_content)
 
