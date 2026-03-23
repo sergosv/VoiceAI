@@ -1003,6 +1003,34 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 return
             if msg.role == "assistant" and msg.text_content:
                 handler.add_transcript_entry("assistant", msg.text_content)
+                # Output guardrails: validar respuesta del agente
+                if guardrails:
+                    check = guardrails.check_agent_response(msg.text_content)
+                    if not check.passed:
+                        logger.warning(
+                            "Output guardrail violations: %s", check.violations
+                        )
+                        # Inyectar corrección para la siguiente respuesta
+                        if hasattr(voice_agent, "_instructions"):
+                            correction = (
+                                "\n\n## CORRECCIÓN URGENTE\n"
+                                "Tu última respuesta violó estas reglas: "
+                                + "; ".join(check.violations) + ". "
+                                "NO repitas este error. Corrige si el usuario pregunta de nuevo."
+                            )
+                            base = voice_agent.instructions
+                            # Limpiar corrección anterior
+                            idx = base.find("## CORRECCIÓN URGENTE")
+                            if idx != -1:
+                                base = base[:idx].rstrip()
+                            voice_agent._instructions = base + correction
+                        # Disparar hook OnGuardrailHit
+                        if hook_engine and hook_engine.has_hooks_for("OnGuardrailHit"):
+                            task = asyncio.ensure_future(
+                                _eval_guardrail_hit_hooks(msg.text_content, check.violations)
+                            )
+                            _bg_tasks.add(task)
+                            task.add_done_callback(_bg_tasks.discard)
                 # Hook: PostResponse — evaluar reglas sobre respuesta del agente
                 if hook_engine and hook_engine.has_hooks_for("PostResponse"):
                     task = asyncio.ensure_future(_eval_post_response_hooks(msg.text_content))

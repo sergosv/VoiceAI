@@ -112,6 +112,88 @@ class SessionHandler:
         self.usage = UsageMetrics()
         # Almacenar referencias a tareas fire-and-forget para evitar GC
         self._background_tasks: set[asyncio.Task] = set()
+        # Checkpoint: guardar transcript parcial cada N turnos
+        self._checkpoint_interval = 5  # cada 5 turnos
+        self._last_checkpoint_turn = 0
+        self._checkpoint_task: asyncio.Task | None = None
+
+    def add_transcript_entry(self, role: str, text: str) -> None:
+        """Agrega una entrada al transcript y dispara checkpoint si toca."""
+        self._transcript.append({
+            "role": role,
+            "text": text,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        # Checkpoint periódico
+        turn_count = len(self._transcript)
+        if (
+            turn_count >= 4  # Al menos 2 turnos completos
+            and turn_count - self._last_checkpoint_turn >= self._checkpoint_interval
+        ):
+            self._last_checkpoint_turn = turn_count
+            task = asyncio.ensure_future(self._checkpoint_transcript())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
+    async def _checkpoint_transcript(self) -> None:
+        """Guarda transcript parcial en DB como safety net.
+
+        Inserta un registro con status='in_progress' la primera vez,
+        luego actualiza el transcript en llamadas posteriores.
+        """
+        if not self._room_name or not self._transcript:
+            return
+        try:
+            sb = _get_supabase()
+            duration = int((datetime.now(timezone.utc) - self._started_at).total_seconds())
+
+            # Buscar si ya hay un checkpoint para este room
+            existing = await asyncio.to_thread(
+                lambda: sb.table("calls")
+                .select("id")
+                .eq("livekit_room_name", self._room_name)
+                .eq("status", "in_progress")
+                .limit(1)
+                .execute()
+            )
+
+            if existing.data:
+                # Actualizar transcript existente
+                await asyncio.to_thread(
+                    lambda: sb.table("calls")
+                    .update({
+                        "transcript": list(self._transcript),
+                        "duration_seconds": duration,
+                    })
+                    .eq("id", existing.data[0]["id"])
+                    .execute()
+                )
+            else:
+                # Primer checkpoint — insertar
+                await asyncio.to_thread(
+                    lambda: sb.table("calls")
+                    .insert({
+                        "livekit_room_name": self._room_name,
+                        "client_id": self._client_id,
+                        "agent_id": self._agent_id,
+                        "direction": self._direction,
+                        "caller_number": normalize_phone(self._caller_number) if self._caller_number else None,
+                        "callee_number": normalize_phone(self._callee_number) if self._callee_number else None,
+                        "duration_seconds": duration,
+                        "status": "in_progress",
+                        "transcript": list(self._transcript),
+                        "started_at": self._started_at.isoformat(),
+                        "cost_total": 0,
+                    })
+                    .execute()
+                )
+
+            logger.info(
+                "Checkpoint guardado: %s (%d turnos, %ds)",
+                self._room_name, len(self._transcript), duration,
+            )
+        except Exception:
+            logger.exception("Error en checkpoint de transcript")
 
     def set_agent_turns(self, turns: list[dict]) -> None:
         """Establece el historial de ruteo de agentes (modo orquestado)."""
@@ -147,14 +229,6 @@ class SessionHandler:
             "success": success,
             "error_message": error_message,
             "turn_index": len(self._transcript),
-        })
-
-    def add_transcript_entry(self, role: str, text: str) -> None:
-        """Agrega una entrada a la transcripción."""
-        self._transcript.append({
-            "role": role,
-            "text": text,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
     def _create_background_task(self, coro) -> asyncio.Task:

@@ -640,6 +640,7 @@ async def chat_turn(
     mcp_servers: list[dict[str, Any]] | None = None,
     hook_engine: Any | None = None,
     hook_channel: str = "widget",
+    guardrails_engine: Any | None = None,
 ) -> tuple[str, list[dict]]:
     """Ejecuta un turno de chat. Retorna (agent_text, tool_calls)."""
     client = _get_gemini()
@@ -784,6 +785,14 @@ async def chat_turn(
                         text = text.rstrip() + " " + transforms["append"]
                 except Exception:
                     logger.exception("Error en hooks PreResponse (chat)")
+
+            # Output guardrails: validar respuesta antes de enviar
+            if guardrails_engine and text:
+                check = guardrails_engine.check_agent_response(text)
+                if not check.passed:
+                    logger.warning("Output guardrail violations (chat): %s", check.violations)
+                    if check.modified_text:
+                        text = check.modified_text  # Usar versión truncada/modificada
 
             conversation.turn_count += 1
 

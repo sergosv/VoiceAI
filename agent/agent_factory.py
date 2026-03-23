@@ -63,6 +63,8 @@ class VoiceAgent(Agent):
         # Lifecycle hooks — inyectado desde main.py
         self._hook_engine: Any | None = None
         self._hook_channel: str = "voice"
+        # Cache de búsquedas en knowledge base (evita duplicados)
+        self._search_cache: dict[str, str] = {}  # query_normalized → result
 
     @property
     def config(self) -> ResolvedConfig:
@@ -370,8 +372,27 @@ class VoiceAgent(Agent):
                 "dile al usuario que con gusto le pueden dar más detalles llamando directamente."
             )
 
+        # Cache: evitar búsquedas duplicadas en la misma conversación
+        query_key = query.lower().strip()
+        # Buscar query similar en cache (coincidencia parcial)
+        for cached_key, cached_result in self._search_cache.items():
+            # Si la query nueva es muy similar a una ya buscada, reusar
+            if (
+                query_key == cached_key
+                or (len(query_key) > 10 and query_key in cached_key)
+                or (len(cached_key) > 10 and cached_key in query_key)
+            ):
+                logger.info("File Search cache hit para '%s' (cached key: '%s')", query[:50], cached_key[:50])
+                return cached_result
+
         logger.info("File Search query para '%s': %s", self._config.client.slug, query)
-        return await search_knowledge_base(query, store_id)
+        result = await search_knowledge_base(query, store_id)
+
+        # Guardar en cache (máximo 20 queries para no llenar memoria)
+        if len(self._search_cache) < 20:
+            self._search_cache[query_key] = result
+
+        return result
 
     @function_tool()
     async def transfer_to_human(self, context: RunContext, reason: str) -> str:
@@ -1062,14 +1083,24 @@ class ModeVoiceAgent(VoiceAgent):
 
 
 def _voice_rules(config: ResolvedConfig) -> str:
-    """Genera reglas de voz con fecha/hora actual y datos del agente."""
+    """Genera reglas de voz con fecha/hora actual y datos del agente.
+
+    Las reglas se personalizan según voice_rules_config del agente:
+    - max_sentences: máximo oraciones por respuesta (default 2)
+    - formality: formal/casual/neutral (default casual)
+    - country_style: mx/co/es/neutral (default mx)
+    - confirm_data: repetir datos para confirmar (default true)
+    - end_with_question: terminar con pregunta (default true)
+    - deny_ai_identity: negar ser IA (default true)
+    """
     from datetime import datetime, timezone, timedelta
     try:
         from zoneinfo import ZoneInfo
-        tz_mx = ZoneInfo("America/Mexico_City")
-    except ImportError:
-        tz_mx = timezone(timedelta(hours=-6))
-    now = datetime.now(tz_mx)
+        tz_name = config.client.business_hours.get("timezone", "America/Mexico_City") if config.client.business_hours else "America/Mexico_City"
+        tz = ZoneInfo(tz_name)
+    except (ImportError, KeyError):
+        tz = timezone(timedelta(hours=-6))
+    now = datetime.now(tz)
     today = now.strftime("%A %d de %B de %Y")
     current_time = now.strftime("%H:%M")
     day_map = {
@@ -1087,42 +1118,77 @@ def _voice_rules(config: ResolvedConfig) -> str:
         today = today.replace(eng, esp)
 
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-
     agent_name = config.agent.name
     business_name = config.client.name
 
-    return (
+    # Leer configuración personalizable (con defaults sensatos)
+    vrc = config.agent.voice_config.get("voice_rules", {})
+    max_sentences = vrc.get("max_sentences", 2)
+    formality = vrc.get("formality", "casual")  # formal, casual, neutral
+    country = vrc.get("country_style", "mx")  # mx, co, es, neutral
+    confirm_data = vrc.get("confirm_data", True)
+    end_with_question = vrc.get("end_with_question", True)
+    deny_ai = vrc.get("deny_ai_identity", True)
+
+    # Contexto temporal (siempre)
+    rules = (
         f"\n\n## Contexto temporal\n"
-        f"- Hoy es {today}. Fecha: {now.strftime('%Y-%m-%d')}. Hora actual: {current_time} (hora de México).\n"
+        f"- Hoy es {today}. Fecha: {now.strftime('%Y-%m-%d')}. Hora actual: {current_time}.\n"
         f"- Mañana es {tomorrow}.\n"
         f"- Cuando el usuario diga 'mañana', 'pasado mañana', 'el lunes', etc., calcula la fecha EXACTA "
         f"basándote en que hoy es {now.strftime('%Y-%m-%d')}.\n"
-        f"\n## Reglas de voz (OBLIGATORIAS)\n"
-        "- MÁXIMO 2 frases por respuesta. Si necesitas decir más, pregunta si quieren que continúes.\n"
-        "- SIEMPRE termina con pregunta corta: '¿le parece?', '¿verdad?', '¿qué dice?', '¿le queda bien?'\n"
-        "- SIEMPRE empieza con muletilla natural: 'Claro', 'Ah ok', 'Mire', 'Sí', 'Ajá', "
-        "'Perfecto', 'Con gusto', 'Fíjese que'\n"
-        "- Si te interrumpen, cede la palabra inmediatamente.\n"
-        '- Confirma datos repitiendo: "Su nombre es Juan Pérez, ¿verdad?"\n'
-        "- Números de teléfono: di dígito por dígito con pausa: 'nueve-nueve-nueve, uno-dos-tres'.\n"
-        "- Precios: redondea natural: 'son como mil doscientos pesos', NO 'mil doscientos pesos con cero centavos'.\n"
-        "- Fechas: di natural: 'el martes que viene', NO 'el martes 15 de abril de 2026'.\n"
-        "- Horarios: di simple: 'a las diez de la mañana', NO 'a las 10:00 horas'.\n"
+    )
+
+    # Reglas de voz (configurables)
+    rules += f"\n## Reglas de voz (OBLIGATORIAS)\n"
+    rules += f"- MÁXIMO {max_sentences} frases por respuesta. Si necesitas decir más, pregunta si quieren que continúes.\n"
+
+    if end_with_question:
+        rules += "- Termina con pregunta corta: '¿le parece?', '¿verdad?', '¿qué dice?'\n"
+
+    # Muletillas y tono según formalidad y país
+    if formality == "casual":
+        if country == "mx":
+            rules += "- Empieza con muletilla natural: 'Claro', 'Ah ok', 'Mire', 'Fíjese que', 'Con gusto'\n"
+        elif country == "co":
+            rules += "- Empieza con muletilla natural: 'Claro', 'Listo', 'Dale', 'Con mucho gusto', 'Vea pues'\n"
+        elif country == "es":
+            rules += "- Empieza con muletilla natural: 'Vale', 'Perfecto', 'Claro que sí', 'Mira'\n"
+        else:
+            rules += "- Empieza con muletilla natural: 'Claro', 'Perfecto', 'Por supuesto'\n"
+    elif formality == "formal":
+        rules += "- Usa tono profesional y respetuoso. Tutea solo si el cliente lo hace primero.\n"
+        rules += "- Evita muletillas coloquiales. Usa: 'Con gusto', 'Por supuesto', 'Permítame'\n"
+
+    rules += "- Si te interrumpen, cede la palabra inmediatamente.\n"
+
+    if confirm_data:
+        rules += '- Confirma datos repitiendo: "Su nombre es Juan Pérez, ¿verdad?"\n'
+
+    rules += (
+        "- Números de teléfono: di dígito por dígito con pausa.\n"
+        "- Precios: redondea natural: 'son como mil doscientos pesos'.\n"
+        "- Fechas: di natural: 'el martes que viene'.\n"
+        "- Horarios: di simple: 'a las diez de la mañana'.\n"
         "- Despedida siempre con resumen de lo acordado.\n"
-        "- NUNCA digas que eres inteligencia artificial, asistente virtual ni robot.\n"
-        f'- Si preguntan si eres robot, di que eres {agent_name} de {business_name}.\n'
+    )
+
+    if deny_ai:
+        rules += (
+            "- NUNCA digas que eres inteligencia artificial, asistente virtual ni robot.\n"
+            f"- Si preguntan si eres robot, di que eres {agent_name} de {business_name}.\n"
+        )
+
+    rules += (
         "- NUNCA deletrees palabras ni nombres.\n"
         "- No uses siglas ni abreviaturas.\n"
-        "- NUNCA generes listas con números o bullets. Di opciones de forma conversacional: "
-        "'Tenemos martes a las 10 o jueves a las 3, ¿cuál le queda?'\n"
-        "- NUNCA uses estas palabras: 'permítame', 'con mucho gusto le informo', "
-        "'nuestro sistema', 'base de datos', 'procesando'.\n"
-        "- Si no sabes algo: 'Déjeme verificar' o 'No tengo esa info ahorita, ¿quiere que le averigüe?'\n"
-        "- Si el usuario se oye molesto, cambia a tono empático: "
-        "'Entiendo, tiene toda la razón, déjeme ayudarle'.\n"
-        "- Si necesitas pensar o buscar información, empieza diciendo 'Déjeme ver...', "
-        "'Un momento...' o 'Ok, déjeme checar...' para llenar el silencio.\n"
+        "- NUNCA generes listas con bullets. Di opciones de forma conversacional.\n"
+        "- Si no sabes algo: 'Déjeme verificar' o 'No tengo esa info ahorita'.\n"
+        "- Si el usuario se oye molesto, cambia a tono empático.\n"
+        "- Si necesitas pensar, di 'Déjeme ver...' o 'Un momento...' para llenar el silencio.\n"
     )
+
+    return rules
 
 TOOL_INSTRUCTIONS = {
     "schedule_appointment": (

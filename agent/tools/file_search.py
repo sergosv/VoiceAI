@@ -41,10 +41,8 @@ async def search_knowledge_base(query: str, store_id: str) -> str:
     if not store_id:
         return "No hay base de conocimientos configurada para este cliente."
 
-    try:
+    async def _do_search() -> str:
         client = _get_gemini()
-
-        # Ejecutar en thread con timeout para no bloquear el event loop
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 client.models.generate_content,
@@ -70,9 +68,18 @@ async def search_knowledge_base(query: str, store_id: str) -> str:
         )
         return response.text or "No se encontró información relevante."
 
+    try:
+        from agent.tools.retry import retry_async
+        return await retry_async(_do_search, max_retries=2, base_delay=1.0)
     except asyncio.TimeoutError:
-        logger.warning("Timeout en File Search (%.0fs) para query: %s", GEMINI_TIMEOUT_S, query[:80])
-        return "La búsqueda tardó demasiado. Intenta con una pregunta más específica."
+        logger.warning("Timeout en File Search (%.0fs, tras retries) para query: %s", GEMINI_TIMEOUT_S, query[:80])
+        return (
+            "La búsqueda tardó demasiado después de varios intentos. "
+            "Responde con lo que sepas o dile al usuario que intente preguntar de otra forma."
+        )
     except Exception as e:
-        logger.error("Error en File Search: %s", e)
-        return "No pude consultar la base de conocimientos en este momento."
+        logger.error("Error en File Search (tras retries): %s", e)
+        return (
+            "No pude consultar la base de conocimientos en este momento. "
+            "Responde con lo que sepas del contexto del negocio o pide disculpas al usuario."
+        )

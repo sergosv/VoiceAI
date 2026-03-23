@@ -35,20 +35,37 @@ async def send_whatsapp_message(
         "text": message,
     }
 
-    try:
+    async def _do_send() -> str:
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
-
         logger.info("WhatsApp enviado a %s vía instancia %s", clean_phone, instance_id)
         return f"Mensaje de WhatsApp enviado exitosamente al número {phone_number}."
 
+    try:
+        from agent.tools.retry import retry_async
+        return await retry_async(
+            _do_send,
+            max_retries=2,
+            base_delay=1.0,
+            retryable_exceptions=(httpx.TimeoutException, httpx.ConnectError, ConnectionError, OSError),
+        )
     except httpx.TimeoutException:
-        logger.error("Timeout enviando WhatsApp a %s", clean_phone)
-        return "No pude enviar el mensaje de WhatsApp: tiempo de espera agotado."
+        logger.error("Timeout enviando WhatsApp a %s (tras retries)", clean_phone)
+        return (
+            "No pude enviar el WhatsApp después de varios intentos — el servicio no responde. "
+            "Ofrece al usuario dictarle la información o que el negocio se la envíe después."
+        )
     except httpx.HTTPStatusError as e:
         logger.error("Error HTTP enviando WhatsApp: %s %s", e.response.status_code, e.response.text)
-        return f"Error al enviar WhatsApp: {e.response.status_code}."
+        return (
+            f"Error al enviar WhatsApp (HTTP {e.response.status_code}). "
+            f"Dile al usuario que no pudiste enviar el mensaje, "
+            f"pero que puedes dictarle la información."
+        )
     except Exception as e:
         logger.error("Error enviando WhatsApp: %s", e)
-        return "No pude enviar el mensaje de WhatsApp en este momento."
+        return (
+            "No pude enviar el mensaje de WhatsApp en este momento. "
+            "Ofrece al usuario una alternativa: dictarle los datos o que lo contacten después."
+        )
