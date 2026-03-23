@@ -50,6 +50,7 @@ const AdminAuditLog = lazy(() => import('./pages/admin/AdminAuditLog').then(m =>
 const AdminPhones = lazy(() => import('./pages/admin/AdminPhones').then(m => ({ default: m.AdminPhones })))
 const AdminWebhookDLQ = lazy(() => import('./pages/admin/AdminWebhookDLQ').then(m => ({ default: m.AdminWebhookDLQ })))
 const NotFound = lazy(() => import('./pages/NotFound').then(m => ({ default: m.NotFound })))
+const Landing = lazy(() => import('./pages/Landing').then(m => ({ default: m.Landing })))
 
 export default function App() {
   return (
@@ -59,6 +60,9 @@ export default function App() {
         <ConfirmProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
+              {/* Landing — pagina publica */}
+              <Route path="/landing" element={<Landing />} />
+
               {/* Auth */}
               <Route element={<AuthLayout />}>
                 <Route path="/login" element={<Login />} />

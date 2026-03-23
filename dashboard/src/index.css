@@ -172,6 +172,22 @@ body {
   font-family: var(--font-mono);
 }
 
+/* ── Landing page animations ── */
+@keyframes waveform {
+  0% { transform: scaleY(0.3); }
+  100% { transform: scaleY(1); }
+}
+
+@keyframes landing-fade-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.landing-fade-in {
+  animation: landing-fade-in 0.8s ease-out forwards;
+  opacity: 0;
+}
+
 .flow-guide-content .example {
   background: #0a0a0f;
   border: 1px solid #2a2a3e;
