@@ -646,6 +646,19 @@ async def chat_turn(
     client = _get_gemini()
     config = conversation.config
 
+    # Inyectar text rules al prompt en el primer turno
+    if conversation.turn_count == 0 and hook_channel in ("whatsapp", "widget", "ghl"):
+        try:
+            from agent.text_rules import TextRulesConfig, build_text_rules_prompt
+            text_cfg = TextRulesConfig.from_agent_config(
+                config.agent.voice_config, hook_channel
+            )
+            text_rules_prompt = build_text_rules_prompt(text_cfg, hook_channel)
+            if text_rules_prompt and text_rules_prompt not in conversation.system_prompt:
+                conversation.system_prompt += text_rules_prompt
+        except Exception:
+            logger.exception("Error inyectando text rules")
+
     # Inicializar flow si es primera vez
     init_flow_state(conversation)
 
@@ -819,6 +832,17 @@ async def chat_turn(
                 ))
             except Exception:
                 logger.exception("Error dispatching message.sent webhook")
+
+            # Text channel formatting: enforcement determinístico
+            if hook_channel in ("whatsapp", "widget", "ghl"):
+                try:
+                    from agent.text_rules import TextRulesConfig, format_text_response
+                    text_cfg = TextRulesConfig.from_agent_config(
+                        config.agent.voice_config, hook_channel
+                    )
+                    text = format_text_response(text, text_cfg)
+                except Exception:
+                    logger.exception("Error aplicando text rules formatting")
 
             return text, tool_calls_log
 

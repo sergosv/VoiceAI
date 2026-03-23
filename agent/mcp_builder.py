@@ -60,6 +60,23 @@ def build_mcp_servers(server_configs: list[dict[str, Any]]) -> list[Any]:
         )
         return []
 
+    # Dynamic tool loading: si hay muchos servers, limitar para no saturar contexto
+    MAX_MCP_SERVERS = 5
+    if len(server_configs) > MAX_MCP_SERVERS:
+        # Priorizar por: 1) los que tienen allowed_tools (más enfocados), 2) HTTP sobre stdio
+        sorted_configs = sorted(
+            server_configs,
+            key=lambda c: (
+                0 if c.get("allowed_tools") else 1,  # Con allowed_tools primero
+                0 if c.get("connection_type") == "http" else 1,  # HTTP primero
+            ),
+        )
+        server_configs = sorted_configs[:MAX_MCP_SERVERS]
+        logger.warning(
+            "Limitando MCP servers a %d de %d (dynamic tool loading)",
+            MAX_MCP_SERVERS, len(sorted_configs),
+        )
+
     servers = []
 
     for cfg in server_configs:

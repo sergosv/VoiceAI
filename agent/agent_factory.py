@@ -1410,6 +1410,33 @@ def build_agent(
                 "Tienes ejemplos de conversación configurados. "
                 "Sigue el tono y estilo que ya conoces del negocio."
             )
+    # Inyectar FAQs de cross-call insights (si hay)
+    try:
+        from api.services.agent_insights import get_faq_context_for_agent
+        faq_context = asyncio.get_event_loop().run_until_complete(
+            get_faq_context_for_agent(config.agent.id)
+        ) if not asyncio.get_event_loop().is_running() else ""
+        # Si estamos en event loop corriendo, cargar de forma sync
+        if not faq_context:
+            from agent.db import get_supabase
+            sb = get_supabase()
+            faqs = sb.table("agent_insights").select(
+                "title, suggested_response, frequency"
+            ).eq("agent_id", config.agent.id).eq(
+                "insight_type", "faq"
+            ).eq("status", "active").gte(
+                "confidence", 0.6
+            ).order("frequency", desc=True).limit(5).execute()
+            if faqs.data:
+                lines = ["\n\n## Preguntas frecuentes (aprendidas de llamadas anteriores)"]
+                for faq in faqs.data:
+                    if faq.get("suggested_response"):
+                        lines.append(f"- Si preguntan sobre '{faq['title']}': {faq['suggested_response']}")
+                if len(lines) > 1:
+                    augmented_prompt += "\n".join(lines)
+    except Exception:
+        pass  # No bloquear si falla — insights son best-effort
+
     # Crear copia con prompt aumentado
     updated_agent = replace(config.agent, system_prompt=augmented_prompt)
     config = ResolvedConfig(agent=updated_agent, client=config.client)
