@@ -258,7 +258,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 "Por favor intente de nuevo en unos minutos. Gracias.",
                 allow_interruptions=False,
             )
-            await asyncio.sleep(3)
+            await asyncio.sleep(1.5)
         except Exception:
             logger.exception("Error playing capacity limit message")
         return
@@ -280,7 +280,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 "Por favor comunícate directamente al número del negocio. Gracias.",
                 allow_interruptions=False,
             )
-            await asyncio.sleep(3)
+            await asyncio.sleep(1.5)
         except Exception:
             logger.exception("Error playing rejection message")
         return
@@ -349,56 +349,48 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         updated_agent = replace(config.agent, system_prompt=campaign_script)
         config = ResolvedConfig(agent=updated_agent, client=config.client)
 
-    # Cargar MCP servers configurados para este cliente/agente
-    mcp_configs = await load_mcp_servers(config.client.id, config.agent.id)
+    # ── PARALLELIZAR carga de recursos (latency optimization) ──
+    # En vez de 4 awaits secuenciales (~4-8s), cargamos todo en paralelo (~1-2s)
+    async def _load_mcp() -> list[dict]:
+        return await load_mcp_servers(config.client.id, config.agent.id)
+
+    async def _load_apis() -> list[dict]:
+        return await load_api_integrations(config.client.id, config.agent.id)
+
+    async def _load_hooks_task() -> list:
+        return await load_hooks_for_agent(config.agent.id)
+
+    async def _load_memory() -> tuple[AgentMemory | None, str]:
+        contact_phone = caller_number
+        if not contact_phone:
+            return None, ""
+        try:
+            channel = "outbound_call" if outbound_mode else "call"
+            mem = AgentMemory(config.client.id, channel=channel)
+            await mem.identify(contact_phone, "phone")
+            ctx = mem.build_memory_context()
+            return mem, ctx
+        except Exception:
+            logger.exception("Error cargando memoria, continuando sin contexto")
+            return None, ""
+
+    # Ejecutar TODO en paralelo
+    mcp_configs, api_integrations, hook_defs, (memory, memory_context) = await asyncio.gather(
+        _load_mcp(), _load_apis(), _load_hooks_task(), _load_memory(),
+    )
+
     mcp_servers = build_mcp_servers(mcp_configs) if mcp_configs else None
     if mcp_servers:
-        logger.info(
-            "MCP servers cargados para '%s/%s': %d servidor(es)",
-            config.client.slug, config.agent.slug, len(mcp_servers),
-        )
-
-    # Cargar API integrations configuradas para este cliente/agente
-    api_integrations = await load_api_integrations(config.client.id, config.agent.id)
+        logger.info("MCP: %d servidor(es)", len(mcp_servers))
     if api_integrations:
-        logger.info(
-            "API integrations cargadas para '%s/%s': %d integración(es)",
-            config.client.slug, config.agent.slug, len(api_integrations),
-        )
+        logger.info("API integrations: %d", len(api_integrations))
 
-    # Cargar lifecycle hooks para este agente
-    hook_defs = await load_hooks_for_agent(config.agent.id)
     hook_engine: HookEngine | None = None
     if hook_defs:
         hook_engine = HookEngine(hook_defs)
-        logger.info(
-            "Hooks cargados para '%s/%s': %d hook(s)",
-            config.client.slug, config.agent.slug, len(hook_defs),
-        )
-
-    # Memoria de largo plazo: identificar contacto y cargar contexto
-    memory_context = ""
-    memory: AgentMemory | None = None
-    contact_phone_for_memory = caller_number
-    if outbound_mode and caller_number:
-        # En outbound, caller_number es el destino
-        contact_phone_for_memory = caller_number
-
-    if contact_phone_for_memory:
-        try:
-            channel = "outbound_call" if outbound_mode else "call"
-            memory = AgentMemory(config.client.id, channel=channel)
-            await memory.identify(contact_phone_for_memory, "phone")
-            memory_context = memory.build_memory_context()
-            if memory_context:
-                logger.info(
-                    "Contexto de memoria cargado para '%s' (%d memorias)",
-                    contact_phone_for_memory,
-                    len(memory.memories),
-                )
-        except Exception:
-            logger.exception("Error cargando memoria, continuando sin contexto")
-            memory = None
+        logger.info("Hooks: %d", len(hook_defs))
+    if memory and memory_context:
+        logger.info("Memoria: %d memorias", len(memory.memories))
 
     # Hook: OnConversationStart — evaluar antes de construir el agente
     if hook_engine and hook_engine.has_hooks_for("OnConversationStart"):
@@ -544,7 +536,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     vad = silero.VAD.load(
         activation_threshold=0.5,
         min_speech_duration=0.1,
-        min_silence_duration=0.5,
+        min_silence_duration=0.4,
         sample_rate=8000,
     )
 
@@ -558,7 +550,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             vad=vad,
             turn_detection=MultilingualModel(),
             min_endpointing_delay=0.5,
-            max_endpointing_delay=4.0,
+            max_endpointing_delay=3.0,
             min_interruption_duration=0.6,
             min_interruption_words=1,
         )
@@ -574,7 +566,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             vad=vad,
             turn_detection=MultilingualModel(),
             min_endpointing_delay=0.5,
-            max_endpointing_delay=4.0,
+            max_endpointing_delay=3.0,
             min_interruption_duration=0.6,
             min_interruption_words=1,
         )

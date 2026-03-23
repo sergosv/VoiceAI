@@ -357,7 +357,7 @@ class HookEngine:
         try:
             result = await asyncio.wait_for(
                 self._call_prompt_llm(prompt_text, ctx),
-                timeout=5.0,
+                timeout=3.0,
             )
             if not result:
                 # El LLM dijo que no pasa
@@ -396,7 +396,7 @@ class HookEngine:
         try:
             evaluation = await asyncio.wait_for(
                 self._call_evaluator_llm(criteria, ctx),
-                timeout=5.0,
+                timeout=3.0,
             )
             if not evaluation["passed"]:
                 base.action = HookAction.REGENERATE

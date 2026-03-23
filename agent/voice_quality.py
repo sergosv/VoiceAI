@@ -34,13 +34,13 @@ BACKCHANNELS = {
 
 # ── Timing constants ─────────────────────────────────────
 
-FILLER_DELAY_SECONDS = 1.2
-"""Segundos a esperar antes de reproducir un filler. Si el LLM responde antes, no se reproduce."""
+FILLER_DELAY_SECONDS = 0.8
+"""Segundos a esperar antes de reproducir un filler. Reducido de 1.2s para llenar silencio más rápido."""
 
-BACKCHANNEL_FIRST_DELAY = 4.0
+BACKCHANNEL_FIRST_DELAY = 3.5
 """Segundos de habla continua del usuario antes del primer backchannel."""
 
-BACKCHANNEL_INTERVAL = 5.5
+BACKCHANNEL_INTERVAL = 4.5
 """Segundos entre backchannels subsiguientes."""
 
 

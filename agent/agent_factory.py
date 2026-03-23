@@ -115,8 +115,18 @@ class VoiceAgent(Agent):
 
     async def _metered_text(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
         """Wrapper que cuenta caracteres TTS y evalúa hooks PreResponse."""
-        # Si hay hooks PreResponse, acumular el primer segmento para evaluar
-        if self._hook_engine and self._hook_engine.has_hooks_for("PreResponse"):
+        # Solo bufferear si hay hooks evaluator/prompt (los que necesitan texto completo)
+        # Los hooks tipo rule/transform se evalúan post-hoc sin bloquear
+        _has_blocking_hooks = (
+            self._hook_engine
+            and self._hook_engine.has_hooks_for("PreResponse")
+            and any(
+                h.hook_type in ("evaluator", "prompt")
+                for h in self._hook_engine.hooks
+                if h.hook_event == "PreResponse"
+            )
+        )
+        if _has_blocking_hooks:
             full_text = ""
             chunks: list[str] = []
             async for chunk in text:

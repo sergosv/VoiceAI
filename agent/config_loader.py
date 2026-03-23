@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 
 from supabase import Client
 
-# Timeout para queries a Supabase (segundos)
-DB_QUERY_TIMEOUT_S = 8.0
+# Timeout para queries a Supabase (segundos) — reducido de 8s a 5s para latencia
+DB_QUERY_TIMEOUT_S = 5.0
 
 logger = logging.getLogger(__name__)
 

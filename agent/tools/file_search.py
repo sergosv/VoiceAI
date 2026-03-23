@@ -12,8 +12,8 @@ from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-# Timeout para llamadas a Gemini (segundos)
-GEMINI_TIMEOUT_S = 15.0
+# Timeout para llamadas a Gemini (segundos) — reducido de 15s a 10s
+GEMINI_TIMEOUT_S = 10.0
 
 # Cliente Gemini singleton (thread-safe)
 _gemini_client: genai.Client | None = None
