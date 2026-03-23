@@ -1400,16 +1400,9 @@ def build_agent(
             f"{', '.join(api_names)}. Usa call_api con el nombre de la integración."
         )
 
-    # Examples: solo si son cortos (< 500 chars)
+    # Examples: siempre incluir (Anthropic: "examples are worth a thousand words")
     if config.agent.examples:
-        if len(config.agent.examples) < 500:
-            augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
-        else:
-            augmented_prompt += (
-                "\n\n## Estilo de conversación\n"
-                "Tienes ejemplos de conversación configurados. "
-                "Sigue el tono y estilo que ya conoces del negocio."
-            )
+        augmented_prompt += f"\n\n## Ejemplos de conversación\n{config.agent.examples}"
     # Inyectar FAQs de cross-call insights (si hay)
     try:
         from api.services.agent_insights import get_faq_context_for_agent

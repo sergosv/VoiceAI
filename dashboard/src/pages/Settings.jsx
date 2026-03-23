@@ -6,6 +6,7 @@ import {
   Shield, Globe, Star, Bell, Clock, Webhook,
 } from 'lucide-react'
 import HooksEditor from '../components/HooksEditor'
+import InsightsPanel from '../components/InsightsPanel'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -75,6 +76,7 @@ const TABS = [
   { key: 'api', label: 'API', icon: Key },
   { key: 'widget', label: 'Widget', icon: Globe },
   { key: 'hooks', label: 'Reglas', icon: Webhook },
+  { key: 'insights', label: 'Insights', icon: Brain },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
 
@@ -1937,6 +1939,122 @@ export function Settings() {
                     </div>
                   )}
                 </Card>
+
+                {/* Voice Rules configurables */}
+                <Card className="space-y-4">
+                  <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                    <Volume2 size={16} className="text-green-400" />
+                    Reglas de Voz
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    Personaliza cómo responde el agente por voz. Estas reglas se aplican automáticamente a todas las llamadas.
+                  </p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Máx. oraciones por respuesta</label>
+                      <select
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.voice_rules?.max_sentences ?? 2}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            voice_rules: { ...(f.voice_config?.voice_rules || {}), max_sentences: parseInt(e.target.value) },
+                          },
+                        }))}
+                      >
+                        <option value={1}>1 (muy corto)</option>
+                        <option value={2}>2 (recomendado)</option>
+                        <option value={3}>3 (detallado)</option>
+                        <option value={4}>4 (extenso)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Formalidad</label>
+                      <select
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.voice_rules?.formality ?? 'casual'}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            voice_rules: { ...(f.voice_config?.voice_rules || {}), formality: e.target.value },
+                          },
+                        }))}
+                      >
+                        <option value="casual">Casual (tuteo, muletillas)</option>
+                        <option value="neutral">Neutral</option>
+                        <option value="formal">Formal (usted, profesional)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Estilo regional</label>
+                      <select
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.voice_rules?.country_style ?? 'mx'}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            voice_rules: { ...(f.voice_config?.voice_rules || {}), country_style: e.target.value },
+                          },
+                        }))}
+                      >
+                        <option value="mx">Mexico</option>
+                        <option value="co">Colombia</option>
+                        <option value="es">Espana</option>
+                        <option value="neutral">Neutral (sin regionalismos)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.voice_rules?.end_with_question ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            voice_rules: { ...(f.voice_config?.voice_rules || {}), end_with_question: e.target.checked },
+                          },
+                        }))}
+                      />
+                      Terminar con pregunta
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.voice_rules?.confirm_data ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            voice_rules: { ...(f.voice_config?.voice_rules || {}), confirm_data: e.target.checked },
+                          },
+                        }))}
+                      />
+                      Confirmar datos repitiendo
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.voice_rules?.deny_ai_identity ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            voice_rules: { ...(f.voice_config?.voice_rules || {}), deny_ai_identity: e.target.checked },
+                          },
+                        }))}
+                      />
+                      Negar ser IA
+                    </label>
+                  </div>
+                </Card>
               </div>
             )}
 
@@ -2000,7 +2118,80 @@ export function Settings() {
 
             {/* ── WhatsApp Tab ── */}
             {activeTab === 'whatsapp' && clientId && selectedAgent && (
-              <WhatsAppConfig clientId={clientId} agentId={selectedAgent.id} />
+              <div className="space-y-6">
+                <WhatsAppConfig clientId={clientId} agentId={selectedAgent.id} />
+                {/* Text Rules para WhatsApp */}
+                <Card className="space-y-4">
+                  <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                    <MessageCircle size={16} className="text-green-400" />
+                    Formato de Respuestas (WhatsApp)
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    Controla cómo se formatean las respuestas del agente en WhatsApp.
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Longitud maxima (caracteres)</label>
+                      <input
+                        type="number"
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.text_rules?.whatsapp?.max_length ?? form.voice_config?.text_rules?.max_length ?? 600}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            text_rules: {
+                              ...(f.voice_config?.text_rules || {}),
+                              whatsapp: { ...(f.voice_config?.text_rules?.whatsapp || {}), max_length: parseInt(e.target.value) || 600 },
+                            },
+                          },
+                        }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Tono</label>
+                      <select
+                        className="w-full bg-[#0a0a0f] border border-gray-700 rounded px-3 py-2 text-sm text-white"
+                        value={form.voice_config?.text_rules?.whatsapp?.tone ?? form.voice_config?.text_rules?.tone ?? 'friendly'}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          voice_config: {
+                            ...(f.voice_config || {}),
+                            text_rules: {
+                              ...(f.voice_config?.text_rules || {}),
+                              whatsapp: { ...(f.voice_config?.text_rules?.whatsapp || {}), tone: e.target.value },
+                            },
+                          },
+                        }))}
+                      >
+                        <option value="friendly">Amigable</option>
+                        <option value="professional">Profesional</option>
+                        <option value="neutral">Neutral</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.text_rules?.whatsapp?.allow_emojis ?? form.voice_config?.text_rules?.allow_emojis ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), whatsapp: { ...(f.voice_config?.text_rules?.whatsapp || {}), allow_emojis: e.target.checked } } },
+                        }))}
+                      />
+                      Permitir emojis
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                      <input type="checkbox" className="rounded bg-[#0a0a0f] border-gray-700"
+                        checked={form.voice_config?.text_rules?.whatsapp?.allow_links ?? form.voice_config?.text_rules?.allow_links ?? true}
+                        onChange={e => setForm(f => ({
+                          ...f, voice_config: { ...(f.voice_config || {}), text_rules: { ...(f.voice_config?.text_rules || {}), whatsapp: { ...(f.voice_config?.text_rules?.whatsapp || {}), allow_links: e.target.checked } } },
+                        }))}
+                      />
+                      Permitir links
+                    </label>
+                  </div>
+                </Card>
+              </div>
             )}
 
             {/* ── GoHighLevel Tab ── */}
@@ -2264,6 +2455,14 @@ export function Settings() {
             {/* ── Hooks (Reglas) Tab ── */}
             {activeTab === 'hooks' && selectedAgent && (
               <HooksEditor
+                clientId={clientId}
+                agentId={selectedAgent.id}
+              />
+            )}
+
+            {/* ── Insights Tab ── */}
+            {activeTab === 'insights' && selectedAgent && (
+              <InsightsPanel
                 clientId={clientId}
                 agentId={selectedAgent.id}
               />
