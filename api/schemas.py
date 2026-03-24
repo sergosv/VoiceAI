@@ -138,6 +138,7 @@ class AgentOut(BaseModel):
     language_detection_config: dict | None = None
     quality_config: dict | None = None
     proactive_config: dict | None = None
+    widget_channels: list[str] = Field(default_factory=lambda: ["voice"])
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
