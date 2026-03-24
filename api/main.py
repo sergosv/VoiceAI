@@ -120,6 +120,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 _origins = [
     "http://localhost:5173",
     "http://localhost:8000",
+    "https://agentes.innotecnia.app",
+    "https://voiceai-69f.pages.dev",
 ]
 _extra = os.environ.get("ALLOWED_ORIGINS", "")
 if _extra:
@@ -145,7 +147,7 @@ app.add_middleware(
     allow_origin_regex=_cf_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With", "X-Request-ID", "X-Impersonate-Client"],
 )
 
 # Correlation ID middleware (genera request_id por petición)
