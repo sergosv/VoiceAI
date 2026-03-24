@@ -510,39 +510,59 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # Construir agente dinámico
     is_orchestrated = False
-    if (
-        not outbound_mode
-        and config.client.orchestration_mode == "intelligent"
-    ):
-        # Modo inteligente: cargar todos los agentes del cliente
-        all_configs = await load_orchestrated_configs(config.client.id)
-        if len(all_configs) >= 2:
-            voice_agent = build_orchestrated_agent(
-                all_configs, config, memory_context=memory_context,
-                mcp_servers=mcp_servers, api_integrations=api_integrations,
-            )
-            is_orchestrated = True
-            logger.info(
-                "Modo inteligente activado para '%s' — %d agentes",
-                config.client.name,
-                len(all_configs),
-            )
+    try:
+        if (
+            not outbound_mode
+            and config.client.orchestration_mode == "intelligent"
+        ):
+            # Modo inteligente: cargar todos los agentes del cliente
+            try:
+                all_configs = await load_orchestrated_configs(config.client.id)
+            except Exception:
+                logger.exception("Error cargando orchestrated configs — usando modo simple")
+                all_configs = []
+            if len(all_configs) >= 2:
+                voice_agent = build_orchestrated_agent(
+                    all_configs, config, memory_context=memory_context,
+                    mcp_servers=mcp_servers, api_integrations=api_integrations,
+                )
+                is_orchestrated = True
+                logger.info(
+                    "Modo inteligente activado para '%s' — %d agentes",
+                    config.client.name,
+                    len(all_configs),
+                )
+            else:
+                voice_agent = build_agent(
+                    config, memory_context=memory_context,
+                    mcp_servers=mcp_servers, api_integrations=api_integrations,
+                    language_detector=language_detector,
+                )
+                logger.info(
+                    "Modo inteligente solicitado pero solo %d agente(s), usando simple",
+                    len(all_configs),
+                )
         else:
             voice_agent = build_agent(
                 config, memory_context=memory_context,
                 mcp_servers=mcp_servers, api_integrations=api_integrations,
                 language_detector=language_detector,
             )
-            logger.info(
-                "Modo inteligente solicitado pero solo %d agente(s), usando simple",
-                len(all_configs),
-            )
-    else:
-        voice_agent = build_agent(
-            config, memory_context=memory_context,
-            mcp_servers=mcp_servers, api_integrations=api_integrations,
-            language_detector=language_detector,
+    except Exception:
+        logger.exception(
+            "Error crítico construyendo agente '%s/%s' — intentando agente minimal",
+            config.client.slug, config.agent.slug,
         )
+        # Fallback: construir agente mínimo sin MCP ni integraciones
+        try:
+            voice_agent = build_agent(
+                config, memory_context="",
+                mcp_servers=None, api_integrations=[],
+                language_detector=None,
+            )
+        except Exception:
+            logger.exception("Error fatal construyendo agente minimal — abortando llamada")
+            return
 
     # Inyectar hook engine al agente para PreToolCall/PostToolCall
     if hook_engine and hasattr(voice_agent, "_hook_engine"):
@@ -578,36 +598,58 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         sample_rate=8000,
     )
 
-    if config.agent.agent_mode == "realtime":
-        logger.info(
-            "Modo realtime: model=%s, voice=%s",
-            config.agent.realtime_model, config.agent.realtime_voice,
+    try:
+        if config.agent.agent_mode == "realtime":
+            logger.info(
+                "Modo realtime: model=%s, voice=%s",
+                config.agent.realtime_model, config.agent.realtime_voice,
+            )
+            session = AgentSession(
+                llm=build_realtime_model(config.agent),
+                vad=vad,
+                turn_detection=MultilingualModel(),
+                min_endpointing_delay=0.5,
+                max_endpointing_delay=3.0,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
+            )
+        else:
+            logger.info(
+                "Modo pipeline: stt=%s, llm=%s, tts=%s",
+                config.agent.stt_provider, config.agent.llm_provider, config.agent.tts_provider,
+            )
+            session = AgentSession(
+                stt=build_stt(config.agent, stt_language, multi_lang=stt_multi_lang),
+                llm=build_llm(config.agent),
+                tts=build_tts(config.agent, stt_language),
+                vad=vad,
+                turn_detection=MultilingualModel(),
+                min_endpointing_delay=0.5,
+                max_endpointing_delay=3.0,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
+            )
+    except Exception:
+        logger.exception(
+            "Error construyendo pipeline de voz — intentando con defaults"
         )
-        session = AgentSession(
-            llm=build_realtime_model(config.agent),
-            vad=vad,
-            turn_detection=MultilingualModel(),
-            min_endpointing_delay=0.5,
-            max_endpointing_delay=3.0,
-            min_interruption_duration=0.6,
-            min_interruption_words=1,
-        )
-    else:
-        logger.info(
-            "Modo pipeline: stt=%s, llm=%s, tts=%s",
-            config.agent.stt_provider, config.agent.llm_provider, config.agent.tts_provider,
-        )
-        session = AgentSession(
-            stt=build_stt(config.agent, stt_language, multi_lang=stt_multi_lang),
-            llm=build_llm(config.agent),
-            tts=build_tts(config.agent, stt_language),
-            vad=vad,
-            turn_detection=MultilingualModel(),
-            min_endpointing_delay=0.5,
-            max_endpointing_delay=3.0,
-            min_interruption_duration=0.6,
-            min_interruption_words=1,
-        )
+        # Fallback: pipeline con providers por defecto (sin BYOK keys)
+        try:
+            from livekit.plugins import cartesia, deepgram, google
+            session = AgentSession(
+                stt=deepgram.STT(language=stt_language),
+                llm=google.LLM(model="gemini-2.5-flash"),
+                tts=cartesia.TTS(model="sonic-3"),
+                vad=vad,
+                turn_detection=MultilingualModel(),
+                min_endpointing_delay=0.5,
+                max_endpointing_delay=3.0,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
+            )
+        except Exception:
+            logger.exception("Error fatal construyendo pipeline default — abortando")
+            return
 
     # Log detallado del pipeline para debugging de BYOK keys
     logger.info(
