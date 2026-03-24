@@ -303,7 +303,7 @@ export function Landing() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-4 gap-5">
             <FeatureCard inView={featInView} delay={0}
               icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}
               title="Reglas Inquebrantables"
@@ -333,6 +333,16 @@ export function Landing() {
               icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>}
               title="Aprende Solo"
               desc="Analiza todas las llamadas y detecta patrones: preguntas frecuentes, puntos de abandono. Se mejora continuamente."
+            />
+            <FeatureCard inView={featInView} delay={600}
+              icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round"/></svg>}
+              title="APIs y MCP Ilimitados"
+              desc="Conecta tu CRM, ERP, inventario, sistema de pagos — cualquier API. Usa el protocolo MCP para extender al agente sin limites."
+            />
+            <FeatureCard inView={featInView} delay={700}
+              icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></svg>}
+              title="Flow Builder Visual"
+              desc="Diseña flujos de conversacion arrastrando bloques. Triage medico, encuestas, cobranza — sin escribir una linea de codigo."
             />
           </div>
         </div>
@@ -434,6 +444,8 @@ export function Landing() {
                   'Recordar clientes y conversaciones previas',
                   'Detectar emociones y adaptar su tono',
                   'Cambiar de idioma automaticamente',
+                  'Conectar con cualquier API externa (CRM, ERP, inventarios, pagos)',
+                  'Extender sus capacidades con MCP servers (protocolo abierto)',
                 ].map(f => (
                   <li key={f} className="flex items-start gap-2.5 text-sm text-gray-300">
                     <svg viewBox="0 0 24 24" className="w-4 h-4 text-accent flex-shrink-0 mt-0.5">
