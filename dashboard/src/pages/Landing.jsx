@@ -45,6 +45,129 @@ function Waveform() {
   )
 }
 
+// ── SVG: Particulas flotantes (background) ──
+function ParticleField({ count = 30, className = '' }) {
+  const particles = useRef(
+    Array.from({ length: count }, () => ({
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      size: Math.random() * 3 + 1,
+      duration: Math.random() * 8 + 6,
+      delay: Math.random() * 5,
+      dx: (Math.random() - 0.5) * 120,
+      dy: (Math.random() - 0.5) * 120,
+    }))
+  ).current
+
+  return (
+    <div className={`absolute inset-0 overflow-hidden pointer-events-none ${className}`}>
+      {particles.map((p, i) => (
+        <div
+          key={i}
+          className="absolute rounded-full bg-accent/30"
+          style={{
+            left: `${p.x}%`,
+            top: `${p.y}%`,
+            width: p.size,
+            height: p.size,
+            '--dx': `${p.dx}px`,
+            '--dy': `${p.dy}px`,
+            animation: `particle-drift ${p.duration}s ease-in-out ${p.delay}s infinite`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── SVG: Pulsos de audio expandiendose ──
+function AudioPulse() {
+  return (
+    <div className="relative w-32 h-32 mx-auto">
+      {[0, 1, 2].map(i => (
+        <div
+          key={i}
+          className="absolute inset-0 rounded-full border border-accent/30"
+          style={{ animation: `pulse-ring 3s ease-out ${i * 1}s infinite` }}
+        />
+      ))}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-14 h-14 rounded-full bg-accent/20 flex items-center justify-center animate-glow-pulse">
+          <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 text-accent">
+            <path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2"/>
+            <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 22h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── SVG: Lineas de datos fluyendo ──
+function DataFlowLines({ className = '' }) {
+  return (
+    <svg viewBox="0 0 800 80" className={`w-full h-20 ${className}`} preserveAspectRatio="none">
+      {[0, 1, 2].map(i => (
+        <path
+          key={i}
+          d={`M0,${25 + i * 15} C200,${10 + i * 20} 600,${40 + i * 10} 800,${25 + i * 15}`}
+          fill="none"
+          stroke="url(#flow-gradient)"
+          strokeWidth="1.5"
+          strokeDasharray="8 12"
+          style={{
+            animation: `data-flow 4s linear ${i * 0.5}s infinite`,
+          }}
+        />
+      ))}
+      <defs>
+        <linearGradient id="flow-gradient" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="rgba(0,240,255,0)" />
+          <stop offset="50%" stopColor="rgba(0,240,255,0.4)" />
+          <stop offset="100%" stopColor="rgba(0,240,255,0)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  )
+}
+
+// ── Typing indicator animado ──
+function TypingIndicator() {
+  return (
+    <div className="flex items-center gap-1 px-4 py-2">
+      {[0, 1, 2].map(i => (
+        <div
+          key={i}
+          className="w-2 h-2 rounded-full bg-accent/60"
+          style={{ animation: `typing-dot 1.4s ease-in-out ${i * 0.2}s infinite` }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── Orbitas decorativas (para el hero) ──
+function OrbitRing({ radius, duration, dotSize = 4, color = 'accent' }) {
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div
+        className={`rounded-full border border-${color}/10`}
+        style={{ width: radius * 2, height: radius * 2 }}
+      >
+        <div
+          className={`w-${dotSize} h-${dotSize} rounded-full bg-${color}/40`}
+          style={{
+            '--orbit-r': `${radius}px`,
+            animation: `orbit ${duration}s linear infinite`,
+            width: dotSize * 4,
+            height: dotSize * 4,
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ── SVG: Icono de canal ──
 function ChannelIcon({ type }) {
   const icons = {
@@ -77,12 +200,12 @@ function ChannelIcon({ type }) {
 function FeatureCard({ icon, title, desc, delay = 0, inView }) {
   return (
     <div
-      className={`bg-[#12121a] border border-gray-800/50 rounded-xl p-6 transition-all duration-700 ${
+      className={`bg-[#12121a] border border-gray-800/50 rounded-xl p-6 transition-all duration-700 hover:border-accent/30 hover:bg-accent/[0.03] group ${
         inView ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
       }`}
       style={{ transitionDelay: `${delay}ms` }}
     >
-      <div className="w-12 h-12 rounded-lg bg-accent/10 flex items-center justify-center text-accent mb-4">
+      <div className="w-12 h-12 rounded-lg bg-accent/10 flex items-center justify-center text-accent mb-4 group-hover:scale-110 transition-transform">
         {icon}
       </div>
       <h3 className="text-white font-semibold text-lg mb-2">{title}</h3>
@@ -152,8 +275,9 @@ export function Landing() {
       </nav>
 
       {/* ── HERO ── */}
-      <section className="pt-32 pb-20 px-6">
-        <div className="max-w-4xl mx-auto text-center">
+      <section className="pt-32 pb-20 px-6 relative">
+        <ParticleField count={40} />
+        <div className="max-w-4xl mx-auto text-center relative z-10">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-accent text-sm mb-8 landing-fade-in">
             <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             Plataforma de agentes de IA para negocios
@@ -176,13 +300,19 @@ export function Landing() {
               Ver como funciona
             </a>
           </div>
-          {/* Waveform animado */}
+          {/* Audio pulse + waveform animado */}
           <div className="landing-fade-in" style={{ animationDelay: '0.4s' }}>
-            <Waveform />
-            <p className="text-xs text-gray-600 mt-3">Simulacion de conversacion en tiempo real</p>
+            <AudioPulse />
+            <div className="mt-6">
+              <Waveform />
+            </div>
+            <p className="text-xs text-gray-600 mt-3">Conversacion en tiempo real con voz natural</p>
           </div>
         </div>
       </section>
+
+      {/* Separador: data flow */}
+      <DataFlowLines />
 
       {/* ── CANALES ── */}
       <section ref={channelRef} className="py-20 px-6" id="channels">
@@ -209,7 +339,7 @@ export function Landing() {
                 }`}
                 style={{ transitionDelay: `${i * 100}ms` }}
               >
-                <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center text-accent mx-auto mb-4 group-hover:scale-110 transition-transform">
+                <div className="w-16 h-16 rounded-2xl bg-accent/10 flex items-center justify-center text-accent mx-auto mb-4 group-hover:scale-110 transition-transform animate-float" style={{ animationDelay: `${i * 0.3}s` }}>
                   <ChannelIcon type={ch.type} />
                 </div>
                 <h3 className="text-white font-semibold text-lg mb-2">{ch.name}</h3>
@@ -232,8 +362,12 @@ export function Landing() {
         </div>
       </section>
 
+      {/* Separador: data flow */}
+      <DataFlowLines />
+
       {/* ── COMO FUNCIONA ── */}
-      <section className="py-20 px-6 bg-[#08080d]" id="how-it-works">
+      <section className="py-20 px-6 bg-[#08080d] relative" id="how-it-works">
+        <ParticleField count={15} className="opacity-30" />
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Como funciona</h2>
@@ -256,7 +390,7 @@ export function Landing() {
 
             {/* Visual */}
             <div className="relative">
-              <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-8 overflow-hidden">
+              <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-8 overflow-hidden animate-glow-pulse">
                 {/* Animated glow */}
                 <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent" />
                 <div className="relative space-y-4">
@@ -266,6 +400,13 @@ export function Landing() {
                     <div className="bg-[#1a1a2e] rounded-xl rounded-tl-none px-4 py-2 text-sm text-gray-300 max-w-xs">
                       Hola, quiero agendar una cita para manana
                     </div>
+                  </div>
+                  {/* Typing indicator */}
+                  <div className={`flex gap-3 justify-end transition-all duration-500 ${activeStep === 1 ? 'opacity-100' : 'opacity-0'}`}>
+                    <div className="bg-accent/10 border border-accent/20 rounded-xl rounded-tr-none px-2 py-2">
+                      <TypingIndicator />
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center text-xs text-accent">IA</div>
                   </div>
                   <div className={`flex gap-3 justify-end transition-all duration-500 ${activeStep >= 2 ? 'opacity-100' : 'opacity-0'}`}>
                     <div className="bg-accent/10 border border-accent/20 rounded-xl rounded-tr-none px-4 py-2 text-sm text-gray-200 max-w-xs">
@@ -292,8 +433,12 @@ export function Landing() {
         </div>
       </section>
 
+      {/* Separador: data flow */}
+      <DataFlowLines />
+
       {/* ── INTELIGENCIA ── */}
-      <section ref={featRef} className="py-20 px-6" id="features">
+      <section ref={featRef} className="py-20 px-6 relative" id="features">
+        <ParticleField count={20} className="opacity-20" />
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Inteligencia que otros no tienen</h2>
@@ -347,6 +492,9 @@ export function Landing() {
           </div>
         </div>
       </section>
+
+      {/* Separador: data flow */}
+      <DataFlowLines />
 
       {/* ── HOOKS VISUAL ── */}
       <section ref={hookRef} className="py-20 px-6 bg-[#08080d]" id="hooks">
@@ -411,6 +559,9 @@ export function Landing() {
           </div>
         </div>
       </section>
+
+      {/* Separador: data flow */}
+      <DataFlowLines />
 
       {/* ── QUE INCLUYE ── */}
       <section className="py-20 px-6" id="pricing">
