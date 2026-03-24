@@ -7,7 +7,7 @@ export function AuthLayout() {
   const { user, loading } = useAuth()
 
   if (loading) return <PageLoader />
-  if (user) return <Navigate to="/" replace />
+  if (user) return <Navigate to="/app" replace />
 
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center">

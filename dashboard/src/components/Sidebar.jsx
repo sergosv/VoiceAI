@@ -13,7 +13,7 @@ const navGroups = [
   {
     label: null,
     items: [
-      { to: '/', icon: LayoutDashboard, label: 'Inicio', end: true },
+      { to: '/app', icon: LayoutDashboard, label: 'Inicio', end: true },
       { to: '/analytics', icon: BarChart3, label: 'Analytics' },
     ],
   },

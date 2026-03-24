@@ -7,7 +7,7 @@ const ROUTE_LABELS = {
   'calls': 'Llamadas',
   'contacts': 'Contactos',
   'appointments': 'Citas',
-  'campaigns': 'Campanas',
+  'campaigns': 'Campañas',
   'whatsapp': 'WhatsApp',
   'documents': 'Documentos',
   'integrations': 'Integraciones',
@@ -62,7 +62,7 @@ export function Breadcrumbs() {
   return (
     <nav className="flex items-center gap-1.5 text-xs text-text-muted mb-4">
       <Link
-        to="/"
+        to="/app"
         className="hover:text-text-primary transition-colors flex items-center gap-1"
       >
         <Home size={12} />

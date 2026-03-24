@@ -60,8 +60,8 @@ export default function App() {
         <ConfirmProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
-              {/* Landing — pagina publica */}
-              <Route path="/landing" element={<Landing />} />
+              {/* Landing — pagina publica (root) */}
+              <Route path="/" element={<Landing />} />
 
               {/* Auth */}
               <Route element={<AuthLayout />}>
@@ -71,7 +71,7 @@ export default function App() {
 
               {/* Dashboard */}
               <Route element={<DashboardLayout />}>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/app" element={<Dashboard />} />
                 <Route path="/analytics" element={<Analytics />} />
                 <Route path="/calls" element={<Calls />} />
                 <Route path="/calls/:id" element={<CallDetail />} />
