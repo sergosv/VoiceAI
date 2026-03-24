@@ -2333,60 +2333,19 @@ export function Settings() {
                   </div>
                 </Card>
 
-                {/* Chat widget code */}
-                {(selectedAgent?.widget_channels || ['voice']).includes('chat') && (
-                  <Card className="space-y-4">
-                    <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
-                      <MessageCircle size={16} className="text-green-400" />
-                      Widget de Chat
-                    </h2>
-                    <p className="text-xs text-text-muted">
-                      Widget de chat de texto para tu sitio web. Los visitantes escriben y el agente responde automaticamente.
-                    </p>
-                    <div className="space-y-3">
-                      <label className="text-xs font-medium text-text-secondary">Codigo de instalacion</label>
-                      {(() => {
-                        const PROD_API = 'https://voiceai-production-f4e4.up.railway.app/api'
-                        const envApi = import.meta.env.VITE_API_URL
-                        const apiUrl = (envApi && envApi.startsWith('http')) ? envApi : PROD_API
-                        const baseUrl = apiUrl.replace(/\/api$/, '')
-                        const slug = selectedAgent?.slug || 'tu-agente'
-                        return (
-                          <div className="relative">
-                            <pre className="bg-bg-primary border border-border rounded-lg p-4 text-xs text-green-400 overflow-x-auto whitespace-pre-wrap break-all">
-{`<script src="${baseUrl}/chat-widget.js"
-  data-agent="${slug}"
-  data-api="${apiUrl}">
-</script>`}
-                            </pre>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const code = `<script src="${baseUrl}/chat-widget.js"\n  data-agent="${slug}"\n  data-api="${apiUrl}">\n</script>`
-                                navigator.clipboard.writeText(code)
-                                toast.success('Codigo copiado al portapapeles')
-                              }}
-                              className="absolute top-2 right-2 p-1.5 rounded bg-bg-hover hover:bg-border transition-colors"
-                              title="Copiar"
-                            >
-                              <Check size={14} className="text-text-muted" />
-                            </button>
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  </Card>
-                )}
-
-                {/* Voice widget */}
-                {(selectedAgent?.widget_channels || ['voice']).includes('voice') && (<>
+                {/* Widget unificado — un solo script para voz + chat */}
                 <Card className="space-y-4">
                   <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
                     <Globe size={16} className="text-cyan-400" />
-                    Widget de Voz Embebible
+                    Widget Embebible
                   </h2>
                   <p className="text-xs text-text-muted">
-                    Agrega un boton de asistente de voz en cualquier sitio web. Los visitantes podran hablar con tu agente directamente desde la pagina.
+                    Un solo script que incluye {(selectedAgent?.widget_channels || ['voice']).includes('voice') && (selectedAgent?.widget_channels || ['voice']).includes('chat')
+                      ? 'voz y chat de texto. Los visitantes eligen como comunicarse.'
+                      : (selectedAgent?.widget_channels || ['voice']).includes('chat')
+                        ? 'chat de texto. Los visitantes escriben mensajes.'
+                        : 'llamada de voz. Los visitantes hablan por microfono.'
+                    }
                   </p>
 
                   <div className="space-y-3">
@@ -2449,25 +2408,32 @@ export function Settings() {
                       <li>Copia el codigo de arriba</li>
                       <li>Pegalo antes del cierre <code className="text-cyan-400">&lt;/body&gt;</code> en tu pagina HTML</li>
                       <li>El boton aparecera automaticamente en la esquina de tu sitio</li>
-                      <li>Los visitantes hacen clic para hablar con tu agente por voz</li>
+                      {(selectedAgent?.widget_channels || ['voice']).length > 1 && (
+                        <li>Los visitantes eligen entre voz o texto al hacer clic</li>
+                      )}
+                      {(selectedAgent?.widget_channels || ['voice']).includes('voice') && (
+                        <li>Si el microfono no esta disponible, se ofrece chat de texto como alternativa</li>
+                      )}
                     </ol>
                   </div>
 
-                  <div className="border border-yellow-500/20 bg-yellow-500/5 rounded-lg p-3">
-                    <p className="text-xs text-yellow-400/80">
-                      <strong>Nota:</strong> El widget requiere que el navegador del visitante tenga acceso al microfono. Funciona en Chrome, Firefox, Safari y Edge modernos. HTTPS es requerido en produccion.
-                    </p>
-                  </div>
+                  {(selectedAgent?.widget_channels || ['voice']).includes('voice') && (
+                    <div className="border border-yellow-500/20 bg-yellow-500/5 rounded-lg p-3">
+                      <p className="text-xs text-yellow-400/80">
+                        <strong>Nota:</strong> La llamada de voz requiere acceso al microfono y HTTPS en produccion. Si el microfono no esta disponible{(selectedAgent?.widget_channels || ['voice']).includes('chat') ? ', el widget ofrece chat de texto automaticamente' : ''}.
+                      </p>
+                    </div>
+                  )}
                 </Card>
 
-                {/* Preview del widget de voz */}
+                {/* Preview del widget */}
                 <Card className="space-y-4">
                   <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
                     <Eye size={16} className="text-green-400" />
                     Previsualizar Widget
                   </h2>
                   <p className="text-xs text-text-muted">
-                    Prueba el widget en vivo con la voz real de tu agente. El boton aparecera en la esquina inferior derecha de esta pagina.
+                    Prueba el widget en vivo. El boton aparecera en la esquina inferior derecha de esta pagina.
                   </p>
 
                   {!window.__voiceAIWidget ? (
@@ -2483,7 +2449,6 @@ export function Settings() {
                         s.setAttribute('data-title', `Hablar con ${selectedAgent?.name || 'agente'}`)
                         s.id = 'vai-preview-script'
                         document.body.appendChild(s)
-                        // Forzar re-render para mostrar boton de cerrar
                         setTimeout(() => setForm(f => ({ ...f, _widgetPreview: true })), 500)
                       }}
                       className="gap-2"
@@ -2498,17 +2463,15 @@ export function Settings() {
                         <span>Widget activo — busca el boton en la esquina inferior derecha</span>
                       </div>
                       <p className="text-xs text-text-muted">
-                        Haz clic en el boton circular para iniciar una llamada de prueba con tu agente. Podras escuchar la voz configurada y probar la conversacion.
+                        Haz clic en el boton circular para probar el widget.
                       </p>
                       <Button
                         variant="secondary"
                         size="sm"
                         onClick={() => {
-                          // Limpiar widget
                           const script = document.getElementById('vai-preview-script')
                           if (script) script.remove()
-                          document.querySelectorAll('.vai-fab, .vai-tooltip, .vai-status, #vai-audio').forEach(el => el.remove())
-                          const style = document.querySelector('style')
+                          document.querySelectorAll('.vai-fab, .vai-tooltip, .vai-status, .vai-mode-menu, .vai-chat-panel, #vai-audio').forEach(el => el.remove())
                           document.querySelectorAll('style').forEach(s => {
                             if (s.textContent?.includes('vai-fab')) s.remove()
                           })
@@ -2521,7 +2484,6 @@ export function Settings() {
                     </div>
                   )}
                 </Card>
-                </>)}
 
                 {/* Text Rules para Widget Chat */}
                 {(selectedAgent?.widget_channels || ['voice']).includes('chat') && (

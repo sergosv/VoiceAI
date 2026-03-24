@@ -233,13 +233,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # ========= CONCURRENT CALL LIMIT =========
     from agent.db import get_supabase
     sb = get_supabase()
-    active = (
-        sb.table("active_calls")
-        .select("id", count="exact")
-        .eq("client_id", config.client.id)
-        .execute()
-    )
-    active_count = active.count or 0
+    try:
+        active = await asyncio.to_thread(
+            lambda: sb.table("active_calls")
+            .select("id", count="exact")
+            .eq("client_id", config.client.id)
+            .execute()
+        )
+        active_count = active.count or 0
+    except Exception:
+        logger.exception("Error checking concurrent calls — allowing call")
+        active_count = 0
     max_concurrent = config.client.max_concurrent_calls
 
     if active_count >= max_concurrent:
@@ -265,7 +269,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # ========= BILLING: Check ANTES de atender =========
     billing = CallBilling(config.client.id)
-    credit_check = await billing.check_can_take_call()
+    try:
+        credit_check = await billing.check_can_take_call()
+    except Exception:
+        logger.exception("Error checking billing — allowing call")
+        credit_check = {"allowed": True, "balance": 0, "reason": "check_failed"}
 
     if not credit_check["allowed"]:
         logger.warning("Client %s no credits, rejecting call", config.client.id)
@@ -351,14 +359,44 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # ── PARALLELIZAR carga de recursos (latency optimization) ──
     # En vez de 4 awaits secuenciales (~4-8s), cargamos todo en paralelo (~1-2s)
+    # Cada loader tiene su propio try/except + retry para no crashear la llamada
+    async def _load_with_retry(name: str, coro_fn, default, max_retries: int = 2):
+        """Ejecuta coro_fn con retry. Si falla, retorna default en vez de crashear."""
+        for attempt in range(max_retries + 1):
+            try:
+                return await coro_fn()
+            except Exception:
+                if attempt < max_retries:
+                    wait = 0.5 * (attempt + 1)
+                    logger.warning(
+                        "Retry %d/%d cargando %s (esperando %.1fs)",
+                        attempt + 1, max_retries, name, wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.exception("Error cargando %s tras %d intentos — continuando sin datos", name, max_retries + 1)
+                    return default
+
     async def _load_mcp() -> list[dict]:
-        return await load_mcp_servers(config.client.id, config.agent.id)
+        return await _load_with_retry(
+            "MCP servers",
+            lambda: load_mcp_servers(config.client.id, config.agent.id),
+            [],
+        )
 
     async def _load_apis() -> list[dict]:
-        return await load_api_integrations(config.client.id, config.agent.id)
+        return await _load_with_retry(
+            "API integrations",
+            lambda: load_api_integrations(config.client.id, config.agent.id),
+            [],
+        )
 
     async def _load_hooks_task() -> list:
-        return await load_hooks_for_agent(config.agent.id)
+        return await _load_with_retry(
+            "hooks",
+            lambda: load_hooks_for_agent(config.agent.id),
+            [],
+        )
 
     async def _load_memory() -> tuple[AgentMemory | None, str]:
         contact_phone = caller_number
@@ -374,7 +412,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.exception("Error cargando memoria, continuando sin contexto")
             return None, ""
 
-    # Ejecutar TODO en paralelo
+    # Ejecutar TODO en paralelo — cada uno es resiliente individualmente
     mcp_configs, api_integrations, hook_defs, (memory, memory_context) = await asyncio.gather(
         _load_mcp(), _load_apis(), _load_hooks_task(), _load_memory(),
     )
