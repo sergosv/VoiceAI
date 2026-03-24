@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
@@ -7,6 +7,7 @@ import { Card } from '../components/ui/Card'
 
 export function Login() {
   const { signIn } = useAuth()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -18,6 +19,8 @@ export function Login() {
     setLoading(true)
     try {
       await signIn(email, password)
+      // Redirigir explícitamente al dashboard después del login
+      navigate('/app', { replace: true })
     } catch (err) {
       setError(err.message || 'Error al iniciar sesión')
     } finally {
