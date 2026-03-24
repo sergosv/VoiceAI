@@ -45,9 +45,50 @@ SAMPLE_AGENT_ROW = {
     "orchestrator_priority": 0,
     "conversation_mode": "prompt",
     "conversation_flow": None,
+    "mode_config": {},
+    "sentiment_config": None,
+    "intent_config": None,
+    "guardrails_config": None,
+    "language_detection_config": None,
+    "quality_config": None,
+    "proactive_config": None,
+    "widget_channels": ["voice", "chat"],
     "created_at": "2026-01-01T00:00:00",
     "updated_at": None,
 }
+
+
+class TestAgentOutSchemaConsistency:
+    """Verifica que AgentOut incluye todos los campos que retorna la DB."""
+
+    def test_sample_row_roundtrips_through_agent_out(self):
+        """Si un campo existe en SAMPLE_AGENT_ROW, AgentOut debe aceptarlo sin perderlo."""
+        from api.schemas import agent_out_from_row
+
+        result = agent_out_from_row(SAMPLE_AGENT_ROW)
+        out = result.model_dump()
+
+        # Campos que se transforman (API keys se stripean) — no comparar directamente
+        skip = {"voice_config", "llm_config", "stt_config"}
+        for key in SAMPLE_AGENT_ROW:
+            if key in skip:
+                continue
+            assert key in out, (
+                f"Campo '{key}' existe en la DB pero falta en AgentOut schema. "
+                f"Agrega '{key}' a la clase AgentOut en api/schemas.py"
+            )
+
+    def test_widget_channels_preserved(self):
+        """widget_channels debe sobrevivir el roundtrip por AgentOut."""
+        from api.schemas import agent_out_from_row
+
+        row = {**SAMPLE_AGENT_ROW, "widget_channels": ["voice", "chat"]}
+        result = agent_out_from_row(row)
+        assert result.widget_channels == ["voice", "chat"]
+
+        row2 = {**SAMPLE_AGENT_ROW, "widget_channels": ["voice"]}
+        result2 = agent_out_from_row(row2)
+        assert result2.widget_channels == ["voice"]
 
 
 class TestListAgents:
