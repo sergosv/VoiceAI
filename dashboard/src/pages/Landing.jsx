@@ -22,6 +22,70 @@ function useInView(options = {}) {
   return [ref, inView]
 }
 
+// ── Componente: Reveal on scroll (reutilizable) ──
+function Reveal({ children, delay = 0, direction = 'up', className = '' }) {
+  const [ref, inView] = useInView()
+  const transforms = {
+    up: 'translate-y-8',
+    down: '-translate-y-8',
+    left: 'translate-x-8',
+    right: '-translate-x-8',
+    none: '',
+  }
+  return (
+    <div
+      ref={ref}
+      className={`transition-all duration-700 ${inView ? 'opacity-100 translate-x-0 translate-y-0' : `opacity-0 ${transforms[direction]}`} ${className}`}
+      style={{ transitionDelay: `${delay}ms` }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// ── Componente: Lista con items que aparecen uno por uno ──
+function StaggerList({ items, renderItem, className = '' }) {
+  const [ref, inView] = useInView()
+  return (
+    <ul ref={ref} className={className}>
+      {items.map((item, i) => (
+        <li
+          key={typeof item === 'string' ? item : i}
+          className={`transition-all duration-500 ${inView ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'}`}
+          style={{ transitionDelay: `${i * 80}ms` }}
+        >
+          {renderItem ? renderItem(item, i) : item}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// ── Componente: Stat counter animado ──
+function AnimatedStat({ value, label, suffix = '' }) {
+  const [ref, inView] = useInView()
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (!inView) return
+    const target = parseInt(value)
+    if (isNaN(target)) { setCount(value); return }
+    let current = 0
+    const step = Math.ceil(target / 40)
+    const timer = setInterval(() => {
+      current += step
+      if (current >= target) { setCount(target); clearInterval(timer) }
+      else setCount(current)
+    }, 30)
+    return () => clearInterval(timer)
+  }, [inView, value])
+  return (
+    <div ref={ref} className="text-center">
+      <div className="text-3xl sm:text-4xl font-bold text-accent">{count}{suffix}</div>
+      <div className="text-sm text-gray-400 mt-1">{label}</div>
+    </div>
+  )
+}
+
 // ── SVG: Waveform animado ──
 function Waveform() {
   return (
@@ -264,9 +328,10 @@ export function Landing() {
             <span className="font-bold text-lg">VoiceAI</span>
           </div>
           <div className="flex items-center gap-4">
-            <a href="#features" className="text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Funciones</a>
-            <a href="#pricing" className="text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Precios</a>
-            <Link to="/login" className="text-sm text-gray-400 hover:text-white transition-colors">Iniciar sesion</Link>
+            <a href="#features" className="landing-nav-link text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Funciones</a>
+            <a href="#how-it-works" className="landing-nav-link text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Como funciona</a>
+            <a href="#pricing" className="landing-nav-link text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Precios</a>
+            <Link to="/login" className="landing-nav-link text-sm text-gray-400 hover:text-white transition-colors">Iniciar sesion</Link>
             <Link to="/login" className="px-4 py-2 bg-accent text-black text-sm font-semibold rounded-lg hover:bg-accent/90 transition-colors">
               Empezar gratis
             </Link>
@@ -317,13 +382,13 @@ export function Landing() {
       {/* ── CANALES ── */}
       <section ref={channelRef} className="py-20 px-6" id="channels">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
+          <Reveal className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Un agente, todos los canales</h2>
             <p className="text-gray-400 text-lg max-w-xl mx-auto">
               El mismo agente responde por telefono, WhatsApp, tu sitio web y GoHighLevel.
               Una sola configuracion, experiencia consistente en todos lados.
             </p>
-          </div>
+          </Reveal>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {[
@@ -369,10 +434,10 @@ export function Landing() {
       <section className="py-20 px-6 bg-[#08080d] relative" id="how-it-works">
         <ParticleField count={15} className="opacity-30" />
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
+          <Reveal className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Como funciona</h2>
             <p className="text-gray-400 text-lg">De llamada a cita agendada en segundos</p>
-          </div>
+          </Reveal>
 
           <div className="grid md:grid-cols-2 gap-12 items-center">
             {/* Steps */}
@@ -440,13 +505,13 @@ export function Landing() {
       <section ref={featRef} className="py-20 px-6 relative" id="features">
         <ParticleField count={20} className="opacity-20" />
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
+          <Reveal className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Inteligencia que otros no tienen</h2>
             <p className="text-gray-400 text-lg max-w-xl mx-auto">
               No es solo un chatbot con voz. Es un agente con reglas de negocio,
               memoria, evaluacion de calidad y aprendizaje continuo.
             </p>
-          </div>
+          </Reveal>
 
           <div className="grid md:grid-cols-4 gap-5">
             <FeatureCard inView={featInView} delay={0}
@@ -499,12 +564,12 @@ export function Landing() {
       {/* ── HOOKS VISUAL ── */}
       <section ref={hookRef} className="py-20 px-6 bg-[#08080d]" id="hooks">
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
+          <Reveal className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Ajuste fino con reglas de negocio</h2>
             <p className="text-gray-400 text-lg max-w-xl mx-auto">
               Define reglas que el agente SIEMPRE cumple. No depende del prompt — es codigo determinístico.
             </p>
-          </div>
+          </Reveal>
 
           <div className={`bg-[#12121a] border border-gray-800/50 rounded-2xl p-8 transition-all duration-700 ${hookInView ? 'opacity-100' : 'opacity-0'}`}>
             {/* Hook lifecycle diagram */}
@@ -566,15 +631,16 @@ export function Landing() {
       {/* ── QUE INCLUYE ── */}
       <section className="py-20 px-6" id="pricing">
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
+          <Reveal className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Todo lo que necesitas, en una plataforma</h2>
             <p className="text-gray-400 text-lg max-w-xl mx-auto">
               Sin necesidad de integrar 10 herramientas diferentes. Todo viene incluido.
             </p>
-          </div>
+          </Reveal>
 
           <div className="grid md:grid-cols-2 gap-6 mb-12">
             {/* Columna: Lo que hace el agente */}
+            <Reveal direction="left">
             <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-accent">
@@ -583,8 +649,9 @@ export function Landing() {
                 </svg>
                 Tu agente puede
               </h3>
-              <ul className="space-y-3">
-                {[
+              <StaggerList
+                className="space-y-3"
+                items={[
                   'Atender llamadas telefonicas con voz natural',
                   'Responder WhatsApp automaticamente',
                   'Chat en vivo en tu sitio web (widget embebible)',
@@ -597,18 +664,22 @@ export function Landing() {
                   'Cambiar de idioma automaticamente',
                   'Conectar con cualquier API externa (CRM, ERP, inventarios, pagos)',
                   'Extender sus capacidades con MCP servers (protocolo abierto)',
-                ].map(f => (
-                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-300">
+                ]}
+                renderItem={(f) => (
+                  <div className="landing-check-item flex items-start gap-2.5 text-sm text-gray-300 cursor-default">
                     <svg viewBox="0 0 24 24" className="w-4 h-4 text-accent flex-shrink-0 mt-0.5">
                       <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                     {f}
-                  </li>
-                ))}
-              </ul>
+                  </div>
+                )}
+              />
             </div>
 
+            </Reveal>
+
             {/* Columna: Lo que controlas tu */}
+            <Reveal direction="right" delay={200}>
             <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-6">
               <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-accent">
@@ -617,8 +688,9 @@ export function Landing() {
                 </svg>
                 Tu controlas
               </h3>
-              <ul className="space-y-3">
-                {[
+              <StaggerList
+                className="space-y-3"
+                items={[
                   'Dashboard completo con analytics en tiempo real',
                   'Reglas de negocio inquebrantables (lifecycle hooks)',
                   'Evaluador de calidad con segundo LLM',
@@ -629,19 +701,22 @@ export function Landing() {
                   'Multi-agente con orquestacion inteligente',
                   'API publica + webhooks para integraciones',
                   'Pago con Stripe (tarjeta, OXXO)',
-                ].map(f => (
-                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-300">
+                ]}
+                renderItem={(f) => (
+                  <div className="landing-check-item flex items-start gap-2.5 text-sm text-gray-300 cursor-default">
                     <svg viewBox="0 0 24 24" className="w-4 h-4 text-accent flex-shrink-0 mt-0.5">
                       <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                     {f}
-                  </li>
-                ))}
-              </ul>
+                  </div>
+                )}
+              />
             </div>
+            </Reveal>
           </div>
 
           {/* Stack tecnologico */}
+          <Reveal delay={100}>
           <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-6 mb-12">
             <h3 className="text-center text-sm font-medium text-gray-500 uppercase tracking-wider mb-6">Tecnologia de clase mundial</h3>
             <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-400">
@@ -655,16 +730,18 @@ export function Landing() {
                 { name: 'Cloudflare', desc: 'CDN + Grabaciones' },
                 { name: 'Stripe', desc: 'Pagos' },
               ].map(t => (
-                <div key={t.name} className="text-center px-4">
+                <div key={t.name} className="landing-tech-chip text-center px-5 py-3 rounded-xl border border-transparent cursor-default">
                   <p className="text-white font-medium">{t.name}</p>
                   <p className="text-xs text-gray-500">{t.desc}</p>
                 </div>
               ))}
             </div>
           </div>
+          </Reveal>
 
           {/* Pricing: Proximamente */}
-          <div className="bg-gradient-to-br from-accent/5 to-transparent border-2 border-accent/20 rounded-2xl p-8 text-center">
+          <Reveal>
+          <div className="bg-gradient-to-br from-accent/5 to-transparent border-2 border-accent/20 rounded-2xl p-8 text-center animate-glow-pulse">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-accent text-sm mb-6">
               <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
               Proximamente
@@ -683,20 +760,24 @@ export function Landing() {
               </a>
             </div>
           </div>
+          </Reveal>
         </div>
       </section>
 
       {/* ── CTA FINAL ── */}
-      <section className="py-20 px-6 bg-[#08080d]">
-        <div className="max-w-3xl mx-auto text-center">
+      <section className="py-20 px-6 bg-[#08080d] relative">
+        <ParticleField count={20} className="opacity-20" />
+        <Reveal>
+        <div className="max-w-3xl mx-auto text-center relative z-10">
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">Listo para automatizar tu atencion?</h2>
           <p className="text-gray-400 text-lg mb-8">
             Configura tu primer agente en menos de 5 minutos. Sin tarjeta de credito.
           </p>
-          <Link to="/login" className="inline-block px-10 py-4 bg-accent text-black font-bold rounded-xl hover:bg-accent/90 transition-all hover:scale-105 text-lg">
+          <Link to="/login" className="inline-block px-10 py-4 bg-accent text-black font-bold rounded-xl hover:bg-accent/90 transition-all hover:scale-105 text-lg animate-glow-pulse">
             Crear mi agente gratis
           </Link>
         </div>
+        </Reveal>
       </section>
 
       {/* ── FOOTER ── */}

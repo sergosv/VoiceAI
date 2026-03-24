@@ -228,6 +228,48 @@ body {
 .animate-float { animation: float 3s ease-in-out infinite; }
 .animate-glow-pulse { animation: glow-pulse 3s ease-in-out infinite; }
 
+/* Microinteracciones */
+.landing-check-item {
+  transition: all 0.2s ease;
+}
+.landing-check-item:hover {
+  transform: translateX(4px);
+  color: #e8e8f0;
+}
+.landing-check-item:hover svg {
+  transform: scale(1.3);
+  filter: drop-shadow(0 0 4px rgba(0, 240, 255, 0.5));
+}
+.landing-check-item svg {
+  transition: all 0.2s ease;
+}
+
+.landing-tech-chip {
+  transition: all 0.3s ease;
+}
+.landing-tech-chip:hover {
+  transform: translateY(-2px);
+  background: rgba(0, 240, 255, 0.05);
+  border-color: rgba(0, 240, 255, 0.2);
+}
+
+.landing-nav-link {
+  position: relative;
+}
+.landing-nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 1px;
+  background: #00f0ff;
+  transition: width 0.3s ease;
+}
+.landing-nav-link:hover::after {
+  width: 100%;
+}
+
 .flow-guide-content .example {
   background: #0a0a0f;
   border: 1px solid #2a2a3e;
