@@ -438,6 +438,14 @@
             const unlock = () => { el.play().catch(() => {}); document.removeEventListener('click', unlock); };
             document.addEventListener('click', unlock);
           });
+          // Agent audio arrived — NOW show "Hablando con..."
+          if (voiceState === 'connecting') {
+            voiceState = 'active';
+            fab.classList.remove('connecting');
+            fab.classList.add('active');
+            fab.innerHTML = ICON_STOP;
+            showVoiceStatus('Hablando con ' + (config.agent_name || 'asistente') + '...');
+          }
         }
       });
 
@@ -460,11 +468,8 @@
         return;
       }
 
-      voiceState = 'active';
-      fab.classList.remove('connecting');
-      fab.classList.add('active');
-      fab.innerHTML = ICON_STOP;
-      showVoiceStatus('Hablando con ' + (config.agent_name || 'asistente') + '...');
+      // Mic enabled — keep "connecting" animation until agent audio arrives
+      voiceState = 'connecting';
 
     } catch (err) {
       console.error('[VoiceAI Widget]', err);
@@ -602,8 +607,8 @@
 
   // ── FAB click handler ──
   fab.addEventListener('click', async () => {
-    // If voice call is active, end it
-    if (mode === 'voice' && voiceState === 'active') {
+    // If voice call is active or connecting (mic on, waiting for agent), end it
+    if (mode === 'voice' && (voiceState === 'active' || voiceState === 'connecting')) {
       endVoiceCall();
       return;
     }
