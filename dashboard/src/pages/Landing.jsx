@@ -402,85 +402,123 @@ export function Landing() {
         </div>
       </section>
 
-      {/* ── PRICING ── */}
+      {/* ── QUE INCLUYE ── */}
       <section className="py-20 px-6" id="pricing">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Precios simples, sin sorpresas</h2>
-            <p className="text-gray-400 text-lg">Pagas solo por lo que usas. Sin contratos.</p>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Todo lo que necesitas, en una plataforma</h2>
+            <p className="text-gray-400 text-lg max-w-xl mx-auto">
+              Sin necesidad de integrar 10 herramientas diferentes. Todo viene incluido.
+            </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              {
-                name: 'Starter',
-                price: '$499',
-                period: '/mes MXN',
-                desc: 'Para negocios que empiezan',
-                features: ['1 agente', '500 minutos/mes', '1 canal (voz o WhatsApp)', 'Base de conocimiento', 'Soporte por email'],
-                cta: 'Empezar',
-                accent: false,
-              },
-              {
-                name: 'Pro',
-                price: '$1,499',
-                period: '/mes MXN',
-                desc: 'Para negocios en crecimiento',
-                features: ['3 agentes', '2,000 minutos/mes', 'Todos los canales', 'Hooks + Quality Scoring', 'Insights + Auto-tuning', 'Soporte prioritario'],
-                cta: 'Empezar gratis',
-                accent: true,
-              },
-              {
-                name: 'Enterprise',
-                price: 'Contactanos',
-                period: '',
-                desc: 'Para operaciones grandes',
-                features: ['Agentes ilimitados', 'Minutos ilimitados', 'Multi-agente orquestado', 'SLA 99.9%', 'API publica + webhooks', 'Soporte dedicado'],
-                cta: 'Hablar con ventas',
-                accent: false,
-              },
-            ].map((plan) => (
-              <div
-                key={plan.name}
-                className={`rounded-2xl p-6 ${
-                  plan.accent
-                    ? 'bg-accent/5 border-2 border-accent/40 relative'
-                    : 'bg-[#12121a] border border-gray-800/50'
-                }`}
-              >
-                {plan.accent && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-accent text-black text-xs font-bold rounded-full">
-                    Popular
-                  </div>
-                )}
-                <h3 className="text-xl font-bold mb-1">{plan.name}</h3>
-                <p className="text-gray-400 text-sm mb-4">{plan.desc}</p>
-                <div className="mb-6">
-                  <span className="text-3xl font-bold">{plan.price}</span>
-                  <span className="text-gray-400 text-sm">{plan.period}</span>
+          <div className="grid md:grid-cols-2 gap-6 mb-12">
+            {/* Columna: Lo que hace el agente */}
+            <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-accent">
+                  <path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/>
+                  <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v3M8 22h8" strokeLinecap="round"/>
+                </svg>
+                Tu agente puede
+              </h3>
+              <ul className="space-y-3">
+                {[
+                  'Atender llamadas telefonicas con voz natural',
+                  'Responder WhatsApp automaticamente',
+                  'Chat en vivo en tu sitio web (widget embebible)',
+                  'Agendar citas en Google Calendar',
+                  'Buscar informacion en tus documentos (PDFs, docs)',
+                  'Enviar confirmaciones por WhatsApp',
+                  'Transferir a un humano cuando es necesario',
+                  'Recordar clientes y conversaciones previas',
+                  'Detectar emociones y adaptar su tono',
+                  'Cambiar de idioma automaticamente',
+                ].map(f => (
+                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-300">
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 text-accent flex-shrink-0 mt-0.5">
+                      <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Columna: Lo que controlas tu */}
+            <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-6">
+              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5 text-accent">
+                  <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/>
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Tu controlas
+              </h3>
+              <ul className="space-y-3">
+                {[
+                  'Dashboard completo con analytics en tiempo real',
+                  'Reglas de negocio inquebrantables (lifecycle hooks)',
+                  'Evaluador de calidad con segundo LLM',
+                  'Quality scoring automatico post-llamada',
+                  'Insights y sugerencias de mejora al prompt',
+                  'Grabacion de llamadas con reproductor',
+                  'Flujos visuales de conversacion (Flow Builder)',
+                  'Multi-agente con orquestacion inteligente',
+                  'API publica + webhooks para integraciones',
+                  'Pago con Stripe (tarjeta, OXXO)',
+                ].map(f => (
+                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-300">
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 text-accent flex-shrink-0 mt-0.5">
+                      <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          {/* Stack tecnologico */}
+          <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-6 mb-12">
+            <h3 className="text-center text-sm font-medium text-gray-500 uppercase tracking-wider mb-6">Tecnologia de clase mundial</h3>
+            <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-400">
+              {[
+                { name: 'Gemini', desc: 'LLM' },
+                { name: 'Deepgram', desc: 'Speech-to-Text' },
+                { name: 'Cartesia', desc: 'Text-to-Speech' },
+                { name: 'LiveKit', desc: 'Voz en tiempo real' },
+                { name: 'Twilio', desc: 'Telefonia SIP' },
+                { name: 'Supabase', desc: 'Base de datos' },
+                { name: 'Cloudflare', desc: 'CDN + Grabaciones' },
+                { name: 'Stripe', desc: 'Pagos' },
+              ].map(t => (
+                <div key={t.name} className="text-center px-4">
+                  <p className="text-white font-medium">{t.name}</p>
+                  <p className="text-xs text-gray-500">{t.desc}</p>
                 </div>
-                <ul className="space-y-2 mb-6">
-                  {plan.features.map(f => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-gray-300">
-                      <svg viewBox="0 0 24 24" className="w-4 h-4 text-accent flex-shrink-0">
-                        <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  to="/login"
-                  className={`block text-center py-2.5 rounded-xl font-semibold text-sm transition-all ${
-                    plan.accent
-                      ? 'bg-accent text-black hover:bg-accent/90'
-                      : 'border border-gray-700 text-gray-300 hover:border-gray-500'
-                  }`}
-                >
-                  {plan.cta}
-                </Link>
-              </div>
-            ))}
+              ))}
+            </div>
+          </div>
+
+          {/* Pricing: Proximamente */}
+          <div className="bg-gradient-to-br from-accent/5 to-transparent border-2 border-accent/20 rounded-2xl p-8 text-center">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-accent text-sm mb-6">
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+              Proximamente
+            </div>
+            <h3 className="text-2xl font-bold mb-3">Planes y precios</h3>
+            <p className="text-gray-400 max-w-lg mx-auto mb-6">
+              Estamos afinando los planes para ofrecerte el mejor valor.
+              Modelo pago-por-uso sin contratos ni compromisos.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Link to="/login" className="px-8 py-3 bg-accent text-black font-bold rounded-xl hover:bg-accent/90 transition-all">
+                Registrate para acceso anticipado
+              </Link>
+              <a href="mailto:sergio.sanchez.valle@gmail.com" className="px-8 py-3 border border-gray-700 text-gray-300 font-medium rounded-xl hover:border-gray-500 transition-all">
+                Contactar ventas
+              </a>
+            </div>
           </div>
         </div>
       </section>
