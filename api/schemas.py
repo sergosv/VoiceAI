@@ -119,6 +119,7 @@ class AgentOut(BaseModel):
     stt_config: dict = Field(default_factory=dict)
     agent_mode: str = "pipeline"
     agent_type: str = "inbound"
+    agent_category: str = "service"
     transfer_number: str | None = None
     after_hours_message: str | None = None
     max_call_duration_seconds: int = 300
@@ -151,6 +152,7 @@ class AgentCreateRequest(BaseModel):
     examples: str | None = None
     agent_mode: str = "pipeline"
     agent_type: str = "inbound"
+    agent_category: str = "service"
     transfer_number: str | None = None
     after_hours_message: str | None = None
     max_call_duration_seconds: int = 300
@@ -188,6 +190,7 @@ class AgentUpdateRequest(BaseModel):
     examples: str | None = None
     agent_mode: str | None = None
     agent_type: str | None = None
+    agent_category: str | None = None
     transfer_number: str | None = None
     after_hours_message: str | None = None
     max_call_duration_seconds: int | None = None
@@ -277,6 +280,8 @@ class ClientOut(BaseModel):
     has_realtime_api_key: bool = False
     realtime_voice: str = "alloy"
     realtime_model: str = "gpt-4o-realtime-preview"
+    # BYOT (Bring Your Own Twilio)
+    has_twilio_credentials: bool = False
     # Orchestration
     orchestration_mode: str = "simple"
     orchestrator_model: str = "gemini-2.0-flash"
@@ -351,6 +356,27 @@ class ClientUpdateRequest(BaseModel):
     orchestration_mode: str | None = None
     orchestrator_model: str | None = None
     orchestrator_prompt: str | None = None
+
+
+class SaveTwilioCredentialsRequest(BaseModel):
+    account_sid: str
+    auth_token: str
+
+    @field_validator("account_sid")
+    @classmethod
+    def validate_sid(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith("AC") or len(v) != 34:
+            raise ValueError("Account SID debe empezar con 'AC' y tener 34 caracteres.")
+        return v
+
+    @field_validator("auth_token")
+    @classmethod
+    def validate_token(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) != 32:
+            raise ValueError("Auth Token debe tener 32 caracteres.")
+        return v
 
 
 class AssignPhoneRequest(BaseModel):
@@ -1065,6 +1091,11 @@ def client_out_from_row(row: dict) -> ClientOut:
     data["has_llm_api_key"] = bool(data.pop("llm_api_key", None))
     data["has_tts_api_key"] = bool(data.pop("tts_api_key", None))
     data["has_realtime_api_key"] = bool(data.pop("realtime_api_key", None))
+    # BYOT: convertir presencia de creds Twilio a boolean
+    data["has_twilio_credentials"] = bool(
+        data.pop("twilio_account_sid", None) and data.get("twilio_auth_token")
+    )
+    data.pop("twilio_auth_token", None)
     # Eliminar google_service_account_key del output (es un JSON grande)
     data.pop("google_service_account_key", None)
     return ClientOut(**data)

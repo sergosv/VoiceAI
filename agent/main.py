@@ -230,6 +230,43 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.info("Rejecting call — worker shutting down")
         return
 
+    # ========= PA: CALLER WHITELIST CHECK =========
+    if config.agent.agent_category == "personal_assistant":
+        if not caller_number:
+            logger.warning("PA agent '%s' — no caller number, rejecting", config.agent.slug)
+            return
+        from agent.db import get_supabase as _get_sb
+        _sb = _get_sb()
+        try:
+            auth_result = await asyncio.to_thread(
+                lambda: _sb.table("pa_authorized_callers")
+                .select("id")
+                .eq("agent_id", config.agent.id)
+                .eq("phone_number", caller_number)
+                .limit(1)
+                .execute()
+            )
+            if not auth_result.data:
+                # Intentar sin prefijo/con prefijo (normalización básica)
+                normalized = caller_number.lstrip("+")
+                auth_result2 = await asyncio.to_thread(
+                    lambda: _sb.table("pa_authorized_callers")
+                    .select("id")
+                    .ilike("phone_number", f"%{normalized[-10:]}")
+                    .eq("agent_id", config.agent.id)
+                    .limit(1)
+                    .execute()
+                )
+                if not auth_result2.data:
+                    logger.warning(
+                        "PA agent '%s' — unauthorized caller %s",
+                        config.agent.slug, caller_number,
+                    )
+                    return
+        except Exception:
+            logger.exception("Error checking PA authorization — rejecting for safety")
+            return
+
     # ========= CONCURRENT CALL LIMIT =========
     from agent.db import get_supabase
     sb = get_supabase()

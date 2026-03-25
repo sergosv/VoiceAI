@@ -24,6 +24,7 @@ from api.schemas import (
 from api.services.client_service import build_greeting, build_system_prompt, load_voice_id
 from api.services.phone_service import (
     assign_phone_to_agent,
+    get_client_twilio_creds,
     purchase_phone_number,
     setup_livekit_sip,
     verify_twilio_number,
@@ -163,6 +164,7 @@ async def create_agent(
         "stt_config": stt_config,
         "agent_mode": req.agent_mode,
         "agent_type": req.agent_type,
+        "agent_category": req.agent_category,
         "transfer_number": req.transfer_number,
         "after_hours_message": req.after_hours_message,
         "max_call_duration_seconds": req.max_call_duration_seconds,
@@ -240,7 +242,7 @@ async def update_agent(
 
     # Campos directos del agente
     direct_fields = {
-        "name", "system_prompt", "greeting", "examples", "agent_mode", "agent_type",
+        "name", "system_prompt", "greeting", "examples", "agent_mode", "agent_type", "agent_category",
         "transfer_number", "after_hours_message", "max_call_duration_seconds", "is_active",
         "role_description", "orchestrator_enabled", "orchestrator_priority",
         "conversation_mode", "conversation_flow", "mode_config", "widget_channels",
@@ -406,8 +408,14 @@ async def assign_agent_phone(
     admin: CurrentUser = Depends(require_admin),
 ) -> AgentOut:
     """Asigna un número de teléfono Twilio a un agente (solo admin)."""
+    sb = get_supabase()
+    byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
+
     try:
-        phone_sid = await asyncio.to_thread(verify_twilio_number, req.phone_number)
+        phone_sid = await asyncio.to_thread(
+            verify_twilio_number, req.phone_number,
+            account_sid=byot_sid, auth_token=byot_token,
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -426,7 +434,6 @@ async def assign_agent_phone(
                 detail=f"Error configurando LiveKit SIP: {e}",
             )
 
-    sb = get_supabase()
     row = assign_phone_to_agent(
         sb,
         agent_id=agent_id,
@@ -490,9 +497,34 @@ async def purchase_agent_phone(
     admin: CurrentUser = Depends(require_admin),
 ) -> AgentOut:
     """Compra un número en Twilio y lo asigna a un agente (solo admin)."""
+    sb = get_supabase()
+    byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
+
+    # Si es BYOT, habilitar geo permissions
+    if byot_sid:
+        try:
+            from api.services.phone_service import enable_geo_permission
+            country = "MX"
+            if req.phone_number.startswith("+57"):
+                country = "CO"
+            elif req.phone_number.startswith("+56"):
+                country = "CL"
+            elif req.phone_number.startswith("+54"):
+                country = "AR"
+            elif req.phone_number.startswith("+1"):
+                country = "US"
+            await asyncio.to_thread(
+                enable_geo_permission, country,
+                account_sid=byot_sid, auth_token=byot_token,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger("api.agents").warning("No se pudieron habilitar geo permissions: %s", e)
+
     try:
         phone_sid, normalized_number = await asyncio.to_thread(
-            purchase_phone_number, req.phone_number
+            purchase_phone_number, req.phone_number,
+            account_sid=byot_sid, auth_token=byot_token,
         )
     except Exception as e:
         raise HTTPException(
@@ -508,7 +540,6 @@ async def purchase_agent_phone(
             detail=f"Número comprado ({normalized_number}) pero error configurando SIP: {e}",
         )
 
-    sb = get_supabase()
     row = assign_phone_to_agent(
         sb,
         agent_id=agent_id,

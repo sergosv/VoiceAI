@@ -258,18 +258,31 @@ class VoiceAgent(Agent):
 
     # Herramientas que siempre están disponibles (no requieren enabled_tools)
     _ALWAYS_AVAILABLE = {"transfer_to_human", "recall_memory", "call_api"}
+    # Tools exclusivos del Asistente Personal
+    _PA_TOOLS = {
+        "remember", "forget", "search_my_memory",
+        "create_task", "list_tasks", "complete_task",
+        "create_note", "send_email", "schedule_reminder",
+        "schedule_appointment",
+    }
 
     def filter_disabled_tools(self) -> None:
         """Elimina tools deshabilitados del schema visible al LLM."""
         enabled = self._config.client.enabled_tools or []
-        filtered = [
-            t for t in self.tools
-            if t.id in self._ALWAYS_AVAILABLE or t.id in enabled
-        ]
+        is_pa = self._config.agent.agent_category == "personal_assistant"
+        filtered = []
+        for t in self.tools:
+            if t.id in self._PA_TOOLS:
+                # PA tools solo visibles para asistentes personales
+                if is_pa:
+                    filtered.append(t)
+            elif t.id in self._ALWAYS_AVAILABLE or t.id in enabled:
+                filtered.append(t)
         self.update_tools(filtered)
         logger.info(
-            "Tools activos para '%s': %s",
+            "Tools activos para '%s' (%s): %s",
             self._config.agent.slug,
+            self._config.agent.agent_category,
             [t.id for t in filtered],
         )
 
@@ -728,7 +741,7 @@ class VoiceAgent(Agent):
 
         contact_id = self._memory_contact_id
 
-        return await schedule_reminder_action(
+        result = await schedule_reminder_action(
             description=description,
             datetime_str=datetime_str,
             channel=channel,
@@ -737,6 +750,25 @@ class VoiceAgent(Agent):
             target_number=caller_phone,
             target_contact_id=contact_id,
         )
+
+        # PA: también guardar como memory item para contexto
+        if self._config.agent.agent_category == "personal_assistant":
+            try:
+                from agent.tools.pa_memory_tool import pa_remember
+                from agent.db import get_supabase
+                import json
+                sb = get_supabase()
+                await pa_remember(
+                    sb, agent_id=self._config.agent.id,
+                    client_id=self._config.agent.client_id,
+                    content=f"Recordatorio: {description} — {datetime_str} vía {channel}",
+                    item_type="reminder",
+                    metadata={"datetime": datetime_str, "channel": channel},
+                )
+            except Exception as e:
+                logger.warning("Error guardando reminder en PA memory: %s", e)
+
+        return result
 
     @function_tool()
     async def call_api(
@@ -812,6 +844,174 @@ class VoiceAgent(Agent):
         # Hook: PostToolCall
         await self._run_post_tool_hooks("call_api", tool_input, result)
         return result
+
+    # ── PA (Personal Assistant) Tools ─────────────────────
+
+    @function_tool()
+    async def remember(
+        self, context: RunContext, information: str, category: str = "fact",
+    ) -> str:
+        """Recuerda información importante que tu dueño te dice.
+        Usa esto cuando te digan "recuerda que...", "anota que...", o compartan datos importantes.
+
+        Args:
+            information: Lo que hay que recordar.
+            category: "fact" para datos, "preference" para gustos/preferencias.
+        """
+        from agent.tools.pa_memory_tool import pa_remember
+        from agent.db import get_supabase
+        sb = get_supabase()
+        await pa_remember(
+            sb, agent_id=self._config.agent.id,
+            client_id=self._config.agent.client_id,
+            content=information, item_type=category,
+        )
+        return f"Listo, guardé: {information}"
+
+    @function_tool()
+    async def forget(self, context: RunContext, query: str) -> str:
+        """Olvida información previamente guardada.
+
+        Args:
+            query: Descripción de lo que hay que olvidar.
+        """
+        from agent.tools.pa_memory_tool import pa_forget
+        from agent.db import get_supabase
+        sb = get_supabase()
+        count = await pa_forget(sb, agent_id=self._config.agent.id, query=query)
+        if count > 0:
+            return f"Listo, olvidé lo relacionado con: {query}"
+        return f"No encontré nada guardado sobre: {query}"
+
+    @function_tool()
+    async def search_my_memory(self, context: RunContext, query: str) -> str:
+        """Busca en toda tu memoria algo que tu dueño te haya dicho antes.
+
+        Args:
+            query: Qué buscar en la memoria.
+        """
+        from agent.tools.pa_memory_tool import pa_search_memory
+        from agent.db import get_supabase
+        sb = get_supabase()
+        results = await pa_search_memory(
+            sb, agent_id=self._config.agent.id, query=query, limit=5,
+        )
+        if not results:
+            return f"No encontré nada guardado sobre: {query}"
+        lines = []
+        for r in results:
+            tipo = r.get("item_type", "")
+            content = r.get("content", "")
+            lines.append(f"[{tipo}] {content}")
+        return "Encontré esto en mi memoria:\n" + "\n".join(lines)
+
+    @function_tool()
+    async def create_task(
+        self, context: RunContext, description: str, due_date: str = "",
+    ) -> str:
+        """Crea una tarea o pendiente.
+
+        Args:
+            description: Descripción de la tarea.
+            due_date: Fecha límite en formato YYYY-MM-DD (opcional, dejar vacío si no aplica).
+        """
+        from agent.tools.pa_tasks_tool import pa_create_task
+        from agent.db import get_supabase
+        sb = get_supabase()
+        await pa_create_task(
+            sb, agent_id=self._config.agent.id,
+            client_id=self._config.agent.client_id,
+            description=description,
+            due_date=due_date or None,
+        )
+        due_str = f" para el {due_date}" if due_date else ""
+        return f"Tarea creada: {description}{due_str}"
+
+    @function_tool()
+    async def list_tasks(self, context: RunContext, show_completed: bool = False) -> str:
+        """Lista las tareas pendientes.
+
+        Args:
+            show_completed: Si incluir tareas ya completadas.
+        """
+        from agent.tools.pa_tasks_tool import pa_list_tasks
+        from agent.db import get_supabase
+        sb = get_supabase()
+        tasks = await pa_list_tasks(
+            sb, agent_id=self._config.agent.id,
+            include_completed=show_completed,
+        )
+        if not tasks:
+            return "No tienes tareas pendientes."
+        lines = []
+        for t in tasks:
+            status = "✓" if t.get("is_completed") else "○"
+            meta = t.get("metadata") or {}
+            if isinstance(meta, str):
+                import json
+                meta = json.loads(meta)
+            due = meta.get("due_date", "")
+            due_str = f" (para el {due})" if due else ""
+            lines.append(f"{status} {t['content']}{due_str}")
+        return "Tus tareas:\n" + "\n".join(lines)
+
+    @function_tool()
+    async def complete_task(self, context: RunContext, task_description: str) -> str:
+        """Marca una tarea como completada.
+
+        Args:
+            task_description: Descripción de la tarea a completar.
+        """
+        from agent.tools.pa_tasks_tool import pa_complete_task
+        from agent.db import get_supabase
+        sb = get_supabase()
+        completed = await pa_complete_task(
+            sb, agent_id=self._config.agent.id, task_query=task_description,
+        )
+        if completed:
+            return f"Listo, marqué como completada: {task_description}"
+        return f"No encontré una tarea pendiente que coincida con: {task_description}"
+
+    @function_tool()
+    async def create_note(
+        self, context: RunContext, content: str, title: str = "",
+    ) -> str:
+        """Crea una nota.
+
+        Args:
+            content: Contenido de la nota.
+            title: Título opcional de la nota.
+        """
+        from agent.tools.pa_tasks_tool import pa_create_note
+        from agent.db import get_supabase
+        sb = get_supabase()
+        await pa_create_note(
+            sb, agent_id=self._config.agent.id,
+            client_id=self._config.agent.client_id,
+            content=content, title=title or None,
+        )
+        title_str = f" '{title}'" if title else ""
+        return f"Nota{title_str} guardada."
+
+    @function_tool()
+    async def send_email(
+        self, context: RunContext, to: str, subject: str, body: str,
+    ) -> str:
+        """Envía un email en nombre de tu dueño.
+        Siempre confirma con tu dueño el destinatario y contenido antes de enviar.
+
+        Args:
+            to: Email del destinatario.
+            subject: Asunto del email.
+            body: Cuerpo del email.
+        """
+        from agent.tools.pa_email_tool import pa_send_email
+        from agent.db import get_supabase
+        sb = get_supabase()
+        return await pa_send_email(
+            sb, agent_id=self._config.agent.id,
+            to_email=to, subject=subject, body=body,
+        )
 
 
 class FlowVoiceAgent(VoiceAgent):
@@ -1377,6 +1577,36 @@ def build_agent(
         return _build_mode_agent(
             config, memory_context, mcp_servers, api_integrations
         )
+
+    # ── PA: construir prompt especializado de asistente personal ──
+    if config.agent.agent_category == "personal_assistant":
+        from agent.pa_context import build_pa_prompt, build_pa_system_context
+        from agent.db import get_supabase as _pa_sb
+        try:
+            pa_ctx = asyncio.get_event_loop().run_until_complete(
+                build_pa_system_context(_pa_sb(), config.agent.id)
+            ) if not asyncio.get_event_loop().is_running() else ""
+        except Exception:
+            pa_ctx = ""
+        augmented_prompt = build_pa_prompt(
+            owner_instructions=config.agent.system_prompt,
+            pa_context=pa_ctx,
+            memory_context=memory_context,
+        )
+        augmented_prompt += _voice_rules(config)
+        updated_agent = replace(config.agent, system_prompt=augmented_prompt)
+        config = ResolvedConfig(agent=updated_agent, client=config.client)
+        agent = VoiceAgent(
+            config,
+            mcp_servers=mcp_servers,
+            api_integrations=api_integrations,
+            language_detector=language_detector,
+        )
+        logger.info(
+            "PA agent creado: '%s' / '%s'",
+            config.client.name, config.agent.name,
+        )
+        return agent
 
     # Progressive Context Disclosure (Anthropic best practice):
     # Core prompt = personalidad + contexto temporal + reglas de voz (compactas)

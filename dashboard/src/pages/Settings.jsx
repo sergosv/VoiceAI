@@ -66,7 +66,7 @@ const PROVIDER_LABELS = {
   openai: 'OpenAI TTS',
 }
 
-const TABS = [
+const SERVICE_TABS = [
   { key: 'general', label: 'General', icon: Bot },
   { key: 'voice', label: 'Voz', icon: Volume2 },
   { key: 'calls', label: 'Llamadas', icon: Phone },
@@ -77,6 +77,17 @@ const TABS = [
   { key: 'widget', label: 'Widget', icon: Globe },
   { key: 'hooks', label: 'Reglas', icon: Webhook },
   { key: 'insights', label: 'Insights', icon: Brain },
+  { key: 'advanced', label: 'Avanzado', icon: Settings2 },
+]
+
+const PA_TABS = [
+  { key: 'general', label: 'General', icon: Bot },
+  { key: 'voice', label: 'Voz', icon: Volume2 },
+  { key: 'pa_callers', label: 'Numeros', icon: Phone },
+  { key: 'pa_memory', label: 'Memoria', icon: Brain },
+  { key: 'pa_tasks', label: 'Tareas', icon: Check },
+  { key: 'pa_email', label: 'Email', icon: Globe },
+  { key: 'calls', label: 'Llamadas', icon: Phone },
   { key: 'advanced', label: 'Avanzado', icon: Settings2 },
 ]
 
@@ -144,6 +155,334 @@ function ApiKeyField({ label, hasKey, value, onChange, onClear }) {
     </div>
   )
 }
+
+function ByotTwilioSection({ clientId, client, setClient }) {
+  const [sid, setSid] = useState('')
+  const [token, setToken] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const { addToast } = useToast()
+
+  const hasCreds = client?.has_twilio_credentials
+
+  const handleSave = async () => {
+    if (!sid.startsWith('AC') || sid.length !== 34) {
+      addToast('Account SID debe empezar con AC y tener 34 caracteres', 'error')
+      return
+    }
+    if (token.length !== 32) {
+      addToast('Auth Token debe tener 32 caracteres', 'error')
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await api.put(`/clients/${clientId}/twilio-credentials`, {
+        account_sid: sid, auth_token: token,
+      })
+      setClient(res.data)
+      setSid('')
+      setToken('')
+      addToast('Credenciales de Twilio verificadas y guardadas', 'success')
+    } catch (err) {
+      addToast(err.response?.data?.detail || 'Error guardando credenciales', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      const res = await api.delete(`/clients/${clientId}/twilio-credentials`)
+      setClient(res.data)
+      addToast('Credenciales de Twilio eliminadas', 'success')
+    } catch (err) {
+      addToast(err.response?.data?.detail || 'Error eliminando credenciales', 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+        <Phone size={16} className="text-orange-400" />
+        Twilio — Cuenta propia (BYOT)
+      </h2>
+      <p className="text-xs text-text-muted">
+        Conecta tu propia cuenta de Twilio para usar tus numeros y pagar la telefonia directamente.
+        Si no configuras esto, se usara la cuenta de la plataforma.
+      </p>
+
+      {hasCreds ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 px-3 py-2 bg-success/10 border border-success/20 rounded-lg text-sm">
+            <Check size={14} className="text-success" />
+            <span className="text-success">Cuenta Twilio conectada</span>
+          </div>
+          <Button variant="secondary" onClick={handleDelete} disabled={deleting} className="text-xs text-red-400 hover:text-red-300">
+            {deleting ? 'Eliminando...' : 'Desconectar cuenta Twilio'}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Input
+            label="Account SID"
+            value={sid}
+            onChange={e => setSid(e.target.value.trim())}
+            placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          />
+          <Input
+            label="Auth Token"
+            type="password"
+            value={token}
+            onChange={e => setToken(e.target.value.trim())}
+            placeholder="32 caracteres"
+          />
+          <Button onClick={handleSave} disabled={saving || !sid || !token}>
+            {saving ? 'Verificando...' : 'Verificar y conectar'}
+          </Button>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+
+// ── PA Tab Components ──────────────────────────────────
+
+function PaCallersTab({ agentId }) {
+  const [callers, setCallers] = useState([])
+  const [phone, setPhone] = useState('')
+  const [label, setLabel] = useState('')
+  const [loading, setLoading] = useState(true)
+  const { addToast } = useToast()
+
+  const load = async () => {
+    try {
+      const data = await api.get(`/agents/${agentId}/pa/callers`)
+      setCallers(data)
+    } catch (e) { addToast('Error cargando callers', 'error') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [agentId])
+
+  const handleAdd = async () => {
+    if (!phone) return
+    try {
+      await api.post(`/agents/${agentId}/pa/callers`, { phone_number: phone, label: label || null, is_owner: callers.length === 0 })
+      setPhone(''); setLabel('')
+      load()
+      addToast('Numero autorizado agregado', 'success')
+    } catch (e) { addToast(e.response?.data?.detail || 'Error', 'error') }
+  }
+
+  const handleRemove = async (id) => {
+    await api.delete(`/agents/${agentId}/pa/callers/${id}`)
+    load()
+  }
+
+  if (loading) return <Card className="p-6"><Spinner /></Card>
+
+  return (
+    <Card className="space-y-4">
+      <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+        <Phone size={16} className="text-cyan-400" />
+        Numeros autorizados
+      </h2>
+      <p className="text-xs text-text-muted">Solo estos numeros pueden hablar con tu asistente personal.</p>
+
+      <div className="space-y-2">
+        {callers.map(c => (
+          <div key={c.id} className="flex items-center justify-between px-3 py-2 bg-bg-secondary rounded-lg">
+            <div>
+              <span className="font-mono text-sm">{c.phone_number}</span>
+              {c.label && <span className="text-text-muted text-xs ml-2">({c.label})</span>}
+              {c.is_owner && <span className="text-cyan-400 text-xs ml-2">Propietario</span>}
+            </div>
+            <button onClick={() => handleRemove(c.id)} className="text-red-400 text-xs hover:text-red-300 cursor-pointer">Eliminar</button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <Input placeholder="+52..." value={phone} onChange={e => setPhone(e.target.value)} className="flex-1" />
+        <Input placeholder="Etiqueta (opcional)" value={label} onChange={e => setLabel(e.target.value)} className="w-40" />
+        <Button onClick={handleAdd} disabled={!phone}>Agregar</Button>
+      </div>
+    </Card>
+  )
+}
+
+function PaMemoryTab({ agentId }) {
+  const [items, setItems] = useState([])
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('')
+  const [loading, setLoading] = useState(true)
+  const { addToast } = useToast()
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ limit: '50' })
+      if (filter) params.set('item_type', filter)
+      if (search) params.set('q', search)
+      const data = await api.get(`/agents/${agentId}/pa/memory?${params}`)
+      setItems(data)
+    } catch (e) { addToast('Error cargando memoria', 'error') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [agentId, filter])
+
+  const handleDelete = async (id) => {
+    await api.delete(`/agents/${agentId}/pa/memory/${id}`)
+    setItems(items.filter(i => i.id !== id))
+  }
+
+  const TYPE_LABELS = { fact: 'Dato', preference: 'Preferencia', task: 'Tarea', note: 'Nota', reminder: 'Recordatorio' }
+  const TYPE_COLORS = { fact: 'text-blue-400', preference: 'text-purple-400', task: 'text-yellow-400', note: 'text-green-400', reminder: 'text-orange-400' }
+
+  return (
+    <Card className="space-y-4">
+      <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+        <Brain size={16} className="text-cyan-400" />
+        Memoria del asistente
+      </h2>
+
+      <div className="flex gap-2">
+        <Input placeholder="Buscar en memoria..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
+        <Button onClick={load} variant="secondary">Buscar</Button>
+        <select value={filter} onChange={e => setFilter(e.target.value)}
+          className="px-3 py-1.5 bg-bg-secondary border border-border rounded-lg text-sm">
+          <option value="">Todos</option>
+          <option value="fact">Datos</option>
+          <option value="preference">Preferencias</option>
+          <option value="note">Notas</option>
+          <option value="reminder">Recordatorios</option>
+        </select>
+      </div>
+
+      {loading ? <Spinner /> : (
+        <div className="space-y-1 max-h-96 overflow-y-auto">
+          {items.length === 0 && <p className="text-text-muted text-sm py-4 text-center">Sin items en memoria</p>}
+          {items.map(item => (
+            <div key={item.id} className="flex items-start justify-between px-3 py-2 bg-bg-secondary rounded-lg">
+              <div className="flex-1">
+                <span className={`text-xs font-medium ${TYPE_COLORS[item.item_type] || 'text-text-muted'}`}>
+                  {TYPE_LABELS[item.item_type] || item.item_type}
+                </span>
+                <p className="text-sm mt-0.5">{item.content}</p>
+              </div>
+              <button onClick={() => handleDelete(item.id)} className="text-red-400/50 text-xs hover:text-red-400 ml-2 shrink-0 cursor-pointer">x</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function PaTasksTab({ agentId }) {
+  const [tasks, setTasks] = useState([])
+  const [showCompleted, setShowCompleted] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const { addToast } = useToast()
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const data = await api.get(`/agents/${agentId}/pa/tasks?completed=${showCompleted}`)
+      setTasks(data)
+    } catch (e) { addToast('Error cargando tareas', 'error') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [agentId, showCompleted])
+
+  const toggleComplete = async (task) => {
+    try {
+      await api.patch(`/agents/${agentId}/pa/tasks/${task.id}`, { is_completed: !task.is_completed })
+      load()
+    } catch (e) { addToast('Error actualizando tarea', 'error') }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+          <Check size={16} className="text-cyan-400" />
+          Tareas
+        </h2>
+        <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+          <input type="checkbox" checked={showCompleted} onChange={e => setShowCompleted(e.target.checked)} className="accent-cyan-400" />
+          Mostrar completadas
+        </label>
+      </div>
+
+      {loading ? <Spinner /> : (
+        <div className="space-y-1">
+          {tasks.length === 0 && <p className="text-text-muted text-sm py-4 text-center">Sin tareas</p>}
+          {tasks.map(t => (
+            <div key={t.id} className="flex items-center gap-3 px-3 py-2 bg-bg-secondary rounded-lg">
+              <button onClick={() => toggleComplete(t)}
+                className={`w-5 h-5 rounded border flex items-center justify-center shrink-0 cursor-pointer ${t.is_completed ? 'bg-cyan-500 border-cyan-500' : 'border-border hover:border-cyan-400'}`}>
+                {t.is_completed && <Check size={12} className="text-white" />}
+              </button>
+              <span className={`text-sm flex-1 ${t.is_completed ? 'line-through text-text-muted' : ''}`}>{t.content}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function PaEmailTab({ agentId }) {
+  const [config, setConfig] = useState({ from_name: '', from_email: '', reply_to: '', signature: '' })
+  const [hasConfig, setHasConfig] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const { addToast } = useToast()
+
+  useEffect(() => {
+    api.get(`/agents/${agentId}/pa/email-config`).then(data => {
+      if (data) { setConfig(data); setHasConfig(true) }
+    }).catch(() => {})
+  }, [agentId])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await api.put(`/agents/${agentId}/pa/email-config`, config)
+      setConfig(res); setHasConfig(true)
+      addToast('Configuracion de email guardada', 'success')
+    } catch (e) { addToast(e.response?.data?.detail || 'Error', 'error') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Card className="space-y-4">
+      <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+        <Globe size={16} className="text-cyan-400" />
+        Configuracion de email
+      </h2>
+      <p className="text-xs text-text-muted">Configura como se envian los emails desde tu asistente.</p>
+
+      <Input label="Nombre del remitente" placeholder="Asistente de Dr. Garcia"
+        value={config.from_name} onChange={e => setConfig(c => ({ ...c, from_name: e.target.value }))} />
+      <Input label="Email del remitente" placeholder="asistente@tudominio.com"
+        value={config.from_email} onChange={e => setConfig(c => ({ ...c, from_email: e.target.value }))} />
+      <Input label="Reply-to (tu email real)" placeholder="tu@email.com"
+        value={config.reply_to || ''} onChange={e => setConfig(c => ({ ...c, reply_to: e.target.value }))} />
+      <Textarea label="Firma del email" rows={3} placeholder="--\nDr. Garcia\nClinica Dental\nTel: +52..."
+        value={config.signature || ''} onChange={e => setConfig(c => ({ ...c, signature: e.target.value }))} />
+
+      <Button onClick={handleSave} disabled={saving || !config.from_name || !config.from_email}>
+        <Save size={16} className="mr-2 inline" />
+        {saving ? 'Guardando...' : 'Guardar configuracion'}
+      </Button>
+    </Card>
+  )
+}
+
 
 function CostEstimator({ sttProvider, llmProvider, ttsProvider }) {
   const [estimate, setEstimate] = useState(null)
@@ -1328,6 +1667,9 @@ export function Settings() {
             }`}
           >
             {agent.name}
+            {agent.agent_category === 'personal_assistant' && (
+              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-medium">PA</span>
+            )}
             {agent.phone_number && (
               <span className="ml-2 text-xs text-text-muted font-mono">{agent.phone_number}</span>
             )}
@@ -1386,7 +1728,7 @@ export function Settings() {
         <>
           {/* Tab navigation */}
           <div className="flex border-b border-border">
-            {TABS.map(tab => {
+            {(selectedAgent?.agent_category === 'personal_assistant' ? PA_TABS : SERVICE_TABS).map(tab => {
               const Icon = tab.icon
               return (
                 <button
@@ -2060,6 +2402,7 @@ export function Settings() {
 
             {/* ── Llamadas Tab ── */}
             {activeTab === 'calls' && (
+              <div className="space-y-6">
               <Card className="space-y-4">
                 <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
                   <Phone size={16} className="text-accent" />
@@ -2114,6 +2457,10 @@ export function Settings() {
                   </p>
                 </div>
               </Card>
+
+              {/* ── BYOT: Bring Your Own Twilio ── */}
+              <ByotTwilioSection clientId={clientId} client={client} setClient={setClient} />
+              </div>
             )}
 
             {/* ── WhatsApp Tab ── */}
@@ -2639,6 +2986,26 @@ export function Settings() {
                   </Button>
                 </Card>
               </div>
+            )}
+
+            {/* ── PA: Números autorizados ── */}
+            {activeTab === 'pa_callers' && selectedAgent && (
+              <PaCallersTab agentId={selectedAgent.id} />
+            )}
+
+            {/* ── PA: Memoria ── */}
+            {activeTab === 'pa_memory' && selectedAgent && (
+              <PaMemoryTab agentId={selectedAgent.id} />
+            )}
+
+            {/* ── PA: Tareas ── */}
+            {activeTab === 'pa_tasks' && selectedAgent && (
+              <PaTasksTab agentId={selectedAgent.id} />
+            )}
+
+            {/* ── PA: Email ── */}
+            {activeTab === 'pa_email' && selectedAgent && (
+              <PaEmailTab agentId={selectedAgent.id} />
             )}
           </div>
 

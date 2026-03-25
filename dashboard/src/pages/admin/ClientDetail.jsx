@@ -253,6 +253,7 @@ export function ClientDetail() {
     try {
       const params = new URLSearchParams({ country: searchForm.country, limit: '10' })
       if (searchForm.area_code) params.set('area_code', searchForm.area_code)
+      if (id) params.set('client_id', id)
       const numbers = await api.get(`/clients/available-numbers?${params}`)
       setAvailableNumbers(numbers)
       if (numbers.length === 0) toast.info('No se encontraron numeros disponibles')
@@ -722,6 +723,12 @@ export function ClientDetail() {
 
       {/* Modal: Asignar telefono a agente */}
       <Modal open={showPhoneModal} onClose={() => setShowPhoneModal(false)} title="Asignar telefono al agente" maxWidth="max-w-2xl">
+        {client?.has_twilio_credentials && (
+          <div className="flex items-center gap-2 px-3 py-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-lg text-sm">
+            <Phone size={14} className="text-orange-400" />
+            <span className="text-orange-300">Usa cuenta Twilio propia (BYOT)</span>
+          </div>
+        )}
         <div className="flex gap-1 mb-4 border-b border-border">
           <button
             className={`px-4 py-2 text-sm font-medium cursor-pointer ${phoneTab === 'search' ? 'text-accent border-b-2 border-accent' : 'text-text-muted hover:text-text-secondary'}`}

@@ -64,6 +64,7 @@ class AgentConfig:
     stt_config: dict = field(default_factory=dict)
     agent_mode: str = "pipeline"
     agent_type: str = "inbound"
+    agent_category: str = "service"
     transfer_number: str | None = None
     after_hours_message: str | None = None
     max_call_duration_seconds: int = 300
@@ -499,6 +500,7 @@ def _rows_to_resolved(agent_row: dict) -> ResolvedConfig:
         stt_config=agent_row.get("stt_config") or {},
         agent_mode=agent_row.get("agent_mode", "pipeline"),
         agent_type=agent_row.get("agent_type", "inbound"),
+        agent_category=agent_row.get("agent_category", "service"),
         transfer_number=agent_row.get("transfer_number"),
         after_hours_message=agent_row.get("after_hours_message"),
         max_call_duration_seconds=agent_row.get("max_call_duration_seconds", 300),

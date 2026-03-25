@@ -36,6 +36,7 @@ SAMPLE_AGENT_ROW = {
     "stt_config": {"provider": "deepgram"},
     "agent_mode": "pipeline",
     "agent_type": "inbound",
+    "agent_category": "service",
     "transfer_number": None,
     "after_hours_message": None,
     "max_call_duration_seconds": 300,

@@ -6,12 +6,12 @@ import { useToast } from '../context/ToastContext'
 import {
   Target, Building2, ArrowDownToLine, ArrowUpFromLine, RefreshCw,
   FileText, Workflow, ChevronLeft, ChevronRight, Sparkles, Check, Copy,
-  Loader2, ExternalLink,
+  Loader2, ExternalLink, UserCircle, Phone,
 } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 
-const STEPS = ['objective', 'vertical', 'direction', 'template', 'customize', 'result']
-const STEP_LABELS = ['Objetivo', 'Industria', 'Direccion', 'Plantilla', 'Personalizar', 'Resultado']
+const STEPS = ['category', 'objective', 'vertical', 'direction', 'template', 'customize', 'result']
+const STEP_LABELS = ['Tipo', 'Objetivo', 'Industria', 'Direccion', 'Plantilla', 'Personalizar', 'Resultado']
 
 export function AgentWizard() {
   const { user } = useAuth()
@@ -26,6 +26,7 @@ export function AgentWizard() {
   const [copied, setCopied] = useState(false)
 
   // Selecciones
+  const [selectedCategory, setSelectedCategory] = useState(null) // 'service' | 'personal_assistant'
   const [selectedObjective, setSelectedObjective] = useState(null)
   const [selectedVertical, setSelectedVertical] = useState(null)
   const [selectedDirection, setSelectedDirection] = useState(null)
@@ -72,7 +73,7 @@ export function AgentWizard() {
         ...config,
       })
       setResult(data)
-      setStep(5)
+      setStep(6)
     } catch (err) {
       toast.error(err.message || 'Error al generar')
     } finally {
@@ -108,8 +109,38 @@ export function AgentWizard() {
         ))}
       </div>
 
-      {/* ===== PASO 1: OBJETIVO ===== */}
+      {/* ===== PASO 0: CATEGORÍA ===== */}
       {step === 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-1">Que tipo de agente quieres crear?</h2>
+          <p className="text-text-muted text-sm mb-6">Esto determina las capacidades y el flujo de configuracion</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <button
+              onClick={() => { setSelectedCategory('service'); nextStep() }}
+              className="border rounded-xl p-6 text-left transition-all hover:border-accent/50 hover:bg-accent/5 border-border bg-bg-secondary cursor-pointer"
+            >
+              <Building2 size={32} className="text-accent mb-3" />
+              <h3 className="font-semibold text-base mb-1">Agente de Atencion</h3>
+              <p className="text-text-muted text-sm">
+                Atiende llamadas de tus clientes. Responde preguntas, agenda citas, toma mensajes y usa tus herramientas.
+              </p>
+            </button>
+            <button
+              onClick={() => { setSelectedCategory('personal_assistant'); nextStep() }}
+              className="border rounded-xl p-6 text-left transition-all hover:border-cyan-400/50 hover:bg-cyan-400/5 border-border bg-bg-secondary cursor-pointer"
+            >
+              <UserCircle size={32} className="text-cyan-400 mb-3" />
+              <h3 className="font-semibold text-base mb-1">Asistente Personal</h3>
+              <p className="text-text-muted text-sm">
+                Tu asistente privado por voz. Recuerda cosas, gestiona tareas, envia emails y programa recordatorios.
+              </p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== PASO 1: OBJETIVO ===== */}
+      {step === 1 && selectedCategory === 'service' && (
         <div>
           <h2 className="text-lg font-semibold mb-1">Para que necesitas tu agente?</h2>
           <p className="text-text-muted text-sm mb-6">Selecciona el objetivo principal</p>
@@ -127,8 +158,76 @@ export function AgentWizard() {
         </div>
       )}
 
+      {/* ===== PASO 1 (PA): Config rápida del asistente personal ===== */}
+      {step === 1 && selectedCategory === 'personal_assistant' && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold mb-1">Configura tu asistente personal</h2>
+          <p className="text-text-muted text-sm mb-4">Define como se comportara tu asistente</p>
+          <input
+            className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm text-text-primary"
+            placeholder="Nombre del asistente (ej: Max, Sofia)"
+            value={config.agent_name}
+            onChange={e => setConfig(c => ({ ...c, agent_name: e.target.value }))}
+          />
+          <textarea
+            className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm text-text-primary h-24"
+            placeholder="Instrucciones de comportamiento (ej: Eres mi asistente ejecutivo, habla de forma profesional y concisa)"
+            value={config.tone}
+            onChange={e => setConfig(c => ({ ...c, tone: e.target.value }))}
+          />
+          <input
+            className="w-full px-3 py-2 bg-bg-secondary border border-border rounded-lg text-sm text-text-primary"
+            placeholder="Tu numero de telefono (+52...)"
+            value={config.transfer_phone}
+            onChange={e => setConfig(c => ({ ...c, transfer_phone: e.target.value }))}
+          />
+          <p className="text-text-muted text-xs">Este numero se agregara automaticamente como caller autorizado.</p>
+          <div className="flex gap-3 pt-2">
+            <button onClick={prevStep} className="px-4 py-2 border border-border rounded-lg text-sm hover:bg-bg-secondary cursor-pointer">
+              <ChevronLeft size={14} className="inline mr-1" />Atras
+            </button>
+            <button
+              onClick={async () => {
+                if (!config.agent_name) { toast.error('Nombre del asistente es requerido'); return }
+                setGenerating(true)
+                try {
+                  const agentRes = await api.post(`/clients/${user.client_id}/agents`, {
+                    name: config.agent_name,
+                    agent_category: 'personal_assistant',
+                    agent_type: 'inbound',
+                    system_prompt: config.tone || 'Eres un asistente personal eficiente y amable.',
+                    greeting: `Hola, soy ${config.agent_name}, tu asistente personal. En que te puedo ayudar?`,
+                  })
+                  // Agregar caller autorizado si hay teléfono
+                  if (config.transfer_phone && agentRes.id) {
+                    try {
+                      await api.post(`/agents/${agentRes.id}/pa/callers`, {
+                        phone_number: config.transfer_phone,
+                        label: 'Mi telefono',
+                        is_owner: true,
+                      })
+                    } catch (e) { console.warn('Error adding caller:', e) }
+                  }
+                  toast.success('Asistente personal creado')
+                  navigate('/app/settings')
+                } catch (err) {
+                  toast.error(err.message || 'Error creando asistente')
+                } finally {
+                  setGenerating(false)
+                }
+              }}
+              disabled={generating || !config.agent_name}
+              className="px-6 py-2 bg-cyan-500 hover:bg-cyan-400 text-white rounded-lg text-sm font-medium disabled:opacity-50 cursor-pointer"
+            >
+              {generating ? <Loader2 size={14} className="inline mr-1 animate-spin" /> : <Sparkles size={14} className="inline mr-1" />}
+              Crear asistente
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ===== PASO 2: VERTICAL ===== */}
-      {step === 1 && (
+      {step === 2 && (
         <div>
           <h2 className="text-lg font-semibold mb-1">Tu industria?</h2>
           <p className="text-text-muted text-sm mb-6">Esto personaliza las preguntas y el vocabulario del agente</p>
@@ -150,7 +249,7 @@ export function AgentWizard() {
       )}
 
       {/* ===== PASO 3: DIRECCION ===== */}
-      {step === 2 && (
+      {step === 3 && (
         <div>
           <h2 className="text-lg font-semibold mb-1">Como llegan tus prospectos?</h2>
           <p className="text-text-muted text-sm mb-6">Esto cambia el tono y flujo del agente</p>
@@ -176,7 +275,7 @@ export function AgentWizard() {
       )}
 
       {/* ===== PASO 4: SELECCIONAR TEMPLATE + MODO ===== */}
-      {step === 3 && (
+      {step === 4 && (
         <div>
           <h2 className="text-lg font-semibold mb-1">Elige una plantilla</h2>
           <p className="text-text-muted text-sm mb-6">Selecciona la que mejor se ajuste a tu necesidad</p>
@@ -251,7 +350,7 @@ export function AgentWizard() {
       )}
 
       {/* ===== PASO 5: PERSONALIZAR ===== */}
-      {step === 4 && (
+      {step === 5 && (
         <div>
           <h2 className="text-lg font-semibold mb-1">Personaliza tu agente</h2>
           <p className="text-text-muted text-sm mb-6">Estos datos hacen que el agente suene como parte de tu equipo</p>
@@ -313,7 +412,7 @@ export function AgentWizard() {
       )}
 
       {/* ===== PASO 6: RESULTADO ===== */}
-      {step === 5 && result && (
+      {step === 6 && result && (
         <div>
           <Card className="bg-accent/10 border-accent/30 mb-6">
             <div className="flex items-center gap-2">

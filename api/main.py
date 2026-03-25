@@ -57,7 +57,7 @@ from api.middleware.auth import CurrentUser, require_admin
 from api.routes import (
     admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, calls, campaigns,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
-    documents, evaluations, evolution, flow_builder, ghl, hooks, insights, looptalk, mcp, proactive,
+    documents, evaluations, evolution, flow_builder, ghl, hooks, insights, looptalk, mcp, pa, proactive,
     templates, v1, voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks,
     widget,
 )
@@ -319,6 +319,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(voices.router, prefix="/api/voices", tags=["voices"])
 app.include_router(clients.router, prefix="/api/clients", tags=["clients"])
 app.include_router(agents.router, prefix="/api/clients", tags=["agents"])
+app.include_router(pa.router, prefix="/api/agents", tags=["personal-assistant"])
 app.include_router(hooks.router, prefix="/api/clients", tags=["hooks"])
 app.include_router(insights.router, prefix="/api/clients", tags=["insights"])
 app.include_router(calls.router, prefix="/api/calls", tags=["calls"])

@@ -21,10 +21,12 @@ from api.schemas import (
     MessageResponse,
     PromptTemplateOut,
     PurchaseNumberRequest,
+    SaveTwilioCredentialsRequest,
     client_out_from_row,
 )
 from api.services.phone_service import (
     assign_phone_to_client,
+    get_client_twilio_creds,
     purchase_phone_number,
     search_available_numbers,
     setup_livekit_sip,
@@ -115,12 +117,18 @@ async def list_available_numbers(
     country: str = "MX",
     area_code: str | None = None,
     limit: int = 10,
+    client_id: str | None = None,
     admin: CurrentUser = Depends(require_admin),
 ) -> list[AvailableNumberOut]:
-    """Busca números disponibles en Twilio (solo admin)."""
+    """Busca números disponibles en Twilio (solo admin). Si el cliente tiene BYOT, usa su cuenta."""
+    byot_sid, byot_token = None, None
+    if client_id:
+        sb = get_supabase()
+        byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
     try:
         numbers = await asyncio.to_thread(
-            search_available_numbers, country, area_code, limit
+            search_available_numbers, country, area_code, limit,
+            account_sid=byot_sid, auth_token=byot_token,
         )
     except Exception as e:
         raise HTTPException(
@@ -137,10 +145,35 @@ async def purchase_and_assign_phone(
     admin: CurrentUser = Depends(require_admin),
 ) -> ClientOut:
     """Compra un número en Twilio y lo asigna al cliente con SIP config (solo admin)."""
+    sb = get_supabase()
+    byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
+
+    # Si es BYOT, habilitar geo permissions para el país del número
+    if byot_sid:
+        try:
+            from api.services.phone_service import enable_geo_permission
+            # Detectar país del número (asume formato E.164)
+            country = "MX"  # Default, se puede mejorar con phonenumbers lib
+            if req.phone_number.startswith("+57"):
+                country = "CO"
+            elif req.phone_number.startswith("+56"):
+                country = "CL"
+            elif req.phone_number.startswith("+54"):
+                country = "AR"
+            elif req.phone_number.startswith("+1"):
+                country = "US"
+            await asyncio.to_thread(
+                enable_geo_permission, country,
+                account_sid=byot_sid, auth_token=byot_token,
+            )
+        except Exception as e:
+            logger.warning("No se pudieron habilitar geo permissions: %s", e)
+
     # Comprar número
     try:
         phone_sid, normalized_number = await asyncio.to_thread(
-            purchase_phone_number, req.phone_number
+            purchase_phone_number, req.phone_number,
+            account_sid=byot_sid, auth_token=byot_token,
         )
     except Exception as e:
         raise HTTPException(
@@ -158,7 +191,6 @@ async def purchase_and_assign_phone(
         )
 
     # Guardar en DB
-    sb = get_supabase()
     row = assign_phone_to_client(
         sb,
         client_id=client_id,
@@ -402,9 +434,15 @@ async def assign_phone(
     admin: CurrentUser = Depends(require_admin),
 ) -> ClientOut:
     """Asigna un número de teléfono Twilio a un cliente (solo admin)."""
-    # Verificar número en Twilio
+    sb = get_supabase()
+    byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
+
+    # Verificar número en Twilio (usa cuenta BYOT si existe)
     try:
-        phone_sid = await asyncio.to_thread(verify_twilio_number, req.phone_number)
+        phone_sid = await asyncio.to_thread(
+            verify_twilio_number, req.phone_number,
+            account_sid=byot_sid, auth_token=byot_token,
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -424,7 +462,6 @@ async def assign_phone(
                 detail=f"Error configurando LiveKit SIP: {e}",
             )
 
-    sb = get_supabase()
     row = assign_phone_to_client(
         sb,
         client_id=client_id,
@@ -448,6 +485,115 @@ async def assign_phone(
         )
 
     return client_out_from_row(row)
+
+
+# ── BYOT (Bring Your Own Twilio) ──────────────────────
+
+
+@router.put("/{client_id}/twilio-credentials", response_model=ClientOut)
+async def save_twilio_credentials(
+    client_id: str,
+    req: SaveTwilioCredentialsRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> ClientOut:
+    """Guarda credenciales BYOT de Twilio para un cliente."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    # Validar credenciales con Twilio
+    from api.services.phone_service import validate_twilio_credentials
+    valid = await asyncio.to_thread(
+        validate_twilio_credentials, req.account_sid, req.auth_token
+    )
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credenciales de Twilio inválidas o cuenta inactiva.",
+        )
+
+    # Encriptar auth_token y guardar
+    sb = get_supabase()
+    encrypted_token = encrypt_value(req.auth_token)
+    result = (
+        sb.table("clients")
+        .update({
+            "twilio_account_sid": req.account_sid,
+            "twilio_auth_token": encrypted_token,
+        })
+        .eq("id", client_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+
+    await log_audit(
+        sb, user_id=user.id, action="byot_credentials_saved",
+        resource_type="client", resource_id=client_id,
+        details={"account_sid": req.account_sid},
+    )
+    logger.info("BYOT credentials saved for client %s", client_id)
+    return client_out_from_row(result.data[0])
+
+
+@router.delete("/{client_id}/twilio-credentials", response_model=ClientOut)
+async def delete_twilio_credentials(
+    client_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> ClientOut:
+    """Elimina credenciales BYOT de Twilio de un cliente."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso denegado")
+
+    sb = get_supabase()
+    result = (
+        sb.table("clients")
+        .update({"twilio_account_sid": None, "twilio_auth_token": None})
+        .eq("id", client_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+
+    await log_audit(
+        sb, user_id=user.id, action="byot_credentials_deleted",
+        resource_type="client", resource_id=client_id,
+    )
+    logger.info("BYOT credentials deleted for client %s", client_id)
+    return client_out_from_row(result.data[0])
+
+
+@router.post("/{client_id}/twilio-sip-trunk", response_model=MessageResponse)
+async def create_twilio_sip_trunk(
+    client_id: str,
+    admin: CurrentUser = Depends(require_admin),
+) -> MessageResponse:
+    """Crea un Elastic SIP Trunk en la cuenta Twilio del cliente apuntando a LiveKit."""
+    sb = get_supabase()
+    byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
+    if not byot_sid or not byot_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El cliente no tiene credenciales BYOT configuradas.",
+        )
+
+    from api.services.phone_service import setup_twilio_elastic_sip_trunk
+    try:
+        trunk_sid = await asyncio.to_thread(
+            setup_twilio_elastic_sip_trunk,
+            account_sid=byot_sid, auth_token=byot_token,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error creando SIP trunk en cuenta del cliente: {e}",
+        )
+
+    await log_audit(
+        sb, user_id=admin.id, action="byot_sip_trunk_created",
+        resource_type="client", resource_id=client_id,
+        details={"twilio_trunk_sid": trunk_sid},
+    )
+    return MessageResponse(message=f"SIP trunk creado: {trunk_sid}")
 
 
 @router.post("/{client_id}/create-store", response_model=ClientOut)
