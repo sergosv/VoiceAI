@@ -23,7 +23,7 @@ if "twilio" not in sys.modules:
 class TestSaveTwilioCredentialsRequest:
     def test_valid_credentials(self):
         req = SaveTwilioCredentialsRequest(
-            account_sid="AC12345678901234567890123456789012",
+            account_sid="ACtest_fake_sid_for_unit_testing_0",
             auth_token="abcdef01234567890abcdef012345678",
         )
         assert req.account_sid.startswith("AC")
@@ -47,13 +47,13 @@ class TestSaveTwilioCredentialsRequest:
     def test_invalid_token_length(self):
         with pytest.raises(ValidationError, match="32"):
             SaveTwilioCredentialsRequest(
-                account_sid="AC12345678901234567890123456789012",
+                account_sid="ACtest_fake_sid_for_unit_testing_0",
                 auth_token="short",
             )
 
     def test_strips_whitespace(self):
         req = SaveTwilioCredentialsRequest(
-            account_sid="  AC12345678901234567890123456789012  ",
+            account_sid="  ACtest_fake_sid_for_unit_testing_0  ",
             auth_token="  abcdef01234567890abcdef012345678  ",
         )
         assert not req.account_sid.startswith(" ")
@@ -73,7 +73,7 @@ class TestClientOutByot:
     def test_has_twilio_credentials_true(self):
         row = {
             **self.BASE_ROW,
-            "twilio_account_sid": "AC12345678901234567890123456789012",
+            "twilio_account_sid": "ACtest_fake_sid_for_unit_testing_0",
             "twilio_auth_token": "enc:encrypted_token_here",
         }
         out = client_out_from_row(row)
@@ -87,7 +87,7 @@ class TestClientOutByot:
     def test_has_twilio_credentials_false_when_partial(self):
         row = {
             **self.BASE_ROW,
-            "twilio_account_sid": "AC12345678901234567890123456789012",
+            "twilio_account_sid": "ACtest_fake_sid_for_unit_testing_0",
             "twilio_auth_token": None,
         }
         out = client_out_from_row(row)
@@ -96,7 +96,7 @@ class TestClientOutByot:
     def test_credentials_not_exposed_in_output(self):
         row = {
             **self.BASE_ROW,
-            "twilio_account_sid": "AC12345678901234567890123456789012",
+            "twilio_account_sid": "ACtest_fake_sid_for_unit_testing_0",
             "twilio_auth_token": "enc:secret",
         }
         out = client_out_from_row(row)
@@ -110,7 +110,7 @@ class TestClientOutByot:
 
 class TestGetTwilioClient:
     @patch.dict("os.environ", {
-        "TWILIO_ACCOUNT_SID": "ACplatform000000000000000000000000",
+        "TWILIO_ACCOUNT_SID": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         "TWILIO_AUTH_TOKEN": "platformtoken00000000000000000000",
     })
     def test_uses_env_when_no_byot(self):
@@ -127,7 +127,7 @@ class TestGetTwilioClient:
         with patch("twilio.rest.Client", new=mock_client_cls):
             result = ps._get_twilio_client()
             mock_client_cls.assert_called_once_with(
-                "ACplatform000000000000000000000000",
+                "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                 "platformtoken00000000000000000000",
             )
 
@@ -139,11 +139,11 @@ class TestGetTwilioClient:
         mock_client_cls = MagicMock()
         with patch("twilio.rest.Client", new=mock_client_cls):
             ps._get_twilio_client(
-                "ACbyot00000000000000000000000000",
+                "ACyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 "byottoken000000000000000000000000",
             )
             mock_client_cls.assert_called_once_with(
-                "ACbyot00000000000000000000000000",
+                "ACyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 "byottoken000000000000000000000000",
             )
 
@@ -163,7 +163,7 @@ class TestValidateTwilioCredentials:
         mock_client_cls.return_value.api.v2010.accounts.return_value.fetch.return_value = mock_account
 
         with patch("twilio.rest.Client", new=mock_client_cls):
-            assert ps.validate_twilio_credentials("ACtest0000000000000000000000000000", "token00000000000000000000000000") is True
+            assert ps.validate_twilio_credentials("ACzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "token00000000000000000000000000") is True
 
     def test_invalid_credentials(self):
         from importlib import reload
@@ -196,13 +196,13 @@ class TestGetClientTwilioCreds:
         sb = MagicMock()
         sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
             data=[{
-                "twilio_account_sid": "AC12345678901234567890123456789012",
+                "twilio_account_sid": "ACtest_fake_sid_for_unit_testing_0",
                 "twilio_auth_token": "enc:encrypted_value",
             }]
         )
         with patch("api.crypto.decrypt_value", return_value="decrypted_token"):
             sid, token = get_client_twilio_creds(sb, "client-1")
-        assert sid == "AC12345678901234567890123456789012"
+        assert sid == "ACtest_fake_sid_for_unit_testing_0"
         assert token == "decrypted_token"
 
 
@@ -222,11 +222,11 @@ class TestPhoneServiceByotThreading:
 
         with patch("twilio.rest.Client", new=mock_client_cls):
             ps.search_available_numbers(
-                "MX", account_sid="ACbyot00000000000000000000000000",
+                "MX", account_sid="ACyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 auth_token="byottoken000000000000000000000000",
             )
             mock_client_cls.assert_called_once_with(
-                "ACbyot00000000000000000000000000",
+                "ACyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 "byottoken000000000000000000000000",
             )
 
@@ -244,11 +244,11 @@ class TestPhoneServiceByotThreading:
         with patch("twilio.rest.Client", new=mock_client_cls):
             sid, num = ps.purchase_phone_number(
                 "+5215551234567",
-                account_sid="ACbyot00000000000000000000000000",
+                account_sid="ACyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 auth_token="byottoken000000000000000000000000",
             )
             assert sid == "PN123"
             mock_client_cls.assert_called_once_with(
-                "ACbyot00000000000000000000000000",
+                "ACyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
                 "byottoken000000000000000000000000",
             )
