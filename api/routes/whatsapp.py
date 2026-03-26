@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import create_client
 
-from api.routes.auth import get_current_user
+from api.middleware.auth import get_current_user
 from api.schemas import (
     MessageResponse,
     WhatsAppConfigCreateRequest,
