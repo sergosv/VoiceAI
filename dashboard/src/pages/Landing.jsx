@@ -392,10 +392,10 @@ export function Landing() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {[
-              { type: 'phone', name: 'Llamadas', desc: 'Voz natural con Deepgram + Cartesia. Detecta emociones y cambia de idioma.' },
-              { type: 'whatsapp', name: 'WhatsApp', desc: 'Respuestas automaticas via Evolution API. Emojis, formato, horario.' },
-              { type: 'widget', name: 'Widget Web', desc: 'Chat o voz embebible en tu sitio. Una linea de codigo.' },
-              { type: 'ghl', name: 'GoHighLevel', desc: 'Integrado con GHL. Responde SMS, webchat y redes sociales.' },
+              { type: 'phone', name: 'Llamadas', desc: 'Contesta con voz natural. Detecta emociones y cambia de idioma si es necesario.' },
+              { type: 'whatsapp', name: 'WhatsApp', desc: 'Responde al instante. Con emojis, formato y respetando tu horario de atencion.' },
+              { type: 'widget', name: 'Widget Web', desc: 'Chat o voz en tu sitio web. Se instala con una sola linea de codigo.' },
+              { type: 'ghl', name: 'GoHighLevel', desc: 'Conectado a GHL. Responde en SMS, webchat y redes sociales automaticamente.' },
             ].map((ch, i) => (
               <div
                 key={ch.type}
@@ -427,6 +427,78 @@ export function Landing() {
         </div>
       </section>
 
+      {/* ── DOS PRODUCTOS ── */}
+      <section className="py-20 px-6 bg-[#08080d] relative">
+        <ParticleField count={10} className="opacity-20" />
+        <div className="max-w-5xl mx-auto">
+          <Reveal className="text-center mb-16">
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Dos agentes, dos propositos</h2>
+            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+              Elige el tipo de agente que necesitas. Puedes tener ambos trabajando para ti al mismo tiempo.
+            </p>
+          </Reveal>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Agente de Atencion */}
+            <Reveal delay={0} direction="left">
+              <div className="bg-[#12121a] border border-gray-800/50 rounded-2xl p-8 h-full hover:border-accent/30 transition-all group">
+                <div className="w-14 h-14 rounded-xl bg-accent/10 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-accent">
+                    <path d="M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0H5m14 0h2M5 21H3m4-10h2m4 0h2m-8 4h2m4 0h2" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Agente de Atencion</h3>
+                <p className="text-gray-400 text-sm mb-5">
+                  Atiende a tus clientes por telefono, WhatsApp y web. Responde preguntas, agenda citas, toma mensajes y ejecuta acciones con tus herramientas.
+                </p>
+                <ul className="space-y-2.5">
+                  {['Contesta llamadas 24/7 con voz natural', 'Responde WhatsApp al instante', 'Agenda citas en tu calendario', 'Busca en tus documentos y base de conocimiento', 'Conecta con tu CRM, APIs y herramientas externas', 'Transfiere a un humano cuando es necesario'].map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                      <svg className="w-4 h-4 text-accent shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-6 pt-5 border-t border-gray-800/50">
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">Ideal para</span>
+                  <p className="text-sm text-gray-300 mt-1">Consultorios, clinicas, restaurantes, inmobiliarias, despachos, cualquier negocio que recibe llamadas.</p>
+                </div>
+              </div>
+            </Reveal>
+
+            {/* Asistente Personal */}
+            <Reveal delay={200} direction="right">
+              <div className="bg-[#12121a] border border-cyan-500/20 rounded-2xl p-8 h-full hover:border-cyan-400/40 transition-all group relative overflow-hidden">
+                {/* Badge nuevo */}
+                <div className="absolute top-4 right-4 px-2.5 py-1 bg-cyan-500/20 text-cyan-400 text-[10px] font-bold uppercase rounded-full tracking-wider">Nuevo</div>
+                <div className="w-14 h-14 rounded-xl bg-cyan-500/10 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-cyan-400">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Asistente Personal</h3>
+                <p className="text-gray-400 text-sm mb-5">
+                  Tu asistente privado por voz. Le llamas, le hablas, y el hace las cosas por ti. Recuerda todo, gestiona tus pendientes y te mantiene organizado.
+                </p>
+                <ul className="space-y-2.5">
+                  {['Memoria persistente — recuerda todo lo que le dices', 'Crea y gestiona tareas y pendientes por voz', 'Toma notas y las busca cuando las necesitas', 'Envia emails en tu nombre', 'Programa recordatorios que te avisan por llamada o WhatsApp', 'Solo responde a tus numeros autorizados'].map((item, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-gray-300">
+                      <svg className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-6 pt-5 border-t border-gray-800/50">
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">Ideal para</span>
+                  <p className="text-sm text-gray-300 mt-1">Empresarios, directores, doctores, abogados — cualquier profesional que necesita un asistente siempre disponible.</p>
+                </div>
+              </div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
       {/* Separador: data flow */}
       <DataFlowLines />
 
@@ -443,11 +515,11 @@ export function Landing() {
             {/* Steps */}
             <div className="space-y-6">
               {[
-                { title: 'El cliente contacta', desc: 'Por telefono, WhatsApp o tu sitio web. El agente responde al instante.' },
-                { title: 'Escucha y entiende', desc: 'STT en tiempo real con Deepgram Nova-3. Detecta idioma automaticamente.' },
-                { title: 'Busca la respuesta', desc: 'Consulta tu base de conocimientos, calendario, CRM o APIs externas.' },
-                { title: 'Responde naturalmente', desc: 'Voz humana con Cartesia Sonic-3. Respuestas cortas y naturales.' },
-                { title: 'Ejecuta la accion', desc: 'Agenda citas, envia WhatsApp, guarda contactos, transfiere a humano.' },
+                { title: 'Tu cliente te contacta', desc: 'Por telefono, WhatsApp o tu sitio web. El agente contesta al primer tono, 24 horas, 7 dias.' },
+                { title: 'Entiende lo que necesita', desc: 'Escucha con precision, entiende acentos regionales y hasta cambia de idioma si es necesario.' },
+                { title: 'Busca la mejor respuesta', desc: 'Consulta tus documentos, tu calendario, tu CRM o cualquier sistema que conectes.' },
+                { title: 'Responde con voz natural', desc: 'No suena a robot. Habla como una persona real, con respuestas claras y al punto.' },
+                { title: 'Toma accion por ti', desc: 'Agenda la cita, envia la confirmacion por WhatsApp, guarda el contacto o transfiere a un humano.' },
               ].map((step, i) => (
                 <FlowStep key={i} number={i + 1} title={step.title} desc={step.desc} active={activeStep === i} />
               ))}
