@@ -66,10 +66,10 @@ export function Campaigns() {
       ) : campaigns.length === 0 ? (
         <EmptyState
           icon={PhoneOutgoing}
-          title="Sin campanas activas"
-          description="Las campanas te permiten hacer llamadas outbound automatizadas a listas de contactos. Crea tu primera campana para empezar."
+          title="Sin campañas activas"
+          description="Las campañas te permiten hacer llamadas outbound automatizadas a listas de contactos. Crea tu primera campaña para empezar."
           action={() => setShowCreate(true)}
-          actionLabel="Crear campana"
+          actionLabel="Crear campaña"
           actionIcon={Plus}
         />
       ) : (

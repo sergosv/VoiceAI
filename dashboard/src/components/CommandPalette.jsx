@@ -10,7 +10,7 @@ const COMMANDS = [
   { id: 'home', label: 'Inicio', desc: 'Panel principal', icon: LayoutDashboard, path: '/', keywords: 'dashboard inicio panel' },
   { id: 'calls', label: 'Llamadas', desc: 'Historial de llamadas', icon: Phone, path: '/calls', keywords: 'llamadas calls telefono' },
   { id: 'whatsapp', label: 'WhatsApp', desc: 'Inbox de conversaciones', icon: MessageCircle, path: '/whatsapp', keywords: 'whatsapp mensajes chat' },
-  { id: 'campaigns', label: 'Campanas', desc: 'Campanas outbound', icon: Megaphone, path: '/campaigns', keywords: 'campanas campaigns outbound' },
+  { id: 'campaigns', label: 'Campañas', desc: 'Campañas outbound', icon: Megaphone, path: '/campaigns', keywords: 'campañas campaigns outbound' },
   { id: 'ghl', label: 'GHL Inbox', desc: 'Conversaciones GoHighLevel', icon: MessageCircle, path: '/ghl', keywords: 'ghl gohighlevel inbox sms webchat facebook instagram' },
   { id: 'contacts', label: 'Contactos', desc: 'CRM de contactos', icon: UserRound, path: '/contacts', keywords: 'contactos crm clientes' },
   { id: 'appointments', label: 'Citas', desc: 'Calendario de citas', icon: Calendar, path: '/appointments', keywords: 'citas calendario agenda' },

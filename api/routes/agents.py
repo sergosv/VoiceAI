@@ -138,6 +138,9 @@ async def create_agent(
         "voice_id": voice_id,
         "realtime_voice": req.realtime_voice,
         "realtime_model": req.realtime_model,
+        "gemini_live_model": req.gemini_live_model,
+        "gemini_live_voice": req.gemini_live_voice,
+        "gemini_live_thinking_level": req.gemini_live_thinking_level,
     }
     if req.tts_api_key:
         voice_config["api_key"] = encrypt_value(req.tts_api_key)
@@ -275,6 +278,15 @@ async def update_agent(
         voice_changed = True
     if req.realtime_model is not None:
         voice_config["realtime_model"] = req.realtime_model
+        voice_changed = True
+    if req.gemini_live_model is not None:
+        voice_config["gemini_live_model"] = req.gemini_live_model
+        voice_changed = True
+    if req.gemini_live_voice is not None:
+        voice_config["gemini_live_voice"] = req.gemini_live_voice
+        voice_changed = True
+    if req.gemini_live_thinking_level is not None:
+        voice_config["gemini_live_thinking_level"] = req.gemini_live_thinking_level
         voice_changed = True
     if voice_changed:
         updates["voice_config"] = voice_config

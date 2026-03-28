@@ -231,7 +231,7 @@ export function CampaignDetail() {
     try {
       const updated = await api.patch(`/campaigns/${id}`, form)
       setCampaign(updated)
-      toast.success('Campana actualizada')
+      toast.success('Campaña actualizada')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -243,7 +243,7 @@ export function CampaignDetail() {
     try {
       const updated = await api.post(`/campaigns/${id}/start`)
       setCampaign(updated)
-      toast.success('Campana iniciada')
+      toast.success('Campaña iniciada')
     } catch (err) {
       toast.error(err.message)
     }
@@ -253,7 +253,7 @@ export function CampaignDetail() {
     try {
       const updated = await api.post(`/campaigns/${id}/pause`)
       setCampaign(updated)
-      toast.success('Campana pausada')
+      toast.success('Campaña pausada')
     } catch (err) {
       toast.error(err.message)
     }
@@ -261,7 +261,7 @@ export function CampaignDetail() {
 
   async function handleRestart() {
     const ok = await confirm({
-      title: 'Relanzar campana',
+      title: 'Relanzar campaña',
       message: 'Se resetearan todas las llamadas a pendiente. Continuar?',
       confirmText: 'Relanzar',
       variant: 'warning',
@@ -271,7 +271,7 @@ export function CampaignDetail() {
       const updated = await api.post(`/campaigns/${id}/restart`)
       setCampaign(updated)
       await loadData()
-      toast.success('Campana reiniciada — lista para lanzar')
+      toast.success('Campaña reiniciada — lista para lanzar')
     } catch (err) {
       toast.error(err.message)
     }
@@ -279,15 +279,15 @@ export function CampaignDetail() {
 
   async function handleDelete() {
     const ok = await confirm({
-      title: 'Eliminar campana',
-      message: 'Se eliminara la campana y todas sus llamadas. Esta accion es irreversible.',
+      title: 'Eliminar campaña',
+      message: 'Se eliminará la campaña y todas sus llamadas. Esta acción es irreversible.',
       confirmText: 'Eliminar',
       variant: 'danger',
     })
     if (!ok) return
     try {
       await api.delete(`/campaigns/${id}`)
-      toast.success('Campana eliminada')
+      toast.success('Campaña eliminada')
       navigate('/campaigns')
     } catch (err) {
       toast.error(err.message)
@@ -311,7 +311,7 @@ export function CampaignDetail() {
   async function handleRemoveContact(callId, phone) {
     const ok = await confirm({
       title: 'Eliminar contacto',
-      message: `Eliminar ${phone} de la campana?`,
+      message: `Eliminar ${phone} de la campaña?`,
       confirmText: 'Eliminar',
       variant: 'danger',
     })
@@ -482,7 +482,7 @@ export function CampaignDetail() {
           </div>
           {calls.length === 0 ? (
             <p className="text-text-muted text-center py-8">
-              Sin contactos. Agrega contactos para iniciar la campana.
+              Sin contactos. Agrega contactos para iniciar la campaña.
             </p>
           ) : (
             <>

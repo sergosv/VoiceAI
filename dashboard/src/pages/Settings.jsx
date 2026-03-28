@@ -60,6 +60,36 @@ const REALTIME_MODELS = [
   { value: 'gpt-4o-mini-realtime-preview', label: 'gpt-4o-mini-realtime-preview' },
 ]
 
+const GEMINI_LIVE_MODELS = [
+  { value: 'gemini-3.1-flash-live-preview', label: 'Gemini 3.1 Flash Live (recomendado)' },
+  { value: 'gemini-2.5-flash-native-audio-preview', label: 'Gemini 2.5 Flash Audio' },
+]
+
+const GEMINI_LIVE_VOICES = [
+  { value: 'Puck', label: 'Puck', desc: 'Versatil, natural (default)' },
+  { value: 'Charon', label: 'Charon', desc: 'Profunda, autoritativa' },
+  { value: 'Kore', label: 'Kore', desc: 'Clara, profesional' },
+  { value: 'Fenrir', label: 'Fenrir', desc: 'Firme, directa' },
+  { value: 'Aoede', label: 'Aoede', desc: 'Calida, melodica' },
+  { value: 'Leda', label: 'Leda', desc: 'Suave, amigable' },
+  { value: 'Orus', label: 'Orus', desc: 'Energetica, clara' },
+  { value: 'Zephyr', label: 'Zephyr', desc: 'Ligera, fresca' },
+  { value: 'Schedar', label: 'Schedar', desc: 'Serena, confiable' },
+  { value: 'Gacrux', label: 'Gacrux', desc: 'Resonante, segura' },
+  { value: 'Umbriel', label: 'Umbriel', desc: 'Misteriosa, profunda' },
+  { value: 'Algieba', label: 'Algieba', desc: 'Expresiva, dinamica' },
+  { value: 'Sulafat', label: 'Sulafat', desc: 'Brillante, vivaz' },
+  { value: 'Laomedeia', label: 'Laomedeia', desc: 'Sofisticada, elegante' },
+  { value: 'Achernar', label: 'Achernar', desc: 'Neutra, balanceada' },
+]
+
+const GEMINI_LIVE_THINKING = [
+  { value: 'minimal', label: 'Minimal — mas rapido' },
+  { value: 'low', label: 'Low — balance rapido' },
+  { value: 'medium', label: 'Medium — razonamiento medio' },
+  { value: 'high', label: 'High — razonamiento profundo' },
+]
+
 const PROVIDER_LABELS = {
   cartesia: 'Cartesia',
   elevenlabs: 'ElevenLabs',
@@ -1269,6 +1299,8 @@ export function Settings() {
     agent_mode: 'pipeline', stt_provider: 'deepgram', llm_provider: 'google', tts_provider: 'cartesia',
     stt_api_key: '', llm_api_key: '', tts_api_key: '', realtime_api_key: '',
     realtime_voice: 'alloy', realtime_model: 'gpt-4o-realtime-preview', voice_id: '',
+    gemini_live_model: 'gemini-3.1-flash-live-preview', gemini_live_voice: 'Puck',
+    gemini_live_thinking_level: 'minimal',
     role_description: '', orchestrator_enabled: true, orchestrator_priority: 0,
     mode_config: {},
     conversation_flow: null,
@@ -1313,6 +1345,9 @@ export function Settings() {
       realtime_voice: vc.realtime_voice || 'alloy',
       realtime_model: vc.realtime_model || 'gpt-4o-realtime-preview',
       voice_id: vc.voice_id || '',
+      gemini_live_model: vc.gemini_live_model || 'gemini-3.1-flash-live-preview',
+      gemini_live_voice: vc.gemini_live_voice || 'Puck',
+      gemini_live_thinking_level: vc.gemini_live_thinking_level || 'minimal',
       role_description: agentData.role_description || '',
       orchestrator_enabled: agentData.orchestrator_enabled !== false,
       orchestrator_priority: agentData.orchestrator_priority || 0,
@@ -1337,7 +1372,7 @@ export function Settings() {
     const provider = providerOverride || vc.provider || 'cartesia'
     const mode = agentData?.agent_mode || 'pipeline'
 
-    if (mode === 'realtime') {
+    if (mode === 'realtime' || mode === 'gemini_live') {
       setVoices([])
       return
     }
@@ -1467,6 +1502,9 @@ export function Settings() {
         tts_provider: form.tts_provider,
         realtime_voice: form.realtime_voice,
         realtime_model: form.realtime_model,
+        gemini_live_model: form.gemini_live_model,
+        gemini_live_voice: form.gemini_live_voice,
+        gemini_live_thinking_level: form.gemini_live_thinking_level,
         role_description: form.role_description || null,
         orchestrator_enabled: form.orchestrator_enabled,
         orchestrator_priority: form.orchestrator_priority,
@@ -1601,6 +1639,7 @@ export function Settings() {
   const currentVoice = voices?.find(v => v.id === form.voice_id)
 
   const isPipeline = form.agent_mode === 'pipeline'
+  const isGeminiLive = form.agent_mode === 'gemini_live'
 
   /* ─────────────────────── Render: Loading ─────────────────────── */
 
@@ -2049,38 +2088,36 @@ export function Settings() {
                     API keys de la plataforma. Para otros proveedores, necesitas tu propia API key.
                   </p>
 
-                  {/* Mode toggle: Pipeline vs Realtime */}
+                  {/* Mode toggle: Pipeline vs Realtime vs Gemini Live */}
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setForm(f => ({ ...f, agent_mode: 'pipeline' }))}
-                      className={`flex-1 px-4 py-3 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
-                        isPipeline
-                          ? 'border-accent bg-accent/10 text-accent'
-                          : 'border-border bg-bg-primary text-text-muted hover:bg-bg-hover'
-                      }`}
-                    >
-                      <div className="flex items-center justify-center gap-2">
-                        <Mic size={16} />
-                        <span>Pipeline</span>
-                      </div>
-                      <p className="text-[11px] mt-1 font-normal opacity-70">STT + LLM + TTS separados</p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setForm(f => ({ ...f, agent_mode: 'realtime' }))}
-                      className={`flex-1 px-4 py-3 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
-                        !isPipeline
-                          ? 'border-accent bg-accent/10 text-accent'
-                          : 'border-border bg-bg-primary text-text-muted hover:bg-bg-hover'
-                      }`}
-                    >
-                      <div className="flex items-center justify-center gap-2">
-                        <Zap size={16} />
-                        <span>OpenAI Realtime</span>
-                      </div>
-                      <p className="text-[11px] mt-1 font-normal opacity-70">Modelo multimodal end-to-end</p>
-                    </button>
+                    {[
+                      { value: 'pipeline', label: 'Pipeline', icon: Mic, desc: 'STT + LLM + TTS separados' },
+                      { value: 'realtime', label: 'OpenAI Realtime', icon: Zap, desc: 'Multimodal end-to-end' },
+                      { value: 'gemini_live', label: 'Gemini Live', icon: Zap, desc: 'Audio nativo, baja latencia' },
+                    ].map(mode => {
+                      const Icon = mode.icon
+                      const isActive = form.agent_mode === mode.value
+                      return (
+                        <button
+                          key={mode.value}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, agent_mode: mode.value }))}
+                          className={`flex-1 px-3 py-3 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
+                            isActive
+                              ? mode.value === 'gemini_live'
+                                ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                                : 'border-accent bg-accent/10 text-accent'
+                              : 'border-border bg-bg-primary text-text-muted hover:bg-bg-hover'
+                          }`}
+                        >
+                          <div className="flex items-center justify-center gap-2">
+                            <Icon size={16} />
+                            <span>{mode.label}</span>
+                          </div>
+                          <p className="text-[11px] mt-1 font-normal opacity-70">{mode.desc}</p>
+                        </button>
+                      )
+                    })}
                   </div>
 
                   {isPipeline ? (
@@ -2249,8 +2286,47 @@ export function Settings() {
                         </div>
                       )}
                     </div>
+                  ) : isGeminiLive ? (
+                    /* Gemini Live config */
+                    <div className="space-y-4 p-4 rounded-lg border border-blue-500/30 bg-blue-500/5">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Zap size={16} className="text-blue-400" />
+                        <span className="text-sm font-medium">Configuracion Gemini Live</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-medium">Incluido</span>
+                      </div>
+                      <p className="text-xs text-text-muted">
+                        Audio nativo de Google. No requiere API key adicional — usa la key de la plataforma.
+                      </p>
+                      <PipelineSelect
+                        label="Modelo"
+                        value={form.gemini_live_model}
+                        onChange={v => setForm(f => ({ ...f, gemini_live_model: v }))}
+                        options={GEMINI_LIVE_MODELS}
+                      />
+                      <PipelineSelect
+                        label="Voz"
+                        value={form.gemini_live_voice}
+                        onChange={v => setForm(f => ({ ...f, gemini_live_voice: v }))}
+                        options={GEMINI_LIVE_VOICES.map(v => ({
+                          value: v.value,
+                          label: `${v.label} — ${v.desc}`,
+                        }))}
+                      />
+                      <PipelineSelect
+                        label="Nivel de razonamiento"
+                        value={form.gemini_live_thinking_level}
+                        onChange={v => setForm(f => ({ ...f, gemini_live_thinking_level: v }))}
+                        options={GEMINI_LIVE_THINKING}
+                      />
+                      <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                        <p className="text-xs text-blue-300">
+                          <strong>Tip:</strong> Usa "Minimal" para FAQ bots y respuestas rapidas.
+                          Sube a "Medium" o "High" para asistentes que necesitan razonar (ej: Personal Assistant).
+                        </p>
+                      </div>
+                    </div>
                   ) : (
-                    /* Realtime config */
+                    /* OpenAI Realtime config */
                     <div className="space-y-4 p-4 rounded-lg border border-border bg-bg-primary/50">
                       <div className="flex items-center gap-2 mb-1">
                         <Key size={16} className="text-amber-400" />

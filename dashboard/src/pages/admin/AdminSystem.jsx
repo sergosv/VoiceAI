@@ -147,7 +147,7 @@ export function AdminSystem() {
           </div>
           <div>
             <p className="text-xl font-bold text-text-primary">{active_campaigns}</p>
-            <p className="text-[10px] text-text-muted uppercase tracking-wider">Campanas Activas</p>
+            <p className="text-[10px] text-text-muted uppercase tracking-wider">Campañas Activas</p>
           </div>
         </Card>
 

@@ -212,3 +212,26 @@ def build_realtime_model(config: AgentConfig):
     if api_key:
         kwargs["api_key"] = api_key
     return openai.realtime.RealtimeModel(**kwargs)
+
+
+def build_gemini_live_model(config: AgentConfig):
+    """Construye el modelo Gemini Live para modo audio-to-audio nativo."""
+    from google.genai import types
+    from livekit.plugins import google
+
+    kwargs: dict = {
+        "model": config.gemini_live_model,
+        "voice": config.gemini_live_voice,
+        "thinking_config": types.ThinkingConfig(
+            thinking_level=config.gemini_live_thinking_level.upper(),
+        ),
+        "input_audio_transcription": types.AudioTranscriptionConfig(),
+        "output_audio_transcription": types.AudioTranscriptionConfig(),
+    }
+
+    # Detectar idioma del cliente para configurar el modelo
+    language = config.voice_config.get("gemini_live_language")
+    if language:
+        kwargs["language"] = language
+
+    return google.realtime.RealtimeModel(**kwargs)

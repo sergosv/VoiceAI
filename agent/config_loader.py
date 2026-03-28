@@ -133,6 +133,19 @@ class AgentConfig:
     def realtime_api_key(self) -> str | None:
         return _decrypt_key(self.voice_config.get("realtime_api_key"))
 
+    # Gemini Live properties
+    @property
+    def gemini_live_model(self) -> str:
+        return self.voice_config.get("gemini_live_model", "gemini-3.1-flash-live-preview")
+
+    @property
+    def gemini_live_voice(self) -> str:
+        return self.voice_config.get("gemini_live_voice", "Puck")
+
+    @property
+    def gemini_live_thinking_level(self) -> str:
+        return self.voice_config.get("gemini_live_thinking_level", "minimal")
+
     @property
     def voice_mode(self) -> str:
         """Alias de agent_mode para backward compat."""

@@ -207,7 +207,7 @@ export function PromptAssistant({
               {mode === 'create' && type === 'campaign' && (
                 <div className="space-y-3">
                   <Select
-                    label="Objetivo de la campana"
+                    label="Objetivo de la campaña"
                     value={campaignForm.objective}
                     onChange={e => setCampaignForm(f => ({ ...f, objective: e.target.value }))}
                     options={OBJECTIVES}

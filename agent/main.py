@@ -43,7 +43,7 @@ from agent.config_loader import (
     load_orchestrated_configs,
 )
 from agent.mcp_builder import build_mcp_servers
-from agent.pipeline_builder import build_llm, build_realtime_model, build_stt, build_tts
+from agent.pipeline_builder import build_gemini_live_model, build_llm, build_realtime_model, build_stt, build_tts
 from agent.session_handler import SessionHandler
 from agent.voice_quality import (
     BACKCHANNEL_FIRST_DELAY,
@@ -643,6 +643,22 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             )
             session = AgentSession(
                 llm=build_realtime_model(config.agent),
+                vad=vad,
+                turn_detection=MultilingualModel(),
+                min_endpointing_delay=0.5,
+                max_endpointing_delay=3.0,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
+            )
+        elif config.agent.agent_mode == "gemini_live":
+            logger.info(
+                "Modo Gemini Live: model=%s, voice=%s, thinking=%s",
+                config.agent.gemini_live_model,
+                config.agent.gemini_live_voice,
+                config.agent.gemini_live_thinking_level,
+            )
+            session = AgentSession(
+                llm=build_gemini_live_model(config.agent),
                 vad=vad,
                 turn_detection=MultilingualModel(),
                 min_endpointing_delay=0.5,

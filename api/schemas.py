@@ -166,6 +166,10 @@ class AgentCreateRequest(BaseModel):
     realtime_api_key: str | None = None
     realtime_voice: str = "alloy"
     realtime_model: str = "gpt-4o-realtime-preview"
+    # Gemini Live
+    gemini_live_model: str = "gemini-3.1-flash-live-preview"
+    gemini_live_voice: str = "Puck"
+    gemini_live_thinking_level: str = "minimal"
     # Orchestration
     role_description: str | None = None
     orchestrator_enabled: bool = True
@@ -205,6 +209,10 @@ class AgentUpdateRequest(BaseModel):
     realtime_api_key: str | None = None
     realtime_voice: str | None = None
     realtime_model: str | None = None
+    # Gemini Live
+    gemini_live_model: str | None = None
+    gemini_live_voice: str | None = None
+    gemini_live_thinking_level: str | None = None
     # Orchestration
     role_description: str | None = None
     orchestrator_enabled: bool | None = None
