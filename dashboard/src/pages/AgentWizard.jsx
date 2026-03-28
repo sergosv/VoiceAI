@@ -280,9 +280,34 @@ export function AgentWizard() {
           <h2 className="text-lg font-semibold mb-1">Elige una plantilla</h2>
           <p className="text-text-muted text-sm mb-6">Selecciona la que mejor se ajuste a tu necesidad</p>
 
+          {/* Opcion: crear desde cero (siempre disponible) */}
+          <button onClick={async () => {
+            try {
+              const clientId = user?.client_id
+              if (!clientId) { toast.error('No hay cliente asociado'); return }
+              const agent = await api.post(`/clients/${clientId}/agents`, { name: 'Nuevo Agente' })
+              toast.success('Agente creado. Configuralo en Settings.')
+              navigate('/settings')
+            } catch (err) { toast.error(err.message || 'Error al crear agente') }
+          }}
+            className={`w-full border border-dashed rounded-xl p-4 text-left transition-all mb-4
+              border-border bg-bg-secondary hover:border-accent/50 hover:bg-accent/5`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+                <FileText className="text-accent" size={18} />
+              </div>
+              <div>
+                <div className="font-semibold text-sm">Crear desde cero</div>
+                <div className="text-xs text-text-muted mt-0.5">
+                  Configura el prompt, voz y herramientas manualmente en Settings
+                </div>
+              </div>
+            </div>
+          </button>
+
           {templates.length === 0 ? (
-            <Card className="text-center text-text-muted py-12">
-              No hay plantillas para esta combinacion. Prueba otra vertical o direccion.
+            <Card className="text-center text-text-muted py-8 text-sm">
+              No hay plantillas para esta combinacion. Usa "Crear desde cero" o prueba otra vertical.
             </Card>
           ) : (
             <div className="space-y-2 mb-6">
