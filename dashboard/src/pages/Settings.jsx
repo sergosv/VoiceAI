@@ -2875,7 +2875,7 @@ export function Settings() {
                         const apiUrl = import.meta.env.VITE_API_URL || '/api'
                         const apiBase = apiUrl.replace(/\/api$/, '')
                         const s = document.createElement('script')
-                        s.src = apiBase + '/widget.js'
+                        s.src = apiBase + '/widget.js?v=' + Date.now()
                         s.setAttribute('data-agent', selectedAgent?.slug || '')
                         s.setAttribute('data-api', apiUrl)
                         s.setAttribute('data-color', '#00f0ff')
