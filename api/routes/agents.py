@@ -75,6 +75,22 @@ def _slugify(name: str) -> str:
     return slug[:50] or "agent"
 
 
+def _ensure_unique_slug(sb, slug: str) -> str:
+    """Garantiza que el slug sea único en la tabla agents, agregando sufijo si es necesario."""
+    import uuid
+
+    base_slug = slug
+    # Verificar si ya existe
+    result = sb.table("agents").select("id").eq("slug", slug).limit(1).execute()
+    if not result.data:
+        return slug
+
+    # Agregar sufijo único
+    suffix = uuid.uuid4().hex[:6]
+    unique_slug = f"{base_slug}-{suffix}"
+    return unique_slug[:50]
+
+
 @router.get("/{client_id}/agents", response_model=list[AgentOut])
 async def list_agents(
     client_id: str,
@@ -118,8 +134,8 @@ async def create_agent(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # Auto-slug
-    slug = req.slug or _slugify(req.name)
+    # Auto-slug — garantizar unicidad global
+    slug = _ensure_unique_slug(sb, req.slug or _slugify(req.name))
 
     # Generar prompt/greeting si no vienen
     greeting = req.greeting or build_greeting(c["name"], req.name)
