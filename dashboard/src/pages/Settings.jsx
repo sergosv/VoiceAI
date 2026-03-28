@@ -1411,6 +1411,16 @@ export function Settings() {
 
   /* ── Select an agent ── */
   function selectAgent(agent, cid) {
+    // Limpiar widget preview anterior al cambiar de agente
+    if (window.__voiceAIWidget) {
+      const script = document.getElementById('vai-preview-script')
+      if (script) script.remove()
+      document.querySelectorAll('.vai-fab, .vai-tooltip, .vai-status, .vai-mode-menu, .vai-chat-panel, #vai-audio').forEach(el => el.remove())
+      document.querySelectorAll('style').forEach(s => {
+        if (s.textContent?.includes('vai-fab')) s.remove()
+      })
+      window.__voiceAIWidget = false
+    }
     setSelectedAgent(agent)
     populateForm(agent)
     loadVoicesForAgent(agent, cid)
