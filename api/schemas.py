@@ -318,9 +318,9 @@ class ClientCreateRequest(BaseModel):
     @field_validator("owner_email")
     @classmethod
     def validate_owner_email(cls, v: str | None) -> str | None:
-        if v is not None:
+        if v is not None and v.strip():
             return _validate_email(v)
-        return v
+        return None
 
     @field_validator("language")
     @classmethod

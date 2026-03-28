@@ -63,14 +63,37 @@ class TestVoiceAgentTransfer:
     """Tests para VoiceAgent.transfer_to_human()."""
 
     @pytest.mark.asyncio
-    async def test_transfer_with_number(self, sample_config: ResolvedConfig) -> None:
+    async def test_transfer_with_number_no_sip(self, sample_config: ResolvedConfig) -> None:
+        """Sin contexto SIP (widget/chat), retorna fallback con número de contacto."""
         agent = VoiceAgent(sample_config)
         mock_context = MagicMock()
 
         result = await agent.transfer_to_human(mock_context, "Cliente quiere hablar con humano")
 
         assert "+5219991234567" in result
-        assert "Transferencia solicitada" in result
+        assert "No se puede transferir por SIP" in result
+
+    @pytest.mark.asyncio
+    async def test_transfer_with_sip_context(self, sample_config: ResolvedConfig) -> None:
+        """Con contexto SIP, ejecuta transferencia real via LiveKit API."""
+        agent = VoiceAgent(sample_config)
+        agent._room_name = "test-room-123"
+        agent._sip_participant_identity = "sip_+5219991000000"
+        mock_context = MagicMock()
+
+        with patch("livekit.api.LiveKitAPI") as MockLiveKitAPI:
+            mock_lk = MagicMock()
+            mock_sip = MagicMock()
+            mock_sip.transfer_sip_participant = AsyncMock()
+            mock_lk.sip = mock_sip
+            mock_lk.__aenter__ = AsyncMock(return_value=mock_lk)
+            mock_lk.__aexit__ = AsyncMock(return_value=False)
+            MockLiveKitAPI.return_value = mock_lk
+
+            result = await agent.transfer_to_human(mock_context, "Lead calificado")
+
+        assert "Transferencia exitosa" in result
+        mock_sip.transfer_sip_participant.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_transfer_without_number(

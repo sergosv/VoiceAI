@@ -53,6 +53,9 @@ class VoiceAgent(Agent):
         # Datos de la llamada — se inyectan desde main.py antes de session.start()
         self._caller_phone: str = ""
         self._memory_contact_id: str | None = None
+        # SIP transfer context — inyectado desde main.py
+        self._room_name: str = ""
+        self._sip_participant_identity: str = ""
         # Métricas de uso real (caracteres TTS, tokens LLM)
         self._usage_metrics = usage_metrics
         # Soporte de cambio de idioma en vivo
@@ -469,19 +472,76 @@ class VoiceAgent(Agent):
             )
 
         logger.info(
-            "Solicitud de transferencia para '%s': %s",
+            "Transferencia SIP para '%s': destino=%s, motivo=%s",
             self._config.agent.slug,
+            transfer_number,
             reason,
         )
-        result = (
-            f"Transferencia solicitada al número {transfer_number}. "
-            f"Motivo: {reason}. "
-            "Informa al cliente que lo estás transfiriendo."
-        )
+
+        # Ejecutar SIP cold transfer real
+        result = await self._execute_sip_transfer(transfer_number, reason)
 
         # Hook: PostToolCall
         await self._run_post_tool_hooks("transfer_to_human", tool_input, result)
         return result
+
+    async def _execute_sip_transfer(self, transfer_number: str, reason: str) -> str:
+        """Ejecuta la transferencia SIP real via LiveKit API (cold transfer)."""
+        if not self._room_name or not self._sip_participant_identity:
+            logger.warning(
+                "No hay contexto SIP para transferir (room=%s, participant=%s). "
+                "Puede ser una sesión de widget/chat.",
+                self._room_name,
+                self._sip_participant_identity,
+            )
+            return (
+                f"No se puede transferir por SIP en este canal. "
+                f"El número de contacto del equipo es {transfer_number}. "
+                f"Informa al cliente que se comunicarán con él."
+            )
+
+        # Normalizar número destino al formato tel:+XXXXXXXXXXX
+        dest = transfer_number.strip()
+        if not dest.startswith("tel:") and not dest.startswith("sip:"):
+            if not dest.startswith("+"):
+                dest = f"+{dest}"
+            dest = f"tel:{dest}"
+
+        try:
+            from livekit import api
+            from livekit.protocol.sip import TransferSIPParticipantRequest
+
+            async with api.LiveKitAPI() as lk_api:
+                transfer_request = TransferSIPParticipantRequest(
+                    participant_identity=self._sip_participant_identity,
+                    room_name=self._room_name,
+                    transfer_to=dest,
+                    play_dialtone=True,
+                )
+                await lk_api.sip.transfer_sip_participant(transfer_request)
+
+            logger.info(
+                "Transferencia SIP exitosa: %s → %s (room=%s)",
+                self._sip_participant_identity,
+                dest,
+                self._room_name,
+            )
+            return (
+                f"Transferencia exitosa al número {transfer_number}. "
+                f"Motivo: {reason}. "
+                "La llamada ha sido transferida. Despídete brevemente del cliente."
+            )
+        except Exception:
+            logger.exception(
+                "Error en transferencia SIP: %s → %s",
+                self._sip_participant_identity,
+                dest,
+            )
+            return (
+                f"Error al transferir la llamada. "
+                f"Informa al cliente que el equipo lo contactará al {transfer_number}. "
+                f"Pide disculpas por el inconveniente."
+            )
 
     @function_tool()
     async def schedule_appointment(

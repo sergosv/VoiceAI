@@ -617,6 +617,22 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             voice_agent._memory_contact_id,
         )
 
+    # Inyectar contexto SIP para transferencia de llamadas
+    if hasattr(voice_agent, "_room_name"):
+        voice_agent._room_name = ctx.room.name
+        # Buscar identity del participante SIP (caller)
+        sip_identity = ""
+        for p in ctx.room.remote_participants.values():
+            if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                sip_identity = p.identity
+                break
+        voice_agent._sip_participant_identity = sip_identity
+        logger.info(
+            "SIP transfer context: room=%s, participant=%s",
+            ctx.room.name,
+            sip_identity,
+        )
+
     # Filtrar tools deshabilitados del schema visible al LLM
     if hasattr(voice_agent, "filter_disabled_tools"):
         voice_agent.filter_disabled_tools()
