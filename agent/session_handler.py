@@ -479,14 +479,22 @@ class SessionHandler:
                     had_conversation = len(self._transcript) > 1
                     call_status = "completed" if had_conversation else "no_answer"
 
-                    summary_text = None
-                    if self._transcript:
+                    # Resumen legible según resultado
+                    if had_conversation:
                         summary_text = " | ".join(
                             f"{t['role']}: {t['text'][:80]}"
                             for t in self._transcript[:6]
                         )
                         if len(summary_text) > 500:
                             summary_text = summary_text[:500]
+                    elif self._transcript:
+                        # Contestó pero no hubo diálogo real
+                        summary_text = (
+                            "La llamada conectó pero no se logró una conversación. "
+                            f"Solo hubo {len(self._transcript)} mensaje(s)."
+                        )
+                    else:
+                        summary_text = "La llamada conectó pero el contacto colgó sin hablar."
 
                     update_data: dict = {
                         "status": call_status,

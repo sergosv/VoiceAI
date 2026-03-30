@@ -1458,7 +1458,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     if _cc.data:
                         _sb_timeout.table("campaign_calls").update({
                             "status": "no_answer",
-                            "result_summary": "No contestó (timeout 60s)",
+                            "result_summary": "El contacto no contestó la llamada (sin respuesta después de 60s)",
                         }).eq("id", _cc.data[0]["id"]).execute()
                 except Exception:
                     logger.exception("Error actualizando campaign_call a no_answer")

@@ -115,7 +115,7 @@ def _cleanup_stale_calls(sb, campaign_id: str) -> int:
     for sid in stale_ids:
         sb.table("campaign_calls").update({
             "status": "failed",
-            "result_summary": f"Timeout: stuck en 'calling' por más de {CALLING_TIMEOUT_MINUTES}min",
+            "result_summary": f"Error técnico: la llamada no se procesó correctamente (sin respuesta del agente en {CALLING_TIMEOUT_MINUTES}min)",
         }).eq("id", sid).execute()
 
     logger.warning(
@@ -559,18 +559,29 @@ async def _place_outbound_call(
             max_retries = camp_data.data[0]["retry_attempts"] if camp_data.data else 2
             current_attempt = call_entry.get("attempt", 0) + 1
 
+            # Mensaje de error legible
+            err_str = str(e)
+            if "trunk" in err_str.lower():
+                friendly_error = f"Error de telefonía: no se pudo conectar con el trunk SIP ({err_str[:200]})"
+            elif "room" in err_str.lower():
+                friendly_error = f"Error creando sala de llamada ({err_str[:200]})"
+            elif "credit" in err_str.lower() or "balance" in err_str.lower():
+                friendly_error = f"Créditos insuficientes para realizar la llamada"
+            else:
+                friendly_error = f"Error al iniciar llamada: {err_str[:300]}"
+
             if current_attempt < max_retries:
                 delay = camp_data.data[0]["retry_delay_minutes"] if camp_data.data else 30
                 next_retry = datetime.now(timezone.utc) + timedelta(minutes=delay)
                 sb.table("campaign_calls").update({
                     "status": "retry",
                     "next_retry_at": next_retry.isoformat(),
-                    "result_summary": str(e)[:500],
+                    "result_summary": f"Reintentando ({current_attempt}/{max_retries}): {friendly_error}",
                 }).eq("id", call_entry_id).execute()
             else:
                 sb.table("campaign_calls").update({
                     "status": "failed",
-                    "result_summary": str(e)[:500],
+                    "result_summary": f"Falló después de {current_attempt} intentos: {friendly_error}",
                 }).eq("id", call_entry_id).execute()
         finally:
             if lk_api is not None:
