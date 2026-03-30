@@ -120,14 +120,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Esperar al participante SIP
     caller_number: str | None = None
     called_number: str | None = None
+    _sip_connected = asyncio.Event()
 
     def on_participant_connected(participant: rtc.RemoteParticipant) -> None:
         nonlocal caller_number, called_number
         if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
             caller_number = participant.attributes.get("sip.phoneNumber")
             called_number = participant.attributes.get("sip.trunkPhoneNumber")
+            _sip_connected.set()
             logger.info(
-                "SIP participante: caller=%s, called=%s",
+                "SIP participante conectado: caller=%s, called=%s",
                 caller_number,
                 called_number,
             )
@@ -139,15 +141,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
             caller_number = p.attributes.get("sip.phoneNumber")
             called_number = p.attributes.get("sip.trunkPhoneNumber")
+            _sip_connected.set()
             break
 
     # Si no hay SIP (ej: test desde web), esperar un momento
-    if not called_number:
+    if not _sip_connected.is_set():
         await asyncio.sleep(2)
         for p in ctx.room.remote_participants.values():
             if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
                 caller_number = p.attributes.get("sip.phoneNumber")
                 called_number = p.attributes.get("sip.trunkPhoneNumber")
+                _sip_connected.set()
                 break
 
     # Detectar modo outbound desde metadata del room
@@ -731,6 +735,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Para outbound, los números van al revés:
     # - caller_number = nuestro número (el que llama)
     # - callee_number = el número destino (sip.phoneNumber del participante SIP)
+    # NOTA: en outbound los números pueden estar vacíos aquí (SIP participant aún
+    # no conectado). Se actualizan después de esperar la conexión (ver más abajo).
     if outbound_mode:
         outbound_callee = caller_number  # sip.phoneNumber = a quién llamamos
         outbound_caller = called_number or config.agent.phone_number
@@ -1408,6 +1414,55 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         )
         # on_shutdown se ejecutará vía ctx shutdown callback
         return
+
+    # ── OUTBOUND: Esperar a que la persona conteste antes de saludar ──
+    # En outbound, el agente se despacha al crear el room, ANTES de que el SIP
+    # participant se conecte (la persona contesta). Si saludamos antes de que
+    # conteste, el audio se pierde. Esperamos hasta 60s a que conteste.
+    if outbound_mode and not _sip_connected.is_set():
+        logger.info("Outbound: esperando a que la persona conteste...")
+        try:
+            await asyncio.wait_for(_sip_connected.wait(), timeout=60)
+            logger.info(
+                "Outbound: persona contestó — caller=%s, called=%s",
+                caller_number, called_number,
+            )
+            # Actualizar números en el handler ahora que los tenemos
+            outbound_callee = caller_number  # sip.phoneNumber = a quién llamamos
+            outbound_caller = called_number or config.agent.phone_number
+            handler._caller_number = outbound_caller
+            handler._callee_number = outbound_callee
+            # Actualizar identity SIP para transfer
+            if hasattr(voice_agent, "_room_name"):
+                for p in ctx.room.remote_participants.values():
+                    if p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                        voice_agent._sip_participant_identity = p.identity
+                        break
+            # Pequeña pausa para que el audio esté estable
+            await asyncio.sleep(0.5)
+        except asyncio.TimeoutError:
+            logger.warning("Outbound: nadie contestó en 60s, cerrando sesión")
+            # Actualizar campaign_calls a no_answer
+            if campaign_id:
+                try:
+                    _sb_timeout = get_supabase()
+                    # Buscar por campaign_id + status calling (puede haber varias, limitar a 1)
+                    _cc = (
+                        _sb_timeout.table("campaign_calls")
+                        .select("id")
+                        .eq("campaign_id", campaign_id)
+                        .eq("status", "calling")
+                        .limit(1)
+                        .execute()
+                    )
+                    if _cc.data:
+                        _sb_timeout.table("campaign_calls").update({
+                            "status": "no_answer",
+                            "result_summary": "No contestó (timeout 60s)",
+                        }).eq("id", _cc.data[0]["id"]).execute()
+                except Exception:
+                    logger.exception("Error actualizando campaign_call a no_answer")
+            return
 
     # Hook: OnGreeting — personalizar saludo según contexto
     greeting_override: str | None = None

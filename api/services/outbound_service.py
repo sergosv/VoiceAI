@@ -23,6 +23,8 @@ DAILY_OUTBOUND_LIMIT = int(os.environ.get("OUTBOUND_DAILY_LIMIT", "200"))
 MIN_ANSWER_RATE = float(os.environ.get("OUTBOUND_MIN_ANSWER_RATE", "0.20"))
 MIN_CALLS_FOR_RATE_CHECK = int(os.environ.get("OUTBOUND_MIN_CALLS_RATE_CHECK", "15"))
 MIN_AVG_DURATION_SECONDS = int(os.environ.get("OUTBOUND_MIN_AVG_DURATION", "10"))
+# Timeout para llamadas stuck en "calling" (minutos)
+CALLING_TIMEOUT_MINUTES = int(os.environ.get("OUTBOUND_CALLING_TIMEOUT_MINUTES", "5"))
 
 # Mantener referencias a tasks de campañas para evitar GC prematuro
 _running_campaigns: set[asyncio.Task] = set()
@@ -86,6 +88,42 @@ def _check_campaign_health(sb, campaign_id: str) -> str | None:
         )
 
     return None
+
+
+def _cleanup_stale_calls(sb, campaign_id: str) -> int:
+    """Marca como failed las llamadas stuck en 'calling' por más de CALLING_TIMEOUT_MINUTES.
+
+    Retorna cantidad de llamadas limpiadas.
+    """
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(minutes=CALLING_TIMEOUT_MINUTES)
+    ).isoformat()
+
+    # Buscar llamadas en "calling" cuyo último update fue antes del cutoff
+    stale = (
+        sb.table("campaign_calls")
+        .select("id")
+        .eq("campaign_id", campaign_id)
+        .eq("status", "calling")
+        .lt("updated_at", cutoff)
+        .execute()
+    )
+    if not stale.data:
+        return 0
+
+    stale_ids = [row["id"] for row in stale.data]
+    for sid in stale_ids:
+        sb.table("campaign_calls").update({
+            "status": "failed",
+            "result_summary": f"Timeout: stuck en 'calling' por más de {CALLING_TIMEOUT_MINUTES}min",
+        }).eq("id", sid).execute()
+
+    logger.warning(
+        "Campaign %s: %d llamadas stuck en 'calling' marcadas como failed",
+        campaign_id, len(stale_ids),
+    )
+    _update_campaign_counters(sb, campaign_id)
+    return len(stale_ids)
 
 
 async def start_campaign(campaign_id: str) -> dict:
@@ -225,6 +263,9 @@ async def _campaign_runner(campaign_id: str, max_concurrent: int) -> None:
             .limit(1)
             .execute()
         )
+        # Limpiar llamadas stuck en "calling" que excedieron el timeout
+        _cleanup_stale_calls(sb, campaign_id)
+
         if not camp.data or camp.data[0]["status"] != "running":
             logger.info("Campaña %s ya no está running, deteniendo", campaign_id)
             break

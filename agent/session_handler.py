@@ -442,59 +442,87 @@ class SessionHandler:
         if self._campaign_id and self._direction == "outbound":
             try:
                 phone = self._callee_number or self._caller_number
+                cc = None
+
+                # Buscar campaign_call por teléfono si lo tenemos
                 if phone:
                     cc = (
                         sb.table("campaign_calls")
-                        .select("id, campaign_id, contact_id")
+                        .select("id, campaign_id, contact_id, phone")
                         .eq("campaign_id", self._campaign_id)
                         .eq("phone", phone)
                         .eq("status", "calling")
                         .limit(1)
                         .execute()
                     )
-                    if cc.data:
-                        cc_id = cc.data[0]["id"]
-                        had_conversation = len(self._transcript) > 1
-                        call_status = "completed" if had_conversation else "no_answer"
 
-                        summary_text = None
-                        if self._transcript:
-                            summary_text = " | ".join(
-                                f"{t['role']}: {t['text'][:80]}"
-                                for t in self._transcript[:6]
-                            )
-                            if len(summary_text) > 500:
-                                summary_text = summary_text[:500]
+                # Fallback: si no tenemos teléfono o no encontramos match,
+                # buscar por campaign_id + status "calling" (puede haber solo 1 activa)
+                if not cc or not cc.data:
+                    logger.warning(
+                        "Campaign call no encontrada por phone=%s, "
+                        "buscando por campaign_id + status calling",
+                        phone,
+                    )
+                    cc = (
+                        sb.table("campaign_calls")
+                        .select("id, campaign_id, contact_id, phone")
+                        .eq("campaign_id", self._campaign_id)
+                        .eq("status", "calling")
+                        .limit(1)
+                        .execute()
+                    )
 
-                        update_data: dict = {
-                            "status": call_status,
-                            "call_id": call_id,
-                            "result_summary": summary_text,
-                        }
+                if cc and cc.data:
+                    cc_id = cc.data[0]["id"]
+                    cc_phone = cc.data[0].get("phone") or phone
+                    had_conversation = len(self._transcript) > 1
+                    call_status = "completed" if had_conversation else "no_answer"
 
-                        if had_conversation:
-                            analysis = await analyze_call_transcript(
-                                self._transcript, self._campaign_script
-                            )
-                            if analysis:
-                                update_data["analysis_data"] = analysis
-                                _enrich_contact(
-                                    sb,
-                                    self._client_id,
-                                    phone,
-                                    cc.data[0].get("contact_id"),
-                                    analysis,
-                                )
-
-                        sb.table("campaign_calls").update(
-                            update_data
-                        ).eq("id", cc_id).execute()
-
-                        _update_campaign_counters(sb, self._campaign_id)
-                        logger.info(
-                            "Campaign call actualizada: %s -> %s (transcript: %d entries)",
-                            phone, call_status, len(self._transcript),
+                    summary_text = None
+                    if self._transcript:
+                        summary_text = " | ".join(
+                            f"{t['role']}: {t['text'][:80]}"
+                            for t in self._transcript[:6]
                         )
+                        if len(summary_text) > 500:
+                            summary_text = summary_text[:500]
+
+                    update_data: dict = {
+                        "status": call_status,
+                        "call_id": call_id,
+                        "result_summary": summary_text,
+                    }
+
+                    if had_conversation:
+                        analysis = await analyze_call_transcript(
+                            self._transcript, self._campaign_script
+                        )
+                        if analysis:
+                            update_data["analysis_data"] = analysis
+                            _enrich_contact(
+                                sb,
+                                self._client_id,
+                                cc_phone,
+                                cc.data[0].get("contact_id"),
+                                analysis,
+                            )
+
+                    sb.table("campaign_calls").update(
+                        update_data
+                    ).eq("id", cc_id).execute()
+
+                    _update_campaign_counters(sb, self._campaign_id)
+                    logger.info(
+                        "Campaign call actualizada: %s -> %s (transcript: %d entries)",
+                        cc_phone, call_status, len(self._transcript),
+                    )
+                else:
+                    logger.error(
+                        "No se encontró campaign_call para campaign_id=%s — "
+                        "status quedará stuck en 'calling'",
+                        self._campaign_id,
+                    )
             except Exception:
                 logger.exception("Error actualizando campaign_call")
 
