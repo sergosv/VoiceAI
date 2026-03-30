@@ -369,7 +369,7 @@ export function CampaignDetail() {
             </Button>
           ) : (
             <>
-              {['paused', 'completed'].includes(campaign.status) && (
+              {['paused', 'completed', 'running'].includes(campaign.status) && (
                 <Button variant="secondary" onClick={handleRestart}>
                   <Play size={16} className="mr-1" /> Relanzar
                 </Button>

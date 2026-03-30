@@ -210,10 +210,13 @@ async def restart_campaign(campaign_id: str) -> dict:
         raise ValueError("Campaña no encontrada")
 
     camp = campaign.data[0]
-    if camp["status"] == "running":
-        raise ValueError("No se puede reiniciar una campaña en ejecución")
 
-    # Resetear campaign_calls fallidos/completados a pending
+    # Si está running, primero pausarla para detener el runner
+    if camp["status"] == "running":
+        sb.table("campaigns").update({"status": "paused"}).eq("id", campaign_id).execute()
+        logger.info("Campaña %s pausada antes de reiniciar", campaign_id)
+
+    # Resetear campaign_calls fallidos/completados/calling a pending
     sb.table("campaign_calls").update({
         "status": "pending",
         "attempt": 0,
@@ -221,7 +224,7 @@ async def restart_campaign(campaign_id: str) -> dict:
         "analysis_data": None,
         "next_retry_at": None,
     }).eq("campaign_id", campaign_id).in_(
-        "status", ["completed", "failed", "no_answer", "busy"]
+        "status", ["completed", "failed", "no_answer", "busy", "calling"]
     ).execute()
 
     # Resetear contadores de la campaña
