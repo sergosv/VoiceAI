@@ -363,24 +363,21 @@ export function CampaignDetail() {
               label="Probar script"
             />
           )}
-          {campaign.status === 'running' ? (
+          {campaign.status === 'running' && (
             <Button variant="secondary" onClick={handlePause}>
               <Pause size={16} className="mr-1" /> Pausar
             </Button>
-          ) : (
-            <>
-              {['paused', 'completed', 'running'].includes(campaign.status) && (
-                <Button variant="secondary" onClick={handleRestart}>
-                  <Play size={16} className="mr-1" /> Relanzar
-                </Button>
-              )}
-              {['draft', 'paused', 'scheduled'].includes(campaign.status) && campaign.total_contacts > 0 && (
-                <Button onClick={handleStart}>
-                  <Play size={16} className="mr-1" />
-                  {campaign.status === 'paused' ? 'Reanudar' : 'Iniciar'}
-                </Button>
-              )}
-            </>
+          )}
+          {['paused', 'completed', 'running'].includes(campaign.status) && (
+            <Button variant="secondary" onClick={handleRestart}>
+              <Play size={16} className="mr-1" /> Relanzar
+            </Button>
+          )}
+          {['draft', 'paused', 'scheduled'].includes(campaign.status) && campaign.total_contacts > 0 && (
+            <Button onClick={handleStart}>
+              <Play size={16} className="mr-1" />
+              {campaign.status === 'paused' ? 'Reanudar' : 'Iniciar'}
+            </Button>
           )}
           {campaign.status !== 'running' && (
             <Button variant="secondary" className="text-danger" onClick={handleDelete}>
