@@ -423,22 +423,37 @@ class SessionHandler:
         try:
             from agent.webhook_dispatch import dispatch_event as _dispatch
 
+            # Incluir lifecycle data en el webhook para sistemas externos
+            webhook_payload = {
+                "client_id": self._client_id,
+                "call_id": call_id,
+                "agent_id": self._agent_id,
+                "room_name": self._room_name,
+                "direction": self._direction,
+                "caller_number": self._caller_number,
+                "callee_number": self._callee_number,
+                "duration_seconds": duration_seconds,
+                "cost_total": float(total_cost),
+                "status": status,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            if self._lifecycle and hasattr(self._lifecycle, "get_summary"):
+                try:
+                    lc = self._lifecycle.get_summary()
+                    webhook_payload.update({
+                        "disposition": lc.get("disposition"),
+                        "disconnect_reason": lc.get("disconnect_reason"),
+                        "disconnect_by": lc.get("disconnect_by"),
+                        "ring_duration_seconds": lc.get("ring_duration_seconds"),
+                        "talk_duration_seconds": lc.get("talk_duration_seconds"),
+                        "answered_at": lc.get("answered_at"),
+                        "user_turns": lc.get("user_turns"),
+                        "agent_turns": lc.get("agent_turns"),
+                    })
+                except Exception:
+                    pass
             self._create_background_task(_dispatch(
-                self._client_id,
-                "call.completed",
-                {
-                    "client_id": self._client_id,
-                    "call_id": call_id,
-                    "agent_id": self._agent_id,
-                    "room_name": self._room_name,
-                    "direction": self._direction,
-                    "caller_number": self._caller_number,
-                    "callee_number": self._callee_number,
-                    "duration_seconds": duration_seconds,
-                    "cost_total": float(total_cost),
-                    "status": status,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
+                self._client_id, "call.completed", webhook_payload,
             ))
         except Exception:
             logger.exception("Error dispatching call.completed webhook")

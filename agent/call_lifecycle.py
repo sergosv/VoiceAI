@@ -127,8 +127,8 @@ class CallLifecycleTracker:
             self._disconnect_by = "agent"
 
     def record_transfer(self, target: str, success: bool = True) -> None:
-        """Se inició/completó una transferencia."""
-        event = "transfer_completed" if success else "transfer_started"
+        """Se completó o falló una transferencia."""
+        event = "transfer_completed" if success else "transfer_failed"
         self.add_event(event, {"target": target, "success": success})
         if success and not self._disconnect_reason:
             self._disconnect_reason = "transfer"

@@ -223,13 +223,44 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Listener: detectar cuando el SIP participant se desconecta (persona colgó)
     def on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
         if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
-            lifecycle.record_sip_disconnected(
-                identity=participant.identity,
-                reason=participant.disconnect_reason if hasattr(participant, 'disconnect_reason') else "",
-            )
+            # Capturar disconnect_reason de LiveKit SIP
+            # Valores posibles: USER_UNAVAILABLE, USER_REJECTED, SIP_TRUNK_FAILURE
+            sip_disconnect = ""
+            try:
+                sip_disconnect = str(participant.disconnect_reason) if hasattr(participant, 'disconnect_reason') else ""
+            except Exception:
+                pass
+
+            # Capturar sip.callStatus si disponible
+            sip_call_status = participant.attributes.get("sip.callStatus", "")
+
+            # Mapear SIP reasons a nuestro sistema
+            if "REJECTED" in sip_disconnect.upper() or "BUSY" in sip_disconnect.upper():
+                lifecycle.add_event("sip_rejected", {
+                    "sip_reason": sip_disconnect,
+                    "sip_call_status": sip_call_status,
+                })
+                if not lifecycle._disconnect_reason:
+                    lifecycle._disconnect_reason = "busy"
+                    lifecycle._disconnect_by = "caller"
+            elif "UNAVAILABLE" in sip_disconnect.upper():
+                lifecycle.add_event("sip_unavailable", {
+                    "sip_reason": sip_disconnect,
+                })
+                if not lifecycle._disconnect_reason:
+                    lifecycle._disconnect_reason = "no_answer"
+                    lifecycle._disconnect_by = "system"
+            elif "TRUNK_FAILURE" in sip_disconnect.upper() or "FAILURE" in sip_disconnect.upper():
+                lifecycle.record_error(f"SIP trunk failure: {sip_disconnect}", category="sip")
+            else:
+                lifecycle.record_sip_disconnected(
+                    identity=participant.identity,
+                    reason=sip_disconnect,
+                )
+
             logger.info(
-                "SIP participant desconectado: %s (identity=%s)",
-                participant.name, participant.identity,
+                "SIP participant desconectado: %s (identity=%s, reason=%s, callStatus=%s)",
+                participant.name, participant.identity, sip_disconnect, sip_call_status,
             )
 
     ctx.room.on("participant_disconnected", on_participant_disconnected)
@@ -664,6 +695,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             ctx.room.name,
             sip_identity,
         )
+
+    # Inyectar lifecycle tracker al agente para que transfer_to_human lo use
+    if hasattr(voice_agent, "_lifecycle"):
+        voice_agent._lifecycle = lifecycle
 
     # Filtrar tools deshabilitados del schema visible al LLM
     if hasattr(voice_agent, "filter_disabled_tools"):

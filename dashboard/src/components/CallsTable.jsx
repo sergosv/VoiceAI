@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Phone, PhoneOutgoing, Mic } from 'lucide-react'
+import { Phone, PhoneOutgoing, Mic, PhoneOff, Timer, ArrowRightLeft, AlertCircle, User, Bot } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { Badge } from './ui/Badge'
 import { Table, Th, Td } from './ui/Table'
@@ -15,6 +15,22 @@ function formatDate(iso) {
   const d = new Date(iso)
   return d.toLocaleDateString('es-MX', { month: 'short', day: 'numeric' }) +
     ' ' + d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
+const DISPOSITION_MINI = {
+  completed: { label: 'Completada', color: 'text-green-400', icon: Phone },
+  short_call: { label: 'Corta', color: 'text-yellow-400', icon: Timer },
+  abandoned: { label: 'Abandonada', color: 'text-orange-400', icon: PhoneOff },
+  no_answer: { label: 'Sin resp.', color: 'text-red-400', icon: PhoneOff },
+  transferred: { label: 'Transferida', color: 'text-blue-400', icon: ArrowRightLeft },
+  voicemail: { label: 'Buzon', color: 'text-purple-400', icon: Mic },
+  error: { label: 'Error', color: 'text-red-400', icon: AlertCircle },
+}
+
+const DISCONNECT_ICON = {
+  caller: User,
+  agent: Bot,
+  system: AlertCircle,
 }
 
 export function CallsTable({ calls = [] }) {
@@ -42,7 +58,7 @@ export function CallsTable({ calls = [] }) {
           <Th>De / Para</Th>
           <Th>Agente</Th>
           <Th>Duración</Th>
-          <Th>Estado</Th>
+          <Th>Resultado</Th>
           <Th>Fecha</Th>
           <Th>{isAdmin ? 'Costo' : 'Creditos'}</Th>
         </tr>
@@ -69,7 +85,22 @@ export function CallsTable({ calls = [] }) {
             </Td>
             <Td className="text-xs text-text-secondary">{call.agent_name || '-'}</Td>
             <Td className="font-mono">{formatDuration(call.duration_seconds)}</Td>
-            <Td><Badge variant={call.status}>{call.status}</Badge></Td>
+            <Td>
+              {call.disposition && DISPOSITION_MINI[call.disposition] ? (() => {
+                const cfg = DISPOSITION_MINI[call.disposition]
+                const Icon = cfg.icon
+                const DisIcon = DISCONNECT_ICON[call.disconnect_by]
+                return (
+                  <span className={`flex items-center gap-1 text-xs font-medium ${cfg.color}`}>
+                    <Icon size={13} />
+                    {cfg.label}
+                    {DisIcon && <DisIcon size={10} className="text-text-muted ml-0.5" title={`Colgó: ${call.disconnect_by}`} />}
+                  </span>
+                )
+              })() : (
+                <Badge variant={call.status}>{call.status}</Badge>
+              )}
+            </Td>
             <Td className="text-text-secondary text-xs">{formatDate(call.started_at)}</Td>
             <Td className="font-mono text-xs">
               {isAdmin

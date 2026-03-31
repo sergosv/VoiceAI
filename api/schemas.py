@@ -433,6 +433,10 @@ class CallOut(BaseModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     has_recording: bool = False
+    # Lifecycle (visible en lista)
+    disposition: str | None = None
+    disconnect_by: str | None = None
+    talk_duration_seconds: int | None = None
 
 
 class CallDetailOut(CallOut):

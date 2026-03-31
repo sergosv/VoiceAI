@@ -34,7 +34,8 @@ async def list_calls(
     query = sb.table("calls").select(
         "id, client_id, agent_id, direction, caller_number, callee_number, "
         "duration_seconds, cost_total, status, summary, sentimiento, resumen_ia, "
-        "started_at, ended_at, metadata, recording_url, recording_key"
+        "started_at, ended_at, metadata, recording_url, recording_key, "
+        "disposition, disconnect_by, talk_duration_seconds"
     ).order("started_at", desc=True)
 
     # Multi-tenancy (soporta impersonación admin)

@@ -66,6 +66,8 @@ class VoiceAgent(Agent):
         # Lifecycle hooks — inyectado desde main.py
         self._hook_engine: Any | None = None
         self._hook_channel: str = "voice"
+        # Call lifecycle tracker — inyectado desde main.py
+        self._lifecycle: Any | None = None
         # Cache de búsquedas en knowledge base (evita duplicados)
         self._search_cache: dict[str, str] = {}  # query_normalized → result
 
@@ -526,6 +528,9 @@ class VoiceAgent(Agent):
                 dest,
                 self._room_name,
             )
+            # Registrar en lifecycle
+            if self._lifecycle:
+                self._lifecycle.record_transfer(target=transfer_number, success=True)
             return (
                 f"Transferencia exitosa al número {transfer_number}. "
                 f"Motivo: {reason}. "
@@ -537,6 +542,11 @@ class VoiceAgent(Agent):
                 self._sip_participant_identity,
                 dest,
             )
+            # Registrar fallo en lifecycle
+            if self._lifecycle:
+                self._lifecycle.record_error(
+                    f"Transfer failed to {transfer_number}", category="sip"
+                )
             return (
                 f"Error al transferir la llamada. "
                 f"Informa al cliente que el equipo lo contactará al {transfer_number}. "
