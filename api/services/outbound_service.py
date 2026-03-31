@@ -24,7 +24,8 @@ MIN_ANSWER_RATE = float(os.environ.get("OUTBOUND_MIN_ANSWER_RATE", "0.20"))
 MIN_CALLS_FOR_RATE_CHECK = int(os.environ.get("OUTBOUND_MIN_CALLS_RATE_CHECK", "15"))
 MIN_AVG_DURATION_SECONDS = int(os.environ.get("OUTBOUND_MIN_AVG_DURATION", "10"))
 # Timeout para llamadas stuck en "calling" (minutos)
-CALLING_TIMEOUT_MINUTES = int(os.environ.get("OUTBOUND_CALLING_TIMEOUT_MINUTES", "5"))
+# Debe ser mayor que la duración máxima esperada de una llamada (15min por defecto)
+CALLING_TIMEOUT_MINUTES = int(os.environ.get("OUTBOUND_CALLING_TIMEOUT_MINUTES", "15"))
 
 # Mantener referencias a tasks de campañas para evitar GC prematuro
 _running_campaigns: set[asyncio.Task] = set()

@@ -445,33 +445,34 @@ class SessionHandler:
                 cc = None
 
                 # Buscar campaign_call por teléfono si lo tenemos
-                if phone:
-                    cc = (
-                        sb.table("campaign_calls")
-                        .select("id, campaign_id, contact_id, phone")
-                        .eq("campaign_id", self._campaign_id)
-                        .eq("phone", phone)
-                        .eq("status", "calling")
-                        .limit(1)
-                        .execute()
-                    )
+                # Buscar en "calling" primero, luego "failed" (el cleanup pudo
+                # marcarla prematuramente mientras la llamada aún estaba activa)
+                for search_status in ["calling", "failed"]:
+                    if phone:
+                        cc = (
+                            sb.table("campaign_calls")
+                            .select("id, campaign_id, contact_id, phone")
+                            .eq("campaign_id", self._campaign_id)
+                            .eq("phone", phone)
+                            .eq("status", search_status)
+                            .limit(1)
+                            .execute()
+                        )
+                        if cc and cc.data:
+                            break
 
-                # Fallback: si no tenemos teléfono o no encontramos match,
-                # buscar por campaign_id + status "calling" (puede haber solo 1 activa)
-                if not cc or not cc.data:
-                    logger.warning(
-                        "Campaign call no encontrada por phone=%s, "
-                        "buscando por campaign_id + status calling",
-                        phone,
-                    )
-                    cc = (
-                        sb.table("campaign_calls")
-                        .select("id, campaign_id, contact_id, phone")
-                        .eq("campaign_id", self._campaign_id)
-                        .eq("status", "calling")
-                        .limit(1)
-                        .execute()
-                    )
+                    # Fallback: buscar por campaign_id + status sin phone
+                    if not cc or not cc.data:
+                        cc = (
+                            sb.table("campaign_calls")
+                            .select("id, campaign_id, contact_id, phone")
+                            .eq("campaign_id", self._campaign_id)
+                            .eq("status", search_status)
+                            .limit(1)
+                            .execute()
+                        )
+                        if cc and cc.data:
+                            break
 
                 if cc and cc.data:
                     cc_id = cc.data[0]["id"]
