@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 from google import genai
 from google.genai import types
@@ -80,7 +81,29 @@ Analiza la siguiente transcripción de una llamada de venta outbound y extrae in
 - Lista las objeciones específicas que mencionó el prospecto (array vacío si no hubo)
 - El resumen debe ser en español, conciso (2-3 oraciones)
 - La confianza debe reflejar qué tan claro fue el resultado
+- IMPORTANTE: Usa caracteres normales con acentos (á, é, í, ó, ú, ñ), NO uses secuencias Unicode como \\u00f3
 """
+
+
+def _fix_unicode_escapes(obj: object) -> object:
+    """Decodifica secuencias Unicode escapadas en strings (ej: '00f3' → 'ó').
+
+    Gemini a veces genera texto con code points Unicode literales en vez de
+    caracteres reales. Esta función los detecta y convierte recursivamente.
+    """
+    if isinstance(obj, str):
+        # Patrón: '00' + 2 hex chars que NO son parte de una palabra (ej: "00f3n" → "ón")
+        def _replace(m: re.Match) -> str:
+            try:
+                return chr(int(m.group(0), 16))
+            except (ValueError, OverflowError):
+                return m.group(0)
+        return re.sub(r"(?<![a-zA-Z0-9])00[a-f][0-9a-f](?![a-zA-Z0-9])", _replace, obj)
+    if isinstance(obj, dict):
+        return {k: _fix_unicode_escapes(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_fix_unicode_escapes(v) for v in obj]
+    return obj
 
 
 def _build_transcript_text(transcript: list[dict]) -> str:
@@ -122,7 +145,8 @@ def _sync_analyze(transcript_text: str, campaign_script: str | None) -> dict | N
         ),
     )
 
-    return json.loads(response.text)
+    result = json.loads(response.text)
+    return _fix_unicode_escapes(result)
 
 
 async def analyze_call_transcript(
@@ -227,6 +251,7 @@ y extrae información estructurada.
 - Recomienda la siguiente acción
 - El resumen debe ser en español, conciso (2-3 oraciones)
 - Indica si se agendó una cita durante la llamada
+- IMPORTANTE: Usa caracteres normales con acentos (á, é, í, ó, ú, ñ), NO uses secuencias Unicode como \\u00f3
 """
 
 
@@ -264,7 +289,8 @@ def _sync_analyze_universal(
         ),
     )
 
-    return json.loads(response.text)
+    result = json.loads(response.text)
+    return _fix_unicode_escapes(result)
 
 
 async def analyze_call_universal(
