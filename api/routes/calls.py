@@ -225,6 +225,19 @@ async def get_call_detail(
         lines=[CostLineItem(**line) for line in bd["lines"]],
     )
 
+    # Cargar call_events (lifecycle timeline)
+    try:
+        events_result = (
+            sb.table("call_events")
+            .select("event, timestamp, details")
+            .eq("call_id", call_id)
+            .order("timestamp")
+            .execute()
+        )
+        call["call_events"] = events_result.data or []
+    except Exception:
+        call["call_events"] = []
+
     return CallDetailOut(**call)
 
 

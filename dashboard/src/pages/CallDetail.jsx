@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones, Mic } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones, Mic, Clock, PhoneOff, PhoneIncoming, PhoneOutgoing, User, Bot, Timer } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { Card } from '../components/ui/Card'
@@ -49,6 +49,54 @@ const SENTIMENT_RT_TEXT = {
   negative: 'text-orange-400',
   frustrated: 'text-red-400',
   angry: 'text-red-400',
+}
+
+const DISPOSITION_CONFIG = {
+  completed: { label: 'Completada', color: 'bg-green-500/20 text-green-400', icon: Phone },
+  short_call: { label: 'Llamada corta', color: 'bg-yellow-500/20 text-yellow-400', icon: Timer },
+  abandoned: { label: 'Abandonada', color: 'bg-orange-500/20 text-orange-400', icon: PhoneOff },
+  no_answer: { label: 'Sin respuesta', color: 'bg-red-500/20 text-red-400', icon: PhoneOff },
+  transferred: { label: 'Transferida', color: 'bg-blue-500/20 text-blue-400', icon: ArrowRightLeft },
+  voicemail: { label: 'Buzon de voz', color: 'bg-purple-500/20 text-purple-400', icon: Mic },
+  error: { label: 'Error', color: 'bg-red-500/20 text-red-400', icon: AlertCircle },
+}
+
+const DISCONNECT_LABELS = {
+  caller_hangup: 'El usuario colgo',
+  agent_hangup: 'El agente termino',
+  transfer: 'Transferida',
+  no_answer: 'Sin respuesta',
+  busy: 'Ocupado',
+  timeout_inactivity: 'Timeout por inactividad',
+  timeout_max_duration: 'Duracion maxima',
+  error_sip: 'Error SIP',
+  error_media: 'Error de audio',
+  error_agent: 'Error del agente',
+  rejected: 'Rechazada',
+  voicemail: 'Buzon de voz',
+}
+
+const DISCONNECT_BY_ICONS = {
+  caller: User,
+  agent: Bot,
+  system: AlertCircle,
+  transfer: ArrowRightLeft,
+}
+
+const EVENT_CONFIG = {
+  call_initiated: { label: 'Llamada iniciada', color: 'bg-blue-400' },
+  sip_answered: { label: 'Contestada', color: 'bg-green-400' },
+  agent_ready: { label: 'Agente listo', color: 'bg-accent' },
+  first_speech_agent: { label: 'Agente habla', color: 'bg-accent' },
+  first_speech_user: { label: 'Usuario habla', color: 'bg-purple-400' },
+  user_hangup: { label: 'Usuario colgo', color: 'bg-red-400' },
+  agent_hangup: { label: 'Agente termino', color: 'bg-orange-400' },
+  transfer_started: { label: 'Transferencia', color: 'bg-blue-400' },
+  transfer_completed: { label: 'Transfer OK', color: 'bg-green-400' },
+  no_answer: { label: 'Sin respuesta', color: 'bg-red-400' },
+  timeout_inactivity: { label: 'Timeout', color: 'bg-yellow-400' },
+  error: { label: 'Error', color: 'bg-red-500' },
+  call_ended: { label: 'Fin', color: 'bg-gray-400' },
 }
 
 const INTENT_RT_LABELS = {
@@ -206,6 +254,94 @@ export function CallDetail() {
             </div>
           )}
         </Card>
+
+        {/* Lifecycle — Ciclo de vida de la llamada */}
+        {(call.disposition || call.disconnect_reason || call.call_events?.length > 0) && (
+          <Card className="lg:col-span-2 space-y-4">
+            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+              <Clock size={16} className="text-accent" /> Ciclo de vida
+            </h2>
+
+            {/* Badges de disposition + disconnect */}
+            <div className="flex flex-wrap gap-2">
+              {call.disposition && DISPOSITION_CONFIG[call.disposition] && (() => {
+                const cfg = DISPOSITION_CONFIG[call.disposition]
+                const Icon = cfg.icon
+                return (
+                  <span className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 ${cfg.color}`}>
+                    <Icon size={12} />{cfg.label}
+                  </span>
+                )
+              })()}
+              {call.disconnect_reason && (
+                <span className="px-2 py-1 rounded text-xs font-medium bg-bg-hover text-text-secondary flex items-center gap-1.5">
+                  {(() => {
+                    const Icon = DISCONNECT_BY_ICONS[call.disconnect_by] || PhoneOff
+                    return <Icon size={12} />
+                  })()}
+                  {DISCONNECT_LABELS[call.disconnect_reason] || call.disconnect_reason}
+                </span>
+              )}
+            </div>
+
+            {/* Tiempos */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {call.ring_duration_seconds != null && (
+                <div className="bg-bg-secondary rounded-lg p-3 text-center">
+                  <div className="text-lg font-mono font-bold text-text-primary">{call.ring_duration_seconds}s</div>
+                  <div className="text-[10px] text-text-muted mt-0.5">Tiempo de ring</div>
+                </div>
+              )}
+              {call.talk_duration_seconds != null && (
+                <div className="bg-bg-secondary rounded-lg p-3 text-center">
+                  <div className="text-lg font-mono font-bold text-accent">{call.talk_duration_seconds}s</div>
+                  <div className="text-[10px] text-text-muted mt-0.5">Tiempo de habla</div>
+                </div>
+              )}
+              <div className="bg-bg-secondary rounded-lg p-3 text-center">
+                <div className="text-lg font-mono font-bold text-text-primary">{call.duration_seconds}s</div>
+                <div className="text-[10px] text-text-muted mt-0.5">Duracion total</div>
+              </div>
+              {call.first_speech_at && call.answered_at && (
+                <div className="bg-bg-secondary rounded-lg p-3 text-center">
+                  <div className="text-lg font-mono font-bold text-purple-400">
+                    {Math.max(0, Math.round((new Date(call.first_speech_at) - new Date(call.answered_at)) / 1000))}s
+                  </div>
+                  <div className="text-[10px] text-text-muted mt-0.5">Hasta 1er palabra</div>
+                </div>
+              )}
+            </div>
+
+            {/* Timeline de eventos */}
+            {call.call_events?.length > 0 && (
+              <div>
+                <h3 className="text-xs text-text-muted mb-2">Timeline</h3>
+                <div className="relative pl-4 space-y-2">
+                  {/* Línea vertical */}
+                  <div className="absolute left-[7px] top-1 bottom-1 w-px bg-border" />
+                  {call.call_events.map((ev, i) => {
+                    const cfg = EVENT_CONFIG[ev.event] || { label: ev.event, color: 'bg-gray-500' }
+                    const time = new Date(ev.timestamp)
+                    const baseTime = call.call_events[0] ? new Date(call.call_events[0].timestamp) : time
+                    const elapsed = Math.round((time - baseTime) / 1000)
+                    return (
+                      <div key={i} className="flex items-center gap-3 relative">
+                        <div className={`w-2.5 h-2.5 rounded-full ${cfg.color} shrink-0 -ml-[5px] z-10 ring-2 ring-bg-primary`} />
+                        <span className="text-xs font-medium text-text-primary w-28 truncate">{cfg.label}</span>
+                        <span className="text-[10px] font-mono text-text-muted">+{elapsed}s</span>
+                        {ev.details && Object.keys(ev.details).length > 0 && (
+                          <span className="text-[10px] text-text-muted truncate max-w-[200px]">
+                            {Object.entries(ev.details).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* Sección Análisis IA */}
         {call.sentimiento && (

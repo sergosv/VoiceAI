@@ -455,6 +455,15 @@ class CallDetailOut(CallOut):
     sentiment_realtime: dict | None = None
     intent_realtime: dict | None = None
     quality_score: int | None = None
+    # Lifecycle
+    ring_duration_seconds: int | None = None
+    talk_duration_seconds: int | None = None
+    disconnect_reason: str | None = None
+    disconnect_by: str | None = None
+    disposition: str | None = None
+    first_speech_at: datetime | None = None
+    answered_at: datetime | None = None
+    call_events: list[dict] = Field(default_factory=list)
 
 
 class CallStatsOut(BaseModel):

@@ -90,6 +90,7 @@ class SessionHandler:
         campaign_script: str | None = None,
         memory_contact_id: str | None = None,
         recording_key: str | None = None,
+        lifecycle: object | None = None,
     ) -> None:
         self._config = config
         self._client_id = config.client.id
@@ -102,6 +103,7 @@ class SessionHandler:
         self._campaign_script = campaign_script
         self._memory_contact_id = memory_contact_id
         self._recording_key = recording_key
+        self._lifecycle = lifecycle
         self._started_at = datetime.now(timezone.utc)
         self._transcript: list[dict] = []
         self._agent_turns: list[dict] = []
@@ -365,6 +367,26 @@ class SessionHandler:
             call_data["sentiment_realtime"] = self._sentiment_summary
         if self._intent_summary:
             call_data["intent_realtime"] = self._intent_summary
+        # Lifecycle data — métricas de ciclo de vida
+        if self._lifecycle and hasattr(self._lifecycle, "get_summary"):
+            try:
+                lc = self._lifecycle.get_summary()
+                call_data["ring_duration_seconds"] = lc.get("ring_duration_seconds")
+                call_data["talk_duration_seconds"] = lc.get("talk_duration_seconds")
+                call_data["disconnect_reason"] = lc.get("disconnect_reason")
+                call_data["disconnect_by"] = lc.get("disconnect_by")
+                call_data["disposition"] = lc.get("disposition")
+                call_data["first_speech_at"] = lc.get("first_speech_at")
+                call_data["answered_at"] = lc.get("answered_at")
+                logger.info(
+                    "Lifecycle: disposition=%s, disconnect=%s by=%s, ring=%ss, talk=%ss",
+                    lc.get("disposition"), lc.get("disconnect_reason"),
+                    lc.get("disconnect_by"), lc.get("ring_duration_seconds"),
+                    lc.get("talk_duration_seconds"),
+                )
+            except Exception:
+                logger.exception("Error obteniendo lifecycle summary")
+
         call_id: str | None = None
         try:
             call_result = sb.table("calls").insert(call_data).execute()
@@ -377,6 +399,25 @@ class SessionHandler:
                 duration_seconds, total_cost,
             )
             # Continuar con call_id=None — el resto de finalize funciona parcialmente
+
+        # Guardar call_events individuales en DB
+        if call_id and self._lifecycle and hasattr(self._lifecycle, "events"):
+            try:
+                events_data = [
+                    {
+                        "call_id": call_id,
+                        "room_name": self._room_name,
+                        "event": ev.event,
+                        "timestamp": ev.timestamp.isoformat(),
+                        "details": ev.details,
+                    }
+                    for ev in self._lifecycle.events
+                ]
+                if events_data:
+                    sb.table("call_events").insert(events_data).execute()
+                    logger.info("Call events guardados: %d eventos", len(events_data))
+            except Exception:
+                logger.exception("Error guardando call_events")
 
         # Dispatch webhook: call.completed (fire-and-forget)
         try:

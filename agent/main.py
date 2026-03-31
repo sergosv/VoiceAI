@@ -24,6 +24,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.agent_factory import build_agent, build_orchestrated_agent
 from agent.billing import CallBilling
+from agent.call_lifecycle import CallLifecycleTracker
 from agent.hook_engine import HookAction, HookContext, HookEngine, load_hooks_for_agent
 from agent.guardrails import GuardrailsConfig, GuardrailsEngine
 from agent.intent import IntentConfig, RealtimeIntentExtractor
@@ -205,6 +206,33 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                             break
                     except (json.JSONDecodeError, AttributeError):
                         pass
+
+    # ── Inicializar lifecycle tracker ──
+    direction = "outbound" if outbound_mode else "inbound"
+    lifecycle = CallLifecycleTracker(room_name=ctx.room.name, direction=direction)
+    lifecycle.add_event("call_initiated", {
+        "direction": direction,
+        "outbound_mode": outbound_mode,
+        "widget_mode": widget_mode,
+    })
+
+    # Si el SIP ya estaba conectado (inbound), registrar el evento
+    if _sip_connected.is_set():
+        lifecycle.record_sip_connected(caller_number, called_number)
+
+    # Listener: detectar cuando el SIP participant se desconecta (persona colgó)
+    def on_participant_disconnected(participant: rtc.RemoteParticipant) -> None:
+        if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+            lifecycle.record_sip_disconnected(
+                identity=participant.identity,
+                reason=participant.disconnect_reason if hasattr(participant, 'disconnect_reason') else "",
+            )
+            logger.info(
+                "SIP participant desconectado: %s (identity=%s)",
+                participant.name, participant.identity,
+            )
+
+    ctx.room.on("participant_disconnected", on_participant_disconnected)
 
     # Cargar config del agente + cliente
     config: ResolvedConfig | None = None
@@ -755,6 +783,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         campaign_script=campaign_script,
         memory_contact_id=memory.contact_id if memory else None,
         recording_key=recording_key,
+        lifecycle=lifecycle,
     )
 
     # Inyectar métricas de uso para conteo real de TTS/LLM
@@ -942,6 +971,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     def on_user_input(ev) -> None:
         if ev.is_final:
             handler.add_transcript_entry("user", ev.transcript)
+            lifecycle.record_user_speech()
             # Guardrails: detectar prompt injection
             if guardrails:
                 injection = guardrails.check_user_input(ev.transcript)
@@ -1150,6 +1180,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 return
             if msg.role == "assistant" and msg.text_content:
                 handler.add_transcript_entry("assistant", msg.text_content)
+                lifecycle.record_agent_speech()
                 # Output guardrails: validar respuesta del agente
                 if guardrails:
                     check = guardrails.check_agent_response(msg.text_content)
@@ -1407,13 +1438,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 ),
             ),
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Error crítico en session.start() para '%s/%s'",
             config.client.slug, config.agent.slug,
         )
+        lifecycle.record_error(str(exc), category="agent")
         # on_shutdown se ejecutará vía ctx shutdown callback
         return
+
+    lifecycle.add_event("agent_ready")
 
     # ── OUTBOUND: Esperar a que la persona conteste antes de saludar ──
     # En outbound, el agente se despacha al crear el room, ANTES de que el SIP
@@ -1427,6 +1461,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 "Outbound: persona contestó — caller=%s, called=%s",
                 caller_number, called_number,
             )
+            # Registrar en lifecycle
+            lifecycle.record_sip_connected(caller_number, called_number)
             # Actualizar números en el handler ahora que los tenemos
             outbound_callee = caller_number  # sip.phoneNumber = a quién llamamos
             outbound_caller = called_number or config.agent.phone_number
@@ -1442,6 +1478,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             await asyncio.sleep(0.5)
         except asyncio.TimeoutError:
             logger.warning("Outbound: nadie contestó en 60s, cerrando sesión")
+            lifecycle.record_no_answer()
             # Actualizar campaign_calls a no_answer
             if campaign_id:
                 try:
