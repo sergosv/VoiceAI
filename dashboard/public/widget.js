@@ -19,7 +19,10 @@
   if (window.__voiceAIWidget) return;
   window.__voiceAIWidget = true;
 
-  const script = document.currentScript;
+  // Support async/defer: currentScript is null in those cases, so fall back to
+  // finding the script tag by src attribute.
+  const script = document.currentScript
+    || document.querySelector('script[data-agent][src*="widget"]');
   const AGENT_SLUG = script?.getAttribute('data-agent');
   const API_BASE = script?.getAttribute('data-api') || '/api';
   const POSITION = script?.getAttribute('data-position') || 'bottom-right';
@@ -28,8 +31,14 @@
   const TITLE = script?.getAttribute('data-title') || 'Hablar con asistente';
 
   if (!AGENT_SLUG) {
-    console.error('[VoiceAI Widget] Missing data-agent attribute');
+    console.error('[VoiceAI Widget] Missing data-agent attribute. Make sure your <script> tag has data-agent="your-agent-slug".');
     return;
+  }
+
+  // Ensure DOM is ready before appending elements (handles script in <head>)
+  function onDomReady(fn) {
+    if (document.body) { fn(); }
+    else { document.addEventListener('DOMContentLoaded', fn); }
   }
 
   // ── State ──
@@ -243,10 +252,13 @@
     }
   `;
 
-  // ── Build DOM ──
+  // ── Build DOM (deferred until body exists) ──
   const styleEl = document.createElement('style');
   styleEl.textContent = css;
-  document.head.appendChild(styleEl);
+  (document.head || document.documentElement).appendChild(styleEl);
+
+  onDomReady(initWidget);
+  function initWidget() {
 
   // FAB button
   const fab = document.createElement('button');
@@ -689,4 +701,6 @@
 
   // ── Preload config ──
   ensureConfig().catch(() => {});
+
+  } // end initWidget
 })();
