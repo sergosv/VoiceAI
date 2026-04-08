@@ -1619,9 +1619,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if greeting_override:
         await session.generate_reply(instructions=f"Saluda al usuario con: {greeting_override}")
     elif outbound_mode:
-        await session.generate_reply(
-            instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
-        )
+        # En outbound, usar TTS directo para saludo instantáneo (sin esperar LLM)
+        outbound_greeting = config.agent.greeting or "Hola, buenas tardes."
+        await session.say(outbound_greeting, allow_interruptions=True)
     elif hasattr(voice_agent, '_flow_engine') and hasattr(voice_agent, '_flow_state'):
         # Modo flow: usar greeting del nodo Start
         flow_greeting = voice_agent.flow_engine.get_greeting(voice_agent.flow_state)
