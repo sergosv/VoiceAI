@@ -737,10 +737,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if lang_cfg.enabled:
         stt_multi_lang = lang_cfg.supported_languages
 
+    # VAD más permisivo para gemini_live (maneja su propio turn detection)
+    is_gemini_live = config.agent.agent_mode == "gemini_live"
     vad = silero.VAD.load(
-        activation_threshold=0.65,
-        min_speech_duration=0.3,
-        min_silence_duration=0.6,
+        activation_threshold=0.5 if is_gemini_live else 0.65,
+        min_speech_duration=0.1 if is_gemini_live else 0.3,
+        min_silence_duration=0.4 if is_gemini_live else 0.6,
         sample_rate=8000,
     )
 
@@ -770,10 +772,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 llm=build_gemini_live_model(config.agent),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.8,
+                min_endpointing_delay=0.5,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=1.0,
-                min_interruption_words=2,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
             )
         else:
             logger.info(
