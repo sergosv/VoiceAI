@@ -1298,6 +1298,22 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             "Finalizando sesión para '%s/%s'",
             config.client.slug, config.agent.slug,
         )
+        # Esperar checkpoint pendiente para no perder transcript parcial
+        if handler._checkpoint_task and not handler._checkpoint_task.done():
+            try:
+                await asyncio.wait_for(handler._checkpoint_task, timeout=5)
+            except (asyncio.TimeoutError, Exception):
+                logger.warning("Checkpoint task no completó a tiempo")
+        # Esperar a que pending background tasks del handler terminen
+        if handler._background_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*handler._background_tasks, return_exceptions=True),
+                    timeout=5,
+                )
+            except (asyncio.TimeoutError, Exception):
+                logger.warning("Background tasks del handler no completaron a tiempo")
+
         # Pasar agent_turns si es modo orquestado
         if is_orchestrated and hasattr(voice_agent, "agent_turns"):
             handler.set_agent_turns(voice_agent.agent_turns)
@@ -1326,7 +1342,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
                 # Validar que el archivo se escribió en R2
                 if recording_key:
-                    await asyncio.sleep(2)  # Dar tiempo a R2 para finalizar escritura
+                    await asyncio.sleep(5)  # Dar tiempo a R2 para finalizar escritura
                     from api.services.recording_service import check_exists
 
                     exists = await asyncio.to_thread(check_exists, recording_key)

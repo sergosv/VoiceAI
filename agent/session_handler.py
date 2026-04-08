@@ -115,9 +115,10 @@ class SessionHandler:
         # Almacenar referencias a tareas fire-and-forget para evitar GC
         self._background_tasks: set[asyncio.Task] = set()
         # Checkpoint: guardar transcript parcial cada N turnos
-        self._checkpoint_interval = 5  # cada 5 turnos
+        self._checkpoint_interval = 3  # cada 3 turnos
         self._last_checkpoint_turn = 0
         self._checkpoint_task: asyncio.Task | None = None
+        self._checkpoint_call_id: str | None = None  # ID del registro checkpoint
 
     def add_transcript_entry(self, role: str, text: str) -> None:
         """Agrega una entrada al transcript y dispara checkpoint si toca."""
@@ -126,14 +127,15 @@ class SessionHandler:
             "text": text,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        # Checkpoint periódico
+        # Checkpoint periódico — primer checkpoint tras 2 turnos, luego cada 3
         turn_count = len(self._transcript)
         if (
-            turn_count >= 4  # Al menos 2 turnos completos
+            turn_count >= 2
             and turn_count - self._last_checkpoint_turn >= self._checkpoint_interval
         ):
             self._last_checkpoint_turn = turn_count
             task = asyncio.ensure_future(self._checkpoint_transcript())
+            self._checkpoint_task = task
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
 
@@ -161,18 +163,19 @@ class SessionHandler:
 
             if existing.data:
                 # Actualizar transcript existente
+                self._checkpoint_call_id = existing.data[0]["id"]
                 await asyncio.to_thread(
                     lambda: sb.table("calls")
                     .update({
                         "transcript": list(self._transcript),
                         "duration_seconds": duration,
                     })
-                    .eq("id", existing.data[0]["id"])
+                    .eq("id", self._checkpoint_call_id)
                     .execute()
                 )
             else:
                 # Primer checkpoint — insertar
-                await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     lambda: sb.table("calls")
                     .insert({
                         "livekit_room_name": self._room_name,
@@ -189,6 +192,8 @@ class SessionHandler:
                     })
                     .execute()
                 )
+                if result.data:
+                    self._checkpoint_call_id = result.data[0]["id"]
 
             logger.info(
                 "Checkpoint guardado: %s (%d turnos, %ds)",
@@ -389,8 +394,19 @@ class SessionHandler:
 
         call_id: str | None = None
         try:
-            call_result = sb.table("calls").insert(call_data).execute()
-            call_id = call_result.data[0]["id"] if call_result.data else None
+            if self._checkpoint_call_id:
+                # Actualizar el registro checkpoint existente en vez de duplicar
+                call_result = (
+                    sb.table("calls")
+                    .update(call_data)
+                    .eq("id", self._checkpoint_call_id)
+                    .execute()
+                )
+                call_id = self._checkpoint_call_id
+                logger.info("Finalized call by updating checkpoint: %s", call_id)
+            else:
+                call_result = sb.table("calls").insert(call_data).execute()
+                call_id = call_result.data[0]["id"] if call_result.data else None
         except Exception:
             logger.exception(
                 "CRITICAL: Error insertando call en DB para '%s/%s' — "
