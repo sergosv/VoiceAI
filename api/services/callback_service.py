@@ -15,7 +15,7 @@ from livekit.api import (
     RoomAgentDispatch,
 )
 
-from api.db import get_supabase
+from api.deps import get_supabase
 
 logger = logging.getLogger(__name__)
 

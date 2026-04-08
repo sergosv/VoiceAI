@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.middleware.auth import CurrentUser, get_current_user
-from api.db import get_supabase
+from api.deps import get_supabase
 
 logger = logging.getLogger(__name__)
 
