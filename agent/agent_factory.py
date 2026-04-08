@@ -1558,7 +1558,8 @@ TOOL_INSTRUCTIONS = {
         "Puedes PROGRAMAR DEVOLUCIONES DE LLAMADA. Si el usuario dice que no puede hablar "
         "ahora, que está ocupado, que le llames después, mañana, a cierta hora, o en otro "
         "momento, usa schedule_callback. Pregúntale a qué hora le gustaría recibir la llamada. "
-        "NUNCA prometas devolver la llamada sin usar esta herramienta."
+        "NUNCA prometas devolver la llamada sin usar esta herramienta. "
+        "NUNCA ofrezcas llamar después por iniciativa propia — solo hazlo si el USUARIO lo pide."
     ),
 }
 
