@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.middleware.auth import CurrentUser, get_current_user
 from api.db import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class CallbackCancelRequest(BaseModel):
 
 @router.get("")
 async def list_callbacks(
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
     status: str | None = Query(None, description="Filter by status"),
     agent_id: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -94,7 +94,7 @@ async def list_callbacks(
 
 @router.get("/stats")
 async def callback_stats(
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Estadísticas de callbacks por status."""
     sb = get_supabase()
@@ -118,7 +118,7 @@ async def callback_stats(
 async def cancel_callback(
     callback_id: str,
     body: CallbackCancelRequest | None = None,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Cancela un callback pendiente."""
     sb = get_supabase()
@@ -153,7 +153,7 @@ async def cancel_callback(
 @router.delete("/{callback_id}")
 async def delete_callback(
     callback_id: str,
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Elimina un callback (solo si está cancelado o fallido)."""
     sb = get_supabase()
@@ -184,7 +184,7 @@ async def delete_callback(
 
 @router.post("/process")
 async def process_callbacks(
-    user: dict = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Procesa callbacks pendientes cuya hora ya llegó.
 
