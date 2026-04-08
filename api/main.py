@@ -55,7 +55,7 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 
 from api.middleware.auth import CurrentUser, require_admin
 from api.routes import (
-    admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, calls, campaigns,
+    admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, callbacks, calls, campaigns,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
     documents, evaluations, evolution, flow_builder, ghl, hooks, insights, looptalk, mcp, pa, proactive,
     templates, v1, voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks,
@@ -64,6 +64,7 @@ from api.routes import (
 from api.services.chat_store import start_cleanup_loop
 from api.services.conversation_cleanup import start_conversation_cleanup
 from api.services.proactive_worker import start_proactive_worker
+from api.services.callback_worker import start_callback_worker
 from api.services.call_evaluator import start_evaluation_worker
 from api.tasks.credit_alerts import start_credit_alert_worker
 
@@ -91,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: inicia workers background."""
     start_cleanup_loop()
     start_proactive_worker()
+    start_callback_worker()
     start_conversation_cleanup()
     start_evaluation_worker()
     start_credit_alert_worker()
@@ -327,6 +329,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["documents"]
 app.include_router(contacts.router, prefix="/api/contacts", tags=["contacts"])
 app.include_router(appointments.router, prefix="/api/appointments", tags=["appointments"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
+app.include_router(callbacks.router, prefix="/api/callbacks", tags=["callbacks"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(costs.router, prefix="/api/costs", tags=["costs"])

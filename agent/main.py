@@ -175,6 +175,27 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     "Modo outbound detectado, campaign_id: %s, agent_id: %s",
                     campaign_id, outbound_agent_id,
                 )
+            elif meta.get("type") == "callback":
+                outbound_mode = True
+                outbound_client_id = meta.get("client_id")
+                outbound_agent_id = meta.get("agent_id")
+                callback_context = meta.get("callback_context", "")
+                callback_id = meta.get("callback_id")
+                # Inyectar contexto de callback como script para que el agente sepa
+                campaign_script = (
+                    "ESTA ES UNA DEVOLUCION DE LLAMADA. El usuario pidio que le llamaras. "
+                    "Saluda diciendo que le devuelves la llamada como quedaron. "
+                    "Contexto de la conversacion anterior:\n"
+                    f"{callback_context}"
+                ) if callback_context else (
+                    "ESTA ES UNA DEVOLUCION DE LLAMADA. El usuario pidio que le llamaras. "
+                    "Saluda diciendo que le devuelves la llamada como quedaron y "
+                    "pregunta en que puedes ayudarle."
+                )
+                logger.info(
+                    "Modo callback detectado, callback_id: %s, agent_id: %s",
+                    callback_id, outbound_agent_id,
+                )
         except (json.JSONDecodeError, AttributeError):
             pass
 
@@ -680,6 +701,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             voice_agent._memory_contact_id,
         )
 
+    # Inyectar session handler y origin call ID para scheduled callbacks
+    if hasattr(voice_agent, "_session_handler"):
+        voice_agent._session_handler = handler
+        voice_agent._origin_call_id = None  # se actualiza en finalize si hay checkpoint
+
     # Inyectar contexto SIP para transferencia de llamadas
     if hasattr(voice_agent, "_room_name"):
         voice_agent._room_name = ctx.room.name
@@ -712,9 +738,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         stt_multi_lang = lang_cfg.supported_languages
 
     vad = silero.VAD.load(
-        activation_threshold=0.5,
-        min_speech_duration=0.1,
-        min_silence_duration=0.4,
+        activation_threshold=0.65,
+        min_speech_duration=0.3,
+        min_silence_duration=0.6,
         sample_rate=8000,
     )
 
@@ -728,10 +754,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 llm=build_realtime_model(config.agent),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.5,
+                min_endpointing_delay=0.8,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=0.6,
-                min_interruption_words=1,
+                min_interruption_duration=1.0,
+                min_interruption_words=2,
             )
         elif config.agent.agent_mode == "gemini_live":
             logger.info(
@@ -744,10 +770,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 llm=build_gemini_live_model(config.agent),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.5,
+                min_endpointing_delay=0.8,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=0.6,
-                min_interruption_words=1,
+                min_interruption_duration=1.0,
+                min_interruption_words=2,
             )
         else:
             logger.info(
@@ -760,10 +786,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 tts=build_tts(config.agent, stt_language),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.5,
+                min_endpointing_delay=0.8,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=0.6,
-                min_interruption_words=1,
+                min_interruption_duration=1.0,
+                min_interruption_words=2,
             )
     except Exception:
         logger.exception(
@@ -778,10 +804,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 tts=cartesia.TTS(model="sonic-3"),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.5,
+                min_endpointing_delay=0.8,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=0.6,
-                min_interruption_words=1,
+                min_interruption_duration=1.0,
+                min_interruption_words=2,
             )
         except Exception:
             logger.exception("Error fatal construyendo pipeline default — abortando")
@@ -1385,6 +1411,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         await handler.finalize(
             status="completed", recording_status=recording_status,
         )
+
+        # Esperar background tasks del handler (análisis universal, failure detection)
+        if handler._background_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*handler._background_tasks, return_exceptions=True),
+                    timeout=30,
+                )
+            except (asyncio.TimeoutError, Exception):
+                logger.warning("Background tasks post-finalize no completaron a tiempo")
 
         # Quality scoring async (no bloquea el shutdown)
         if quality_cfg.enabled and len(handler._transcript) >= 2:

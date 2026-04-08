@@ -31,6 +31,7 @@ const navGroups = [
     items: [
       { to: '/contacts', icon: UserRound, label: 'Contactos' },
       { to: '/appointments', icon: Calendar, label: 'Citas' },
+      { to: '/callbacks', icon: PhoneCall, label: 'Callbacks' },
     ],
   },
   {

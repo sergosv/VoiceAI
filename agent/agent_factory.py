@@ -17,6 +17,7 @@ from agent.language_detect import LanguageDetectionConfig, LanguageDetector, LAN
 from agent.mode_engine import ModeEngine, ModeState
 from agent.tools.file_search import search_knowledge_base
 from agent.tools.calendar_tool import schedule_appointment
+from agent.tools.callback_tool import schedule_callback
 from agent.tools.memory_tool import recall_memory_search
 from agent.tools.schedule_tool import schedule_reminder_action
 from agent.tools.whatsapp_tool import send_whatsapp_message
@@ -53,6 +54,8 @@ class VoiceAgent(Agent):
         # Datos de la llamada — se inyectan desde main.py antes de session.start()
         self._caller_phone: str = ""
         self._memory_contact_id: str | None = None
+        self._origin_call_id: str | None = None
+        self._session_handler: Any | None = None
         # SIP transfer context — inyectado desde main.py
         self._room_name: str = ""
         self._sip_participant_identity: str = ""
@@ -262,7 +265,7 @@ class VoiceAgent(Agent):
         return tool_name in self._config.client.enabled_tools
 
     # Herramientas que siempre están disponibles (no requieren enabled_tools)
-    _ALWAYS_AVAILABLE = {"transfer_to_human", "recall_memory", "call_api"}
+    _ALWAYS_AVAILABLE = {"transfer_to_human", "recall_memory", "call_api", "schedule_callback"}
     # Tools exclusivos del Asistente Personal
     _PA_TOOLS = {
         "remember", "forget", "search_my_memory",
@@ -596,6 +599,10 @@ class VoiceAgent(Agent):
 
         caller_phone = self._caller_phone
 
+        # Resolver timezone del cliente desde business_hours
+        _bh = self._config.client.business_hours
+        _client_tz = _bh.get("timezone") if _bh else None
+
         result = await schedule_appointment(
             client_id=self._config.client.id,
             caller_phone=caller_phone,
@@ -606,10 +613,63 @@ class VoiceAgent(Agent):
             description=tool_input.get("description", description),
             google_calendar_id=self._config.client.google_calendar_id,
             google_service_account_key=self._config.client.google_service_account_key,
+            client_timezone=_client_tz,
         )
 
         # Hook: PostToolCall
         await self._run_post_tool_hooks("schedule_appointment", tool_input, result)
+        return result
+
+    @function_tool()
+    async def schedule_callback(
+        self,
+        context: RunContext,
+        date: str,
+        time: str,
+        reason: str | None = None,
+    ) -> str:
+        """Programa una devolución de llamada para más tarde.
+
+        Usa esta herramienta cuando el usuario pida que le llames después,
+        más tarde, mañana, a cierta hora, o cuando no pueda hablar ahora.
+        Necesitas la fecha y hora a la que quiere recibir la llamada.
+
+        Args:
+            date: Fecha para la llamada en formato YYYY-MM-DD.
+            time: Hora para la llamada en formato HH:MM (24 horas).
+            reason: Motivo o contexto breve de por qué quiere la llamada.
+        """
+        # Hook: PreToolCall
+        tool_input = {"date": date, "time": time, "reason": reason}
+        allowed, msg, tool_input = await self._run_pre_tool_hooks("schedule_callback", tool_input)
+        if not allowed:
+            return msg
+
+        # Resolver timezone del cliente
+        _bh = self._config.client.business_hours
+        _client_tz = _bh.get("timezone") if _bh else None
+
+        # Construir contexto de la conversación actual para el callback
+        transcript_lines = []
+        if hasattr(self, "_session_handler") and self._session_handler:
+            for entry in self._session_handler._transcript[-6:]:
+                role = "Usuario" if entry["role"] == "user" else "Agente"
+                transcript_lines.append(f"{role}: {entry['text']}")
+        conversation_context = "\n".join(transcript_lines) if transcript_lines else reason
+
+        result = await schedule_callback(
+            client_id=self._config.client.id,
+            agent_id=self._config.agent.id,
+            phone=self._caller_phone or "",
+            date=tool_input.get("date", date),
+            time=tool_input.get("time", time),
+            context=conversation_context,
+            origin_call_id=self._origin_call_id,
+            client_timezone=_client_tz,
+        )
+
+        # Hook: PostToolCall
+        await self._run_post_tool_hooks("schedule_callback", tool_input, result)
         return result
 
     @function_tool()
@@ -1493,6 +1553,12 @@ TOOL_INSTRUCTIONS = {
         "que lo llames después, o que le mandes un mensaje en cierta fecha, usa "
         "schedule_reminder. Pregúntale qué quiere que le recuerdes, cuándo, y si "
         "prefiere llamada o WhatsApp."
+    ),
+    "schedule_callback": (
+        "Puedes PROGRAMAR DEVOLUCIONES DE LLAMADA. Si el usuario dice que no puede hablar "
+        "ahora, que está ocupado, que le llames después, mañana, a cierta hora, o en otro "
+        "momento, usa schedule_callback. Pregúntale a qué hora le gustaría recibir la llamada. "
+        "NUNCA prometas devolver la llamada sin usar esta herramienta."
     ),
 }
 

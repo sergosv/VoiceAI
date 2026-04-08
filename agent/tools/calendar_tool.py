@@ -33,6 +33,20 @@ def _get_supabase() -> Client:
     return get_supabase()
 
 
+def _resolve_tz(tz_name: str | None) -> datetime.tzinfo:
+    """Resuelve timezone por nombre IANA, con fallback a America/Mexico_City."""
+    target = tz_name or "America/Mexico_City"
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(target)
+    except (ImportError, KeyError):
+        try:
+            from backports.zoneinfo import ZoneInfo as BZoneInfo
+            return BZoneInfo(target)
+        except (ImportError, KeyError):
+            return TZ_MEXICO
+
+
 async def schedule_appointment(
     client_id: str,
     caller_phone: str,
@@ -43,15 +57,18 @@ async def schedule_appointment(
     description: str | None = None,
     google_calendar_id: str | None = None,
     google_service_account_key: dict | None = None,
+    client_timezone: str | None = None,
 ) -> str:
     """Agenda una cita en la base de datos y opcionalmente en Google Calendar.
 
     Valida disponibilidad, crea/actualiza contacto, y crea la cita.
     """
+    tz = _resolve_tz(client_timezone)
+    tz_name = client_timezone or "America/Mexico_City"
     try:
-        # Parsear fecha y hora en timezone de México
+        # Parsear fecha y hora en timezone del cliente
         start_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
-        start_dt = start_dt.replace(tzinfo=TZ_MEXICO)
+        start_dt = start_dt.replace(tzinfo=tz)
         end_dt = start_dt + timedelta(minutes=duration_minutes)
     except ValueError:
         return (
@@ -123,6 +140,7 @@ async def schedule_appointment(
             description=description or f"Cita agendada por teléfono para {patient_name}",
             start_time=start_dt,
             end_time=end_dt,
+            tz_name=tz_name,
         )
         if google_event_id:
             sb.table("appointments").update(
@@ -148,6 +166,7 @@ def _create_google_event(
     description: str,
     start_time: datetime,
     end_time: datetime,
+    tz_name: str = "America/Mexico_City",
 ) -> str | None:
     """Crea un evento en Google Calendar usando service account."""
     try:
@@ -163,8 +182,8 @@ def _create_google_event(
         event = {
             "summary": title,
             "description": description,
-            "start": {"dateTime": start_time.isoformat(), "timeZone": "America/Mexico_City"},
-            "end": {"dateTime": end_time.isoformat(), "timeZone": "America/Mexico_City"},
+            "start": {"dateTime": start_time.isoformat(), "timeZone": tz_name},
+            "end": {"dateTime": end_time.isoformat(), "timeZone": tz_name},
         }
         created = service.events().insert(calendarId=calendar_id, body=event).execute()
         logger.info("Google Calendar event creado: %s", created.get("id"))

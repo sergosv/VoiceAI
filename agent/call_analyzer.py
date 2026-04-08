@@ -166,15 +166,26 @@ async def analyze_call_transcript(
     if not transcript_text.strip():
         return None
 
-    try:
-        result = await asyncio.to_thread(
-            _sync_analyze, transcript_text, campaign_script
-        )
-        logger.info("Análisis de llamada completado: result=%s", result.get("result") if result else None)
-        return result
-    except Exception:
-        logger.exception("Error analizando transcripción de llamada")
-        return None
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            result = await asyncio.to_thread(
+                _sync_analyze, transcript_text, campaign_script
+            )
+            logger.info("Análisis de llamada completado: result=%s", result.get("result") if result else None)
+            return result
+        except Exception as e:
+            is_retryable = "503" in str(e) or "UNAVAILABLE" in str(e) or "429" in str(e)
+            if is_retryable and attempt < max_retries:
+                wait = attempt * 5
+                logger.warning(
+                    "Análisis campaña intento %d/%d falló (retryable), reintentando en %ds",
+                    attempt, max_retries, wait,
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.exception("Error analizando transcripción de llamada (intento %d/%d)", attempt, max_retries)
+                return None
 
 
 # ── Análisis universal (inbound + outbound) ─────────────────────
@@ -311,16 +322,27 @@ async def analyze_call_universal(
     if not transcript_text.strip():
         return None
 
-    try:
-        result = await asyncio.to_thread(
-            _sync_analyze_universal, transcript_text, direction, business_type
-        )
-        logger.info(
-            "Análisis universal completado: sentimiento=%s, lead=%s",
-            result.get("sentimiento") if result else None,
-            result.get("calificacion_lead") if result else None,
-        )
-        return result
-    except Exception:
-        logger.exception("Error en análisis universal de llamada")
-        return None
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            result = await asyncio.to_thread(
+                _sync_analyze_universal, transcript_text, direction, business_type
+            )
+            logger.info(
+                "Análisis universal completado: sentimiento=%s, lead=%s",
+                result.get("sentimiento") if result else None,
+                result.get("calificacion_lead") if result else None,
+            )
+            return result
+        except Exception as e:
+            is_retryable = "503" in str(e) or "UNAVAILABLE" in str(e) or "429" in str(e)
+            if is_retryable and attempt < max_retries:
+                wait = attempt * 5  # 5s, 10s
+                logger.warning(
+                    "Análisis universal intento %d/%d falló (retryable), reintentando en %ds: %s",
+                    attempt, max_retries, wait, str(e)[:100],
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.exception("Error en análisis universal de llamada (intento %d/%d)", attempt, max_retries)
+                return None
