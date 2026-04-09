@@ -245,6 +245,36 @@ class CallLifecycleTracker:
 
         return "completed"
 
+    @property
+    def agent_response_latency_ms(self) -> int | None:
+        """Latencia desde que el usuario terminó su primer turno hasta que el agente respondió.
+
+        Aproximación: tiempo entre first_speech_user y first_speech_agent
+        (o viceversa si el agente habla primero).
+        """
+        if not self._first_speech_user_at or not self._first_speech_agent_at:
+            return None
+        # Si el agente habla primero (outbound greeting), medir cuánto tardó
+        # desde que contestó hasta que habló
+        if self._first_speech_agent_at < self._first_speech_user_at:
+            if self._answered_at:
+                return max(0, int((self._first_speech_agent_at - self._answered_at).total_seconds() * 1000))
+            return None
+        # Si el usuario habla primero (inbound), medir cuánto tardó el agente
+        return max(0, int((self._first_speech_agent_at - self._first_speech_user_at).total_seconds() * 1000))
+
+    @property
+    def greeting_latency_ms(self) -> int | None:
+        """Tiempo desde session ready (agent_ready) hasta primer audio del agente."""
+        agent_ready_at = None
+        for ev in self.events:
+            if ev.event == "agent_ready":
+                agent_ready_at = ev.timestamp
+                break
+        if not agent_ready_at or not self._first_speech_agent_at:
+            return None
+        return max(0, int((self._first_speech_agent_at - agent_ready_at).total_seconds() * 1000))
+
     def get_summary(self) -> dict:
         """Retorna resumen completo para guardar en DB."""
         self.finalize()
@@ -258,5 +288,7 @@ class CallLifecycleTracker:
             "answered_at": self._answered_at.isoformat() if self._answered_at else None,
             "user_turns": self._user_turns,
             "agent_turns": self._agent_turns,
+            "agent_response_latency_ms": self.agent_response_latency_ms,
+            "greeting_latency_ms": self.greeting_latency_ms,
             "events": [e.to_dict() for e in self.events],
         }

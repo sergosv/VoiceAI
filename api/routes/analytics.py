@@ -407,3 +407,113 @@ async def analytics_proactive_stats(
         "by_channel": by_channel,
         "by_type": by_type,
     }
+
+
+@router.get("/sales-funnel")
+async def analytics_sales_funnel(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    agent_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Funnel de ventas outbound con tasas de conversión por etapa.
+
+    Calcula: conexión → conversación → interés → cierre (cita/callback).
+    También: objeciones top-5 y duración promedio por resultado.
+    """
+    sb = get_supabase()
+    cid = _effective_cid(user, client_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Obtener todas las llamadas outbound del período
+    query = sb.table("calls").select(
+        "id, direction, duration_seconds, status, sentimiento, intencion, "
+        "lead_score, siguiente_accion, disposition, transcript"
+    ).eq("direction", "outbound").gte("started_at", since)
+    if cid:
+        query = query.eq("client_id", cid)
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    calls = query.execute().data or []
+
+    # También obtener análisis de campañas
+    camp_query = sb.table("campaign_calls").select(
+        "id, status, analysis_data, result_summary"
+    ).gte("created_at", since)
+    if cid:
+        camp_query = camp_query.in_(
+            "campaign_id",
+            [c["id"] for c in sb.table("campaigns").select("id").eq("client_id", cid).execute().data or []]
+        ) if cid else camp_query
+    campaign_calls = camp_query.execute().data or []
+
+    # ── Funnel metrics ──
+    total_dialed = len(calls) + len([c for c in campaign_calls if c["status"] != "pending"])
+    connected = [c for c in calls if c["status"] == "completed" and c["duration_seconds"] and c["duration_seconds"] > 5]
+    had_conversation = [c for c in connected if c.get("transcript") and len(c["transcript"]) >= 4]
+    showed_interest = [c for c in connected if (c.get("lead_score") or 0) >= 50]
+    high_interest = [c for c in connected if (c.get("lead_score") or 0) >= 75]
+
+    # Cierres: siguiente_accion indica acción concreta
+    closed = [c for c in connected if c.get("siguiente_accion") in ("agendar_cita", "enviar_info", "seguimiento")]
+    appointments = [c for c in connected if c.get("siguiente_accion") == "agendar_cita"]
+
+    # Campaign-specific results
+    camp_completed = [c for c in campaign_calls if c["status"] == "completed"]
+    camp_no_answer = [c for c in campaign_calls if c["status"] == "no_answer"]
+    camp_failed = [c for c in campaign_calls if c["status"] == "failed"]
+
+    # ── Objeciones (del análisis de campañas) ──
+    objection_counts: dict[str, int] = {}
+    for cc in camp_completed:
+        ad = cc.get("analysis_data") or {}
+        for obj in ad.get("objections", []):
+            obj_text = obj if isinstance(obj, str) else str(obj)
+            objection_counts[obj_text] = objection_counts.get(obj_text, 0) + 1
+    top_objections = sorted(objection_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    # ── Duración promedio por resultado ──
+    duration_by_sentiment: dict[str, list[int]] = {}
+    for c in connected:
+        s = c.get("sentimiento") or "sin_analisis"
+        duration_by_sentiment.setdefault(s, []).append(c["duration_seconds"])
+    avg_duration_by_sentiment = {
+        k: round(sum(v) / len(v)) for k, v in duration_by_sentiment.items()
+    }
+
+    # ── Sentimiento distribution de outbound ──
+    sentiment_dist = {"positivo": 0, "neutral": 0, "negativo": 0, "sin_analisis": 0}
+    for c in connected:
+        s = c.get("sentimiento") or "sin_analisis"
+        sentiment_dist[s] = sentiment_dist.get(s, 0) + 1
+
+    # ── Calcular tasas ──
+    def _rate(num: int, den: int) -> float:
+        return round(num / den * 100, 1) if den > 0 else 0
+
+    return {
+        "period_days": days,
+        "funnel": {
+            "total_dialed": total_dialed,
+            "connected": len(connected),
+            "connection_rate": _rate(len(connected), total_dialed),
+            "had_conversation": len(had_conversation),
+            "conversation_rate": _rate(len(had_conversation), len(connected)),
+            "showed_interest": len(showed_interest),
+            "interest_rate": _rate(len(showed_interest), len(had_conversation)),
+            "high_interest": len(high_interest),
+            "closed": len(closed),
+            "close_rate": _rate(len(closed), len(had_conversation)),
+            "appointments": len(appointments),
+            "appointment_rate": _rate(len(appointments), len(had_conversation)),
+        },
+        "campaign_results": {
+            "completed": len(camp_completed),
+            "no_answer": len(camp_no_answer),
+            "failed": len(camp_failed),
+            "answer_rate": _rate(len(camp_completed), len(camp_completed) + len(camp_no_answer)),
+        },
+        "top_objections": [{"objection": o, "count": c} for o, c in top_objections],
+        "avg_duration_by_sentiment": avg_duration_by_sentiment,
+        "sentiment_distribution": sentiment_dist,
+    }

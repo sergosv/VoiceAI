@@ -1081,6 +1081,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 task = asyncio.ensure_future(_eval_user_message_hooks(ev.transcript))
                 _bg_tasks.add(task)
                 task.add_done_callback(_bg_tasks.discard)
+            # Inyectar elapsed time al LLM cada 5 turnos del usuario
+            _user_turns = lifecycle._user_turns
+            if _user_turns > 0 and _user_turns % 5 == 0 and config.agent.agent_mode != "gemini_live":
+                _elapsed = int((datetime.now(timezone.utc) - handler._started_at).total_seconds())
+                _elapsed_min = _elapsed // 60
+                _elapsed_sec = _elapsed % 60
+                _time_ctx = f"\n\n[Contexto: llevas {_elapsed_min}:{_elapsed_sec:02d} minutos en la llamada.]"
+                if hasattr(voice_agent, "_instructions"):
+                    # Limpiar contexto temporal anterior
+                    base = voice_agent.instructions
+                    idx = base.find("[Contexto: llevas ")
+                    if idx != -1:
+                        base = base[:idx].rstrip()
+                    voice_agent._instructions = base + _time_ctx
+
             # Analizar sentimiento, intent y idioma en background
             if sentiment_analyzer or intent_extractor or language_detector:
                 task = asyncio.ensure_future(_analyze_user_turn(ev.transcript))
