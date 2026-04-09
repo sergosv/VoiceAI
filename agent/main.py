@@ -723,7 +723,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # Filtrar tools deshabilitados del schema visible al LLM
     if hasattr(voice_agent, "filter_disabled_tools"):
-        voice_agent.filter_disabled_tools()
+        await voice_agent.filter_disabled_tools()
 
     # Configurar pipeline de voz (BYOK)
     stt_language = "es" if config.client.language in ("es", "es-en") else "en"

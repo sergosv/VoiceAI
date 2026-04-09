@@ -274,7 +274,7 @@ class VoiceAgent(Agent):
         "schedule_appointment",
     }
 
-    def filter_disabled_tools(self) -> None:
+    async def filter_disabled_tools(self) -> None:
         """Elimina tools deshabilitados del schema visible al LLM."""
         enabled = self._config.client.enabled_tools or []
         is_pa = self._config.agent.agent_category == "personal_assistant"
@@ -286,7 +286,7 @@ class VoiceAgent(Agent):
                     filtered.append(t)
             elif t.id in self._ALWAYS_AVAILABLE or t.id in enabled:
                 filtered.append(t)
-        self.update_tools(filtered)
+        await self.update_tools(filtered)
         logger.info(
             "Tools activos para '%s' (%s): %s",
             self._config.agent.slug,
