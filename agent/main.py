@@ -761,8 +761,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 config.agent.gemini_live_voice,
                 config.agent.gemini_live_thinking_level,
             )
+            # TTS fallback para session.say() (greeting) — Gemini Live no tiene TTS propio
+            from livekit.plugins import cartesia as _cartesia_fallback
+            _greeting_tts = _cartesia_fallback.TTS(model="sonic-3")
             session = AgentSession(
                 llm=build_gemini_live_model(config.agent),
+                tts=_greeting_tts,
                 vad=vad,
                 turn_detection=MultilingualModel(),
                 min_endpointing_delay=0.5,
@@ -1616,32 +1620,50 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.exception("Error en hooks OnGreeting")
 
     # Saludo inicial
+    # Gemini Live no soporta generate_reply — usar session.say() como fallback
+    _is_live_model = config.agent.agent_mode == "gemini_live"
+
     if greeting_override:
-        await session.generate_reply(instructions=f"Saluda al usuario con: {greeting_override}")
+        if _is_live_model:
+            await session.say(greeting_override, allow_interruptions=True)
+        else:
+            await session.generate_reply(instructions=f"Saluda al usuario con: {greeting_override}")
     elif outbound_mode:
-        # Outbound: dar texto exacto para que el LLM no pierda tiempo pensando qué decir
         outbound_greeting = config.agent.greeting or "Hola, buenas tardes."
-        await session.generate_reply(
-            instructions=f"Di EXACTAMENTE esto como saludo: \"{outbound_greeting}\""
-        )
-    elif hasattr(voice_agent, '_flow_engine') and hasattr(voice_agent, '_flow_state'):
-        # Modo flow: usar greeting del nodo Start
-        flow_greeting = voice_agent.flow_engine.get_greeting(voice_agent.flow_state)
-        await session.generate_reply(
-            instructions=f"Saluda al usuario con: {flow_greeting}"
-        )
-    elif memory and memory.contact_id and not memory._is_new_contact and memory.contact and (memory.contact.get("name") or "").strip():
-        contact_name = memory.contact["name"].strip().split()[0]  # Primer nombre
-        await session.generate_reply(
-            instructions=(
-                f"Este es un cliente que ya conoces. Se llama {memory.contact['name']}. "
-                f"Salúdalo de forma cálida y personal, por ejemplo: "
-                f"'¡Qué gusto saludarle, {contact_name}! ¿En qué puedo ayudarle hoy?' "
-                f"NO digas tu nombre ni te presentes, ya te conoce. Sé breve y natural."
+        if _is_live_model:
+            await session.say(outbound_greeting, allow_interruptions=True)
+        else:
+            await session.generate_reply(
+                instructions=f"Di EXACTAMENTE esto como saludo: \"{outbound_greeting}\""
             )
-        )
+    elif hasattr(voice_agent, '_flow_engine') and hasattr(voice_agent, '_flow_state'):
+        flow_greeting = voice_agent.flow_engine.get_greeting(voice_agent.flow_state)
+        if _is_live_model:
+            await session.say(flow_greeting, allow_interruptions=True)
+        else:
+            await session.generate_reply(
+                instructions=f"Saluda al usuario con: {flow_greeting}"
+            )
+    elif memory and memory.contact_id and not memory._is_new_contact and memory.contact and (memory.contact.get("name") or "").strip():
+        contact_name = memory.contact["name"].strip().split()[0]
+        personal_greeting = f"Qué gusto saludarle, {contact_name}! En qué puedo ayudarle hoy?"
+        if _is_live_model:
+            await session.say(personal_greeting, allow_interruptions=True)
+        else:
+            await session.generate_reply(
+                instructions=(
+                    f"Este es un cliente que ya conoces. Se llama {memory.contact['name']}. "
+                    f"Salúdalo de forma cálida y personal, por ejemplo: "
+                    f"'¡Qué gusto saludarle, {contact_name}! ¿En qué puedo ayudarle hoy?' "
+                    f"NO digas tu nombre ni te presentes, ya te conoce. Sé breve y natural."
+                )
+            )
     else:
-        await session.generate_reply(instructions=f"Saluda al usuario con: {config.agent.greeting}")
+        greeting = config.agent.greeting or "Hola, en qué puedo ayudarte?"
+        if _is_live_model:
+            await session.say(greeting, allow_interruptions=True)
+        else:
+            await session.generate_reply(instructions=f"Saluda al usuario con: {greeting}")
 
 
 if __name__ == "__main__":
