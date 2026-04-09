@@ -1034,13 +1034,41 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if ev.is_final:
             handler.add_transcript_entry("user", ev.transcript)
             lifecycle.record_user_speech()
-            # Guardrails: detectar prompt injection
+            # Guardrails: detectar prompt injection y escalada de molestia
             if guardrails:
                 injection = guardrails.check_user_input(ev.transcript)
                 if not injection.passed:
                     logger.warning(
                         "Prompt injection detectado: %s", injection.violations
                     )
+                # Detectar molestia real → cierre graceful inmediato
+                escalation = guardrails.check_escalation(ev.transcript)
+                if not escalation.passed:
+                    logger.warning(
+                        "Escalada de molestia detectada: %s", escalation.violations
+                    )
+                    if config.agent.agent_mode != "gemini_live":
+                        asyncio.ensure_future(session.generate_reply(
+                            instructions=(
+                                "CIERRE INMEDIATO: El usuario está molesto y pidió que dejes de llamar. "
+                                "Discúlpate brevemente y con respeto. Di que no volverás a llamar. "
+                                "NO insistas, NO ofrezcas nada más. Despídete y termina."
+                            )
+                        ))
+                    # Auto-DNC: agregar número a lista de no-llamar
+                    _dnc_phone = caller_number if not outbound_mode else handler._callee_number
+                    if _dnc_phone and outbound_mode:
+                        try:
+                            _sb_dnc = get_supabase()
+                            _sb_dnc.table("dnc_entries").upsert({
+                                "client_id": config.client.id,
+                                "phone": _dnc_phone,
+                                "reason": f"Escalada detectada: {escalation.violations[0]}",
+                                "source": "escalation",
+                            }, on_conflict="client_id,phone").execute()
+                            logger.info("Auto-DNC: %s agregado a lista", _dnc_phone)
+                        except Exception:
+                            logger.exception("Error auto-DNC")
                     # Hook: OnGuardrailHit
                     if hook_engine and hook_engine.has_hooks_for("OnGuardrailHit"):
                         task = asyncio.ensure_future(_eval_guardrail_hit_hooks(
@@ -1511,6 +1539,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     ctx.add_shutdown_callback(on_shutdown)
 
+    # Recording disclosure: inyectar en prompt si hay grabación activa
+    if recording_key and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
+        voice_agent._instructions = voice_agent.instructions + (
+            "\n\nIMPORTANTE: Esta llamada está siendo grabada. En tu PRIMER saludo, "
+            "menciona brevemente: 'Le informo que esta llamada puede ser grabada "
+            "con fines de calidad.' Hazlo de forma natural, no robótica."
+        )
+        logger.info("Recording disclosure inyectado en system prompt")
+
     # Gemini Live: inyectar greeting en system prompt (no soporta generate_reply)
     if config.agent.agent_mode == "gemini_live":
         _gl_greeting = config.agent.greeting or "Hola, en qué puedo ayudarte?"
@@ -1655,6 +1692,26 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             )
         else:
             await session.generate_reply(instructions=f"Saluda al usuario con: {config.agent.greeting}")
+
+    # ── VOICEMAIL DETECTION: si outbound y no hay speech del usuario en 8s post-greeting ──
+    if outbound_mode:
+        _vm_timeout = 8  # segundos sin speech del usuario
+        try:
+            # Esperar a que lifecycle registre primer speech del usuario
+            _vm_start = asyncio.get_event_loop().time()
+            while (asyncio.get_event_loop().time() - _vm_start) < _vm_timeout:
+                if lifecycle._user_turns > 0:
+                    break  # Usuario habló, no es voicemail
+                await asyncio.sleep(0.5)
+            else:
+                # Timeout sin speech → probablemente voicemail
+                if lifecycle._user_turns == 0:
+                    logger.warning("Voicemail detectado: sin speech del usuario en %ds", _vm_timeout)
+                    lifecycle.add_event("voicemail_detected")
+                    # Colgar limpiamente
+                    return
+        except Exception:
+            logger.exception("Error en detección de voicemail")
 
 
 if __name__ == "__main__":

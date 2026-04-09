@@ -481,6 +481,20 @@ async def _place_outbound_call(
         call_entry_id = call_entry["id"]
         phone = call_entry["phone"]
 
+        # DNC check: verificar si el número está en la lista de no-llamar
+        camp = sb.table("campaigns").select("client_id").eq("id", campaign_id).limit(1).execute()
+        if camp.data:
+            dnc = sb.table("dnc_entries").select("id").eq(
+                "client_id", camp.data[0]["client_id"]
+            ).eq("phone", phone).limit(1).execute()
+            if dnc.data:
+                logger.info("DNC: número %s bloqueado, saltando llamada", phone)
+                sb.table("campaign_calls").update({
+                    "status": "skipped",
+                    "result_summary": "Número en lista Do-Not-Call (DNC)",
+                }).eq("id", call_entry_id).execute()
+                return
+
         # Marcar como calling
         sb.table("campaign_calls").update({
             "status": "calling",

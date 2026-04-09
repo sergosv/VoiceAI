@@ -55,7 +55,7 @@ setup_logging(json_format=os.environ.get("LOG_FORMAT") == "json")
 
 from api.middleware.auth import CurrentUser, require_admin
 from api.routes import (
-    admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, callbacks, calls, campaigns,
+    admin, agents, ai, analytics, api_integrations, api_keys, auth, billing, callbacks, calls, campaigns, dnc,
     chat, clients, contacts, conversation_results, appointments, costs, dashboard,
     documents, evaluations, evolution, flow_builder, ghl, hooks, insights, looptalk, mcp, pa, proactive,
     templates, v1, voices, webhook_management, webhooks, whatsapp, whatsapp_webhooks,
@@ -330,6 +330,7 @@ app.include_router(contacts.router, prefix="/api/contacts", tags=["contacts"])
 app.include_router(appointments.router, prefix="/api/appointments", tags=["appointments"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["campaigns"])
 app.include_router(callbacks.router, prefix="/api/callbacks", tags=["callbacks"])
+app.include_router(dnc.router, prefix="/api/dnc", tags=["dnc"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
 app.include_router(costs.router, prefix="/api/costs", tags=["costs"])

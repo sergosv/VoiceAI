@@ -63,6 +63,33 @@ _INJECTION_PATTERNS = [
 ]
 
 
+# Frases que indican molestia real (no objeción refleja)
+# Requieren cierre graceful inmediato para proteger marca y número
+_ESCALATION_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"d[eé]j[ae]me en paz",
+        r"no (me )?(vuelva[ns]?|insista[ns]?) a (llamar|marcar|contactar)",
+        r"ya le dije que no",
+        r"no insista[ns]?",
+        r"voy a (reportar|denunciar|bloquear)",
+        r"(es|esto es) acoso",
+        r"los voy a demandar",
+        r"(llamo|hablo) a (profeco|condusef|policía|policia)",
+        r"no me (est[eé]n? |)molest(ando|en)",
+        r"mét(anse|ete) su (producto|oferta|llamada)",
+        r"ya (p[aá]r[ea]le|b[aá]stale|es[tá] bueno)",
+        r"(colgu[ée]|voy a colgar)",
+        r"(quite|quiten|saque|saquen)me de (su|la) lista",
+        r"no (quiero|deseo) (que me llamen|sus llamadas|nada)",
+        r"leave me alone",
+        r"stop calling( me)?",
+        r"do not call( me)? again",
+        r"(i.ll|i will) (report|sue|block) you",
+        r"this is harassment",
+    ]
+]
+
+
 @dataclass
 class GuardrailResult:
     """Resultado de la validación de guardrails."""
@@ -160,6 +187,32 @@ class GuardrailsEngine:
             self._violations_count += len(violations)
             for v in violations:
                 logger.warning("Guardrail (input): %s", v)
+
+        return GuardrailResult(
+            passed=len(violations) == 0,
+            violations=violations,
+        )
+
+    def check_escalation(self, text: str) -> GuardrailResult:
+        """Detecta molestia real del usuario que requiere cierre inmediato.
+
+        Diferente de objeción refleja ("no me interesa") — esto detecta
+        frases que indican enojo real, amenaza de reporte, o petición
+        explícita de que dejen de llamar.
+
+        Returns:
+            GuardrailResult con passed=False si se detecta escalada.
+        """
+        violations: list[str] = []
+        for pattern in _ESCALATION_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                violations.append(f"Escalada detectada: '{match.group()}'")
+
+        if violations:
+            self._violations_count += len(violations)
+            for v in violations:
+                logger.warning("Guardrail (escalación): %s", v)
 
         return GuardrailResult(
             passed=len(violations) == 0,
