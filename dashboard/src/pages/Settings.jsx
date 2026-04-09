@@ -1372,7 +1372,7 @@ export function Settings() {
     const provider = providerOverride || vc.provider || 'cartesia'
     const mode = agentData?.agent_mode || 'pipeline'
 
-    if (mode === 'realtime' || mode === 'gemini_live') {
+    if ((mode === 'realtime' || mode === 'gemini_live') && !providerOverride) {
       setVoices([])
       return
     }
