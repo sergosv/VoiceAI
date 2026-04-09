@@ -701,11 +701,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             voice_agent._memory_contact_id,
         )
 
-    # Inyectar session handler y origin call ID para scheduled callbacks
-    if hasattr(voice_agent, "_session_handler"):
-        voice_agent._session_handler = handler
-        voice_agent._origin_call_id = None  # se actualiza en finalize si hay checkpoint
-
     # Inyectar contexto SIP para transferencia de llamadas
     if hasattr(voice_agent, "_room_name"):
         voice_agent._room_name = ctx.room.name
@@ -846,6 +841,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         recording_key=recording_key,
         lifecycle=lifecycle,
     )
+
+    # Inyectar session handler y origin call ID para scheduled callbacks
+    if hasattr(voice_agent, "_session_handler"):
+        voice_agent._session_handler = handler
+        voice_agent._origin_call_id = None
 
     # Inyectar métricas de uso para conteo real de TTS/LLM
     # (handler debe existir antes de esta línea)
