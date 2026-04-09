@@ -56,14 +56,15 @@ async def list_callbacks(
 ):
     """Lista callbacks programados del cliente."""
     sb = get_supabase()
-    client_id = user.get("impersonating_client_id") or user["client_id"]
+    effective_client_id = user.impersonating_client_id or user.client_id
 
     query = (
         sb.table("scheduled_callbacks")
         .select("*, agents(name, slug)", count="exact")
-        .eq("client_id", client_id)
         .order("scheduled_at", desc=True)
     )
+    if effective_client_id:
+        query = query.eq("client_id", effective_client_id)
 
     if status:
         query = query.eq("status", status)
@@ -98,7 +99,7 @@ async def callback_stats(
 ):
     """Estadísticas de callbacks por status."""
     sb = get_supabase()
-    client_id = user.get("impersonating_client_id") or user["client_id"]
+    client_id = user.impersonating_client_id or user.client_id
 
     result = sb.table("scheduled_callbacks").select(
         "status", count="exact"
@@ -122,7 +123,7 @@ async def cancel_callback(
 ):
     """Cancela un callback pendiente."""
     sb = get_supabase()
-    client_id = user.get("impersonating_client_id") or user["client_id"]
+    client_id = user.impersonating_client_id or user.client_id
 
     # Verificar que existe y pertenece al cliente
     existing = (
@@ -157,7 +158,7 @@ async def delete_callback(
 ):
     """Elimina un callback (solo si está cancelado o fallido)."""
     sb = get_supabase()
-    client_id = user.get("impersonating_client_id") or user["client_id"]
+    client_id = user.impersonating_client_id or user.client_id
 
     existing = (
         sb.table("scheduled_callbacks")
@@ -192,7 +193,7 @@ async def process_callbacks(
     También puede llamarse manualmente desde el dashboard.
     """
     # Solo admin puede disparar el procesamiento
-    if user.get("role") != "admin":
+    if user.role != "admin":
         raise HTTPException(status_code=403, detail="Solo administradores")
 
     from api.services.callback_service import process_pending_callbacks
