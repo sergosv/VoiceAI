@@ -1562,7 +1562,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                         voice_agent._sip_participant_identity = p.identity
                         break
             # Pequeña pausa para que el audio esté estable
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.3)
         except asyncio.TimeoutError:
             logger.warning("Outbound: nadie contestó en 60s, cerrando sesión")
             lifecycle.record_no_answer()
@@ -1588,9 +1588,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     logger.exception("Error actualizando campaign_call a no_answer")
             return
 
-    # Hook: OnGreeting — personalizar saludo según contexto
+    # Hook: OnGreeting — personalizar saludo según contexto (skip en outbound para velocidad)
     greeting_override: str | None = None
-    if hook_engine and hook_engine.has_hooks_for("OnGreeting"):
+    if not outbound_mode and hook_engine and hook_engine.has_hooks_for("OnGreeting"):
         try:
             hctx = HookContext(
                 event="OnGreeting",
@@ -1600,7 +1600,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 caller_phone=caller_number,
                 contact_name=memory.contact.get("name") if memory and memory.contact else None,
                 metadata={
-                    "direction": "outbound" if outbound_mode else "inbound",
+                    "direction": "inbound",
                     "is_returning": bool(memory and memory.contact_id and not memory._is_new_contact),
                 },
             )
@@ -1619,8 +1619,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if greeting_override:
         await session.generate_reply(instructions=f"Saluda al usuario con: {greeting_override}")
     elif outbound_mode:
+        # Outbound: dar texto exacto para que el LLM no pierda tiempo pensando qué decir
+        outbound_greeting = config.agent.greeting or "Hola, buenas tardes."
         await session.generate_reply(
-            instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
+            instructions=f"Di EXACTAMENTE esto como saludo: \"{outbound_greeting}\""
         )
     elif hasattr(voice_agent, '_flow_engine') and hasattr(voice_agent, '_flow_state'):
         # Modo flow: usar greeting del nodo Start
