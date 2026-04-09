@@ -1571,8 +1571,10 @@ def _build_tool_instructions(enabled_tools: list[str]) -> str:
     @function_tool(). Solo agregamos hints mínimos sobre cuándo ofrecer cada tool
     al usuario, NO repetimos lo que el LLM ya ve en el tool schema.
     """
+    # Incluir always-available tools que tengan instrucciones
+    all_tools = set(enabled_tools) | VoiceAgent._ALWAYS_AVAILABLE
     lines = []
-    for tool_name in enabled_tools:
+    for tool_name in all_tools:
         if tool_name in TOOL_INSTRUCTIONS:
             lines.append(f"- {TOOL_INSTRUCTIONS[tool_name]}")
     if not lines:
