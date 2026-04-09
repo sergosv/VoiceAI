@@ -722,7 +722,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         voice_agent._lifecycle = lifecycle
 
     # Filtrar tools deshabilitados del schema visible al LLM
-    if hasattr(voice_agent, "filter_disabled_tools"):
+    # Gemini Live no soporta update_tools/update_chat_ctx — skip filter
+    if config.agent.agent_mode != "gemini_live" and hasattr(voice_agent, "filter_disabled_tools"):
         await voice_agent.filter_disabled_tools()
 
     # Configurar pipeline de voz (BYOK)
