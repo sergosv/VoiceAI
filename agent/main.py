@@ -737,12 +737,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if lang_cfg.enabled:
         stt_multi_lang = lang_cfg.supported_languages
 
-    # VAD más permisivo para gemini_live (maneja su propio turn detection)
-    is_gemini_live = config.agent.agent_mode == "gemini_live"
     vad = silero.VAD.load(
-        activation_threshold=0.5 if is_gemini_live else 0.65,
-        min_speech_duration=0.1 if is_gemini_live else 0.3,
-        min_silence_duration=0.4 if is_gemini_live else 0.6,
+        activation_threshold=0.5,
+        min_speech_duration=0.1,
+        min_silence_duration=0.4,
         sample_rate=8000,
     )
 
@@ -756,10 +754,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 llm=build_realtime_model(config.agent),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.8,
+                min_endpointing_delay=0.5,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=1.0,
-                min_interruption_words=2,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
             )
         elif config.agent.agent_mode == "gemini_live":
             logger.info(
@@ -788,10 +786,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 tts=build_tts(config.agent, stt_language),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.8,
+                min_endpointing_delay=0.5,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=1.0,
-                min_interruption_words=2,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
             )
     except Exception:
         logger.exception(
@@ -806,10 +804,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 tts=cartesia.TTS(model="sonic-3"),
                 vad=vad,
                 turn_detection=MultilingualModel(),
-                min_endpointing_delay=0.8,
+                min_endpointing_delay=0.5,
                 max_endpointing_delay=3.0,
-                min_interruption_duration=1.0,
-                min_interruption_words=2,
+                min_interruption_duration=0.6,
+                min_interruption_words=1,
             )
         except Exception:
             logger.exception("Error fatal construyendo pipeline default — abortando")
@@ -1621,10 +1619,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     if greeting_override:
         await session.generate_reply(instructions=f"Saluda al usuario con: {greeting_override}")
     elif outbound_mode:
-        # En outbound, dar instrucción con el saludo exacto para minimizar tiempo de LLM
-        outbound_greeting = config.agent.greeting or "Hola, buenas tardes."
         await session.generate_reply(
-            instructions=f"Saluda al usuario EXACTAMENTE con: \"{outbound_greeting}\". No agregues nada más en este primer mensaje."
+            instructions="Saluda al usuario e identifícate. Recuerda que TÚ estás llamando al cliente."
         )
     elif hasattr(voice_agent, '_flow_engine') and hasattr(voice_agent, '_flow_state'):
         # Modo flow: usar greeting del nodo Start
