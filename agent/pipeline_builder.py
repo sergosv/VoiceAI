@@ -236,6 +236,14 @@ def build_gemini_live_model(config: AgentConfig):
     # (incluyendo override de campañas outbound).
     if config.system_prompt:
         kwargs["instructions"] = config.system_prompt
+        import logging as _lg
+        _lg.getLogger("voice-ai").info(
+            "Gemini Live: instructions pasadas (%d chars, primeros 80: %r)",
+            len(config.system_prompt), config.system_prompt[:80]
+        )
+    else:
+        import logging as _lg
+        _lg.getLogger("voice-ai").warning("Gemini Live: SIN instructions (system_prompt vacio)")
 
     # Detectar idioma del cliente para configurar el modelo
     language = config.voice_config.get("gemini_live_language")
