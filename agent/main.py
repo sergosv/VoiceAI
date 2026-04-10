@@ -1587,13 +1587,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # Gemini Live: inyectar greeting en system prompt (no soporta generate_reply)
     if config.agent.agent_mode == "gemini_live":
-        _gl_greeting = config.agent.greeting or "Hola, en qué puedo ayudarte?"
-        if outbound_mode:
-            _gl_greeting = config.agent.greeting or "Hola, buenas tardes."
-        _gl_instruction = (
-            f"\n\nIMPORTANTE: Al iniciar la conversación, saluda al usuario "
-            f"diciendo EXACTAMENTE: \"{_gl_greeting}\". Hazlo inmediatamente."
-        )
+        if outbound_mode and campaign_script:
+            # Outbound con campaign_script: dejar que Gemini genere el saludo basado
+            # en el script de la campaña (no inyectar el greeting del agente que es
+            # del modo inbound).
+            _gl_instruction = (
+                "\n\nIMPORTANTE: Al iniciar la conversación, saluda al usuario "
+                "siguiendo EXACTAMENTE el guión de apertura definido en este prompt. "
+                "Inicia inmediatamente sin esperar a que el usuario hable."
+            )
+        else:
+            _gl_greeting = config.agent.greeting or "Hola, en qué puedo ayudarte?"
+            _gl_instruction = (
+                f"\n\nIMPORTANTE: Al iniciar la conversación, saluda al usuario "
+                f"diciendo EXACTAMENTE: \"{_gl_greeting}\". Hazlo inmediatamente."
+            )
         if hasattr(voice_agent, '_instructions') and voice_agent.instructions:
             voice_agent._instructions = voice_agent.instructions + _gl_instruction
         logger.info("Gemini Live: greeting inyectado en system prompt")
