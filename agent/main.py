@@ -161,6 +161,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     outbound_client_id: str | None = None
     outbound_agent_id: str | None = None
     campaign_id: str | None = None
+    callback_context: str | None = None
+    callback_id: str | None = None
     room_metadata = ctx.room.metadata or ""
     if room_metadata:
         try:
@@ -181,17 +183,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 outbound_agent_id = meta.get("agent_id")
                 callback_context = meta.get("callback_context", "")
                 callback_id = meta.get("callback_id")
-                # Inyectar contexto de callback como script para que el agente sepa
-                campaign_script = (
-                    "ESTA ES UNA DEVOLUCION DE LLAMADA. El usuario pidio que le llamaras. "
-                    "Saluda diciendo que le devuelves la llamada como quedaron. "
-                    "Contexto de la conversacion anterior:\n"
-                    f"{callback_context}"
-                ) if callback_context else (
-                    "ESTA ES UNA DEVOLUCION DE LLAMADA. El usuario pidio que le llamaras. "
-                    "Saluda diciendo que le devuelves la llamada como quedaron y "
-                    "pregunta en que puedes ayudarle."
-                )
+                # NO setear campaign_script — eso reemplaza todo el prompt del agente.
+                # El contexto del callback se inyecta como ADICIÓN al prompt original.
                 logger.info(
                     "Modo callback detectado, callback_id: %s, agent_id: %s",
                     callback_id, outbound_agent_id,
@@ -1562,6 +1555,26 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             "con fines de calidad.' Hazlo de forma natural, no robótica."
         )
         logger.info("Recording disclosure inyectado en system prompt")
+
+    # Callback: inyectar contexto de la conversación anterior al prompt del agente
+    if callback_context and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
+        voice_agent._instructions = voice_agent.instructions + (
+            "\n\n## DEVOLUCIÓN DE LLAMADA\n"
+            "ESTA ES UNA DEVOLUCIÓN DE LLAMADA. El usuario pidió que le llamaras.\n"
+            "Saluda diciendo que le devuelves la llamada como quedaron.\n"
+            f"Contexto de la conversación anterior:\n{callback_context}\n"
+            "Usa este contexto para retomar donde quedaron. NO repitas todo desde cero."
+        )
+        logger.info("Callback context inyectado en system prompt")
+    elif outbound_mode and not campaign_script and callback_id:
+        # Callback sin contexto
+        if hasattr(voice_agent, '_instructions') and voice_agent.instructions:
+            voice_agent._instructions = voice_agent.instructions + (
+                "\n\n## DEVOLUCIÓN DE LLAMADA\n"
+                "ESTA ES UNA DEVOLUCIÓN DE LLAMADA. El usuario pidió que le llamaras.\n"
+                "Saluda diciendo que le devuelves la llamada como quedaron y "
+                "pregunta en qué puedes ayudarle."
+            )
 
     # Gemini Live: inyectar greeting en system prompt (no soporta generate_reply)
     if config.agent.agent_mode == "gemini_live":
