@@ -229,6 +229,12 @@ def build_gemini_live_model(config: AgentConfig):
         "output_audio_transcription": types.AudioTranscriptionConfig(),
     }
 
+    # Pasar el system_prompt como instructions — Gemini Live lo usa como
+    # system_instruction. Sin esto, Gemini Live ignora el prompt del agente
+    # (incluyendo override de campañas outbound).
+    if config.system_prompt:
+        kwargs["instructions"] = config.system_prompt
+
     # Detectar idioma del cliente para configurar el modelo
     language = config.voice_config.get("gemini_live_language")
     if language:
