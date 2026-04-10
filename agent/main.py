@@ -1730,25 +1730,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         else:
             await session.generate_reply(instructions=f"Saluda al usuario con: {config.agent.greeting}")
 
-    # ── VOICEMAIL DETECTION: si outbound y no hay speech del usuario en 8s post-greeting ──
-    if outbound_mode:
-        _vm_timeout = 8  # segundos sin speech del usuario
-        try:
-            # Esperar a que lifecycle registre primer speech del usuario
-            _vm_start = asyncio.get_event_loop().time()
-            while (asyncio.get_event_loop().time() - _vm_start) < _vm_timeout:
-                if lifecycle._user_turns > 0:
-                    break  # Usuario habló, no es voicemail
-                await asyncio.sleep(0.5)
-            else:
-                # Timeout sin speech → probablemente voicemail
-                if lifecycle._user_turns == 0:
-                    logger.warning("Voicemail detectado: sin speech del usuario en %ds", _vm_timeout)
-                    lifecycle.add_event("voicemail_detected")
-                    # Colgar limpiamente
-                    return
-        except Exception:
-            logger.exception("Error en detección de voicemail")
+    # ── VOICEMAIL DETECTION: DESACTIVADA temporalmente ──
+    # El timeout de 8s causaba falsos positivos cuando el usuario contestaba pero
+    # esperaba a que el agente hablara primero (lo cual es normal en outbound).
+    # Para reactivar de forma segura, necesitamos detectar voicemail por otros
+    # medios (silencio total post-agent-speech, no pre-agent-speech).
 
 
 if __name__ == "__main__":
