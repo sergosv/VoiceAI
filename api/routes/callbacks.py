@@ -156,28 +156,28 @@ async def delete_callback(
     callback_id: str,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Elimina un callback (solo si está cancelado o fallido)."""
+    """Elimina un callback. No se permite si está en ejecución."""
     sb = get_supabase()
     client_id = user.impersonating_client_id or user.client_id
 
-    existing = (
-        sb.table("scheduled_callbacks")
-        .select("id, status")
-        .eq("id", callback_id)
-        .eq("client_id", client_id)
-        .limit(1)
-        .execute()
-    )
+    query = sb.table("scheduled_callbacks").select("id, status").eq("id", callback_id)
+    if client_id:
+        query = query.eq("client_id", client_id)
+    existing = query.limit(1).execute()
+
     if not existing.data:
         raise HTTPException(status_code=404, detail="Callback no encontrado")
 
-    if existing.data[0]["status"] in ("pending", "in_progress"):
+    if existing.data[0]["status"] == "in_progress":
         raise HTTPException(
             status_code=400,
-            detail="Cancela el callback antes de eliminarlo",
+            detail="No se puede eliminar un callback en ejecución",
         )
 
-    sb.table("scheduled_callbacks").delete().eq("id", callback_id).execute()
+    delete_query = sb.table("scheduled_callbacks").delete().eq("id", callback_id)
+    if client_id:
+        delete_query = delete_query.eq("client_id", client_id)
+    delete_query.execute()
     return {"ok": True}
 
 

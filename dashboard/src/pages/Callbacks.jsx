@@ -7,7 +7,7 @@ import { PageLoader } from '../components/ui/Spinner'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
-import { PhoneCall, Clock, Bot, XCircle, CheckCircle, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, Play } from 'lucide-react'
+import { PhoneCall, Clock, Bot, XCircle, CheckCircle, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, Play, Trash2 } from 'lucide-react'
 
 const STATUS_CONFIG = {
   pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400', icon: Clock },
@@ -54,6 +54,21 @@ export function Callbacks() {
     try {
       await api.patch(`/callbacks/${id}/cancel`, { reason: 'Cancelado desde dashboard' })
       toast.success('Callback cancelado')
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  async function handleDelete(id) {
+    const confirmed = await confirmDialog.confirm({
+      title: 'Eliminar callback',
+      message: 'El callback se eliminara permanentemente. Continuar?',
+    })
+    if (!confirmed) return
+    try {
+      await api.delete(`/callbacks/${id}`)
+      toast.success('Callback eliminado')
       load()
     } catch (e) {
       toast.error(e.message)
@@ -181,8 +196,23 @@ export function Callbacks() {
                     </Button>
                   )}
                   {cb.status === 'pending' && (
-                    <Button variant="danger" size="sm" onClick={() => handleCancel(cb.id)}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handleCancel(cb.id)}
+                      title="Cancelar (no ejecutar)"
+                    >
                       <XCircle size={14} />
+                    </Button>
+                  )}
+                  {cb.status !== 'in_progress' && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleDelete(cb.id)}
+                      title="Eliminar permanentemente"
+                    >
+                      <Trash2 size={14} />
                     </Button>
                   )}
                 </div>
