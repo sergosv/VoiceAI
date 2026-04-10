@@ -46,9 +46,11 @@ export function Callbacks() {
   useEffect(() => { load() }, [page, statusFilter])
 
   async function handleCancel(id) {
-    const confirmed = await confirmDialog.confirm({
+    const confirmed = await confirmDialog({
       title: 'Cancelar callback',
       message: 'El callback no se ejecutara. Continuar?',
+      confirmText: 'Cancelar callback',
+      variant: 'warning',
     })
     if (!confirmed) return
     try {
@@ -61,9 +63,11 @@ export function Callbacks() {
   }
 
   async function handleDelete(id) {
-    const confirmed = await confirmDialog.confirm({
+    const confirmed = await confirmDialog({
       title: 'Eliminar callback',
       message: 'El callback se eliminara permanentemente. Continuar?',
+      confirmText: 'Eliminar',
+      variant: 'danger',
     })
     if (!confirmed) return
     try {
