@@ -470,6 +470,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         from dataclasses import replace
         updated_agent = replace(config.agent, system_prompt=campaign_script)
         config = ResolvedConfig(agent=updated_agent, client=config.client)
+        logger.info(
+            "Outbound: system prompt reemplazado con campaign script (%d chars)",
+            len(campaign_script),
+        )
+    elif outbound_mode:
+        logger.warning(
+            "Outbound SIN campaign_script — usando system prompt del agente (%d chars)",
+            len(config.agent.system_prompt or ""),
+        )
 
     # ── PARALLELIZAR carga de recursos (latency optimization) ──
     # En vez de 4 awaits secuenciales (~4-8s), cargamos todo en paralelo (~1-2s)
