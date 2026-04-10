@@ -1121,9 +1121,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 transcript=list(handler._transcript),
             )
             results = await hook_engine.evaluate("OnUserMessage", hctx)
-            # Inyectar contexto adicional al prompt del agente
+            # Inyectar contexto adicional al prompt del agente (skip Gemini Live)
             extra_ctx = hook_engine.collect_context(results)
-            if extra_ctx and hasattr(voice_agent, "_instructions"):
+            if (extra_ctx and hasattr(voice_agent, "_instructions")
+                    and config.agent.agent_mode != "gemini_live"):
                 base = voice_agent.instructions
                 # Agregar contexto temporal (se limpia en el siguiente turno)
                 voice_agent._instructions = base + f"\n\n## Contexto hooks:\n{extra_ctx}"
@@ -1147,7 +1148,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             )
             results = await hook_engine.evaluate("OnGuardrailHit", hctx)
             extra = hook_engine.collect_context(results)
-            if extra and hasattr(voice_agent, "_instructions"):
+            if (extra and hasattr(voice_agent, "_instructions")
+                    and config.agent.agent_mode != "gemini_live"):
                 voice_agent._instructions = voice_agent.instructions + f"\n\n{extra}"
             notifications = hook_engine.collect_notifications(results)
             for notif in notifications:
@@ -1254,7 +1256,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         directive = sentiment_analyzer.get_empathy_directive()
 
         # Inyectar directiva emocional al agente si cambió
-        if directive and hasattr(voice_agent, "_instructions"):
+        # Skip en Gemini Live: update_instructions no es compatible y solo causa latencia
+        if (directive and hasattr(voice_agent, "_instructions")
+                and config.agent.agent_mode != "gemini_live"):
             # Limpiar directiva anterior si existe
             base = voice_agent.instructions
             for marker in ("## ALERTA:", "## ALERT:", "## ALERTA URGENTE:", "## URGENT ALERT:"):
@@ -1296,7 +1300,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                             "Output guardrail violations: %s", check.violations
                         )
                         # Inyectar corrección para la siguiente respuesta
-                        if hasattr(voice_agent, "_instructions"):
+                        # Skip en Gemini Live: update_instructions no es compatible
+                        if (hasattr(voice_agent, "_instructions")
+                                and config.agent.agent_mode != "gemini_live"):
                             correction = (
                                 "\n\n## CORRECCIÓN URGENTE\n"
                                 "Tu última respuesta violó estas reglas: "
