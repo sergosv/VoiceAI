@@ -208,6 +208,8 @@ def build_realtime_model(config: AgentConfig):
     from livekit.plugins import openai
 
     kwargs = {"model": config.realtime_model, "voice": config.realtime_voice}
+    if config.system_prompt:
+        kwargs["instructions"] = config.system_prompt
     api_key = config.realtime_api_key
     if api_key:
         kwargs["api_key"] = api_key
