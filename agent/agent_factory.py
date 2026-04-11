@@ -667,7 +667,7 @@ class VoiceAgent(Agent):
             return msg
 
         # Resolver timezone del cliente
-        _bh = self._config.client.business_hours
+        _bh = self._config.client.business_hours or {}
         _client_tz = _bh.get("timezone") if _bh else None
 
         # Construir contexto de la conversación actual para el callback
@@ -689,6 +689,7 @@ class VoiceAgent(Agent):
             client_timezone=_client_tz,
             origin_type=getattr(self, "_origin_type", None),
             campaign_id=getattr(self, "_campaign_id", None),
+            business_hours=_bh,  # pasar config pre-cargada, evita query extra
         )
 
         # Hook: PostToolCall

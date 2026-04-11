@@ -112,6 +112,20 @@ def _parse_scheduled_time(
     return dt_naive.replace(tzinfo=tz)
 
 
+# Tracker en memoria para idempotencia dentro de la misma sesión del agente.
+# Si el LLM llama el tool 5 veces en 10 segundos (porque Gemini canceló el call
+# y reintenta), solo el primer call hace el insert; los demás devuelven el mismo
+# resultado inmediatamente sin tocar la DB.
+_recent_schedules: dict[str, tuple[float, str]] = {}
+_IDEMPOTENCY_WINDOW_S = 30
+
+
+def _idempotency_key(client_id: str, phone: str, scheduled_at: datetime) -> str:
+    """Key que identifica un schedule único por cliente+phone+hora (al minuto)."""
+    minute_key = scheduled_at.strftime("%Y%m%d%H%M")
+    return f"{client_id}:{phone}:{minute_key}"
+
+
 async def schedule_callback(
     client_id: str,
     agent_id: str,
@@ -124,8 +138,13 @@ async def schedule_callback(
     max_attempts: int = 3,
     origin_type: str | None = None,
     campaign_id: str | None = None,
+    business_hours: dict | None = None,
 ) -> str:
     """Programa un callback (devolución de llamada) para una hora futura.
+
+    Diseñado para responder en <500ms: validaciones síncronas, insert async
+    en background, idempotente para evitar duplicados cuando Gemini cancela
+    y reintenta el tool.
 
     Args:
         client_id: ID del cliente.
@@ -134,9 +153,10 @@ async def schedule_callback(
         date: Fecha en formato YYYY-MM-DD.
         time: Hora en formato HH:MM (24h).
         context: Resumen de la conversación para dar contexto al agente.
-        origin_call_id: ID de la llamada original donde se pidió el callback.
+        origin_call_id: ID de la llamada original.
         client_timezone: Timezone IANA del cliente.
         max_attempts: Intentos máximos si no contesta.
+        business_hours: Config ya cargada del cliente (evita query extra).
 
     Returns:
         Mensaje de confirmación o error.
@@ -152,40 +172,25 @@ async def schedule_callback(
             "Confirma con el usuario la fecha (día/mes/año) y hora exacta."
         )
 
-    # Validar que no sea en el pasado
+    # Validaciones rápidas (sin DB)
     now = datetime.now(tz)
     if scheduled_at < now - timedelta(minutes=5):
         return (
             "La hora indicada ya pasó. "
             "Pregúntale al usuario una hora futura para la llamada."
         )
-
-    # Validar que no sea demasiado lejos (max 30 días)
     if scheduled_at > now + timedelta(days=30):
         return (
             "Solo puedo programar callbacks hasta 30 días en el futuro. "
             "Confirma una fecha más cercana con el usuario."
         )
 
-    # Validar business hours si el cliente los tiene configurados
-    try:
-        _sb_bh = _get_supabase()
-        _client = await asyncio.to_thread(
-            lambda: _sb_bh.table("clients").select("business_hours").eq(
-                "id", client_id
-            ).limit(1).execute()
+    # Validar business_hours si vienen en el argumento (sin query extra)
+    if business_hours and not _is_in_business_hours(scheduled_at, business_hours):
+        return (
+            "Esa hora está fuera del horario de atención. "
+            "Pregúntale al usuario otra hora dentro del horario laboral."
         )
-        _bh = _client.data[0].get("business_hours") if _client.data else None
-        if _bh:
-            if not _is_in_business_hours(scheduled_at, _bh):
-                return (
-                    "Esa hora está fuera del horario de atención. "
-                    "Pregúntale al usuario otra hora dentro del horario laboral."
-                )
-    except Exception:
-        logger.warning("No se pudo validar business_hours, continuando sin validación")
-
-    sb = _get_supabase()
 
     # Normalizar teléfono para consistencia con DNC
     try:
@@ -194,73 +199,84 @@ async def schedule_callback(
     except Exception:
         pass
 
-    # Cancelar callbacks pendientes anteriores al mismo número (max 1 activo)
-    try:
-        existing = await asyncio.to_thread(
-            lambda: sb.table("scheduled_callbacks")
-            .select("id")
-            .eq("client_id", client_id)
-            .eq("phone", phone)
-            .eq("status", "pending")
-            .execute()
-        )
-        if existing.data:
+    # ── Idempotencia: si ya programamos este callback recientemente, devolver
+    #    el mismo resultado sin tocar DB (evita duplicados cuando Gemini
+    #    cancela el tool call y reintenta).
+    import time as _time
+    now_ts = _time.time()
+    # Limpiar entradas viejas del tracker
+    expired = [k for k, (ts, _) in _recent_schedules.items() if now_ts - ts > _IDEMPOTENCY_WINDOW_S]
+    for k in expired:
+        _recent_schedules.pop(k, None)
+
+    key = _idempotency_key(client_id, phone, scheduled_at)
+    if key in _recent_schedules:
+        _, cached_msg = _recent_schedules[key]
+        logger.info("Idempotencia: callback %s ya en flight, retornando cache", key)
+        return cached_msg
+
+    # Formatear confirmación antes de marcar idempotencia
+    hora_local = scheduled_at.strftime("%I:%M %p").lstrip("0")
+    fecha_local = scheduled_at.strftime("%d/%m/%Y")
+    confirmation_msg = (
+        f"Callback programado exitosamente para el {fecha_local} a las {hora_local}. "
+        f"Confirma al usuario que le llamaremos a esa hora al número {phone}."
+    )
+    _recent_schedules[key] = (now_ts, confirmation_msg)
+
+    # ── Insert en background (no bloquea al LLM) ──
+    async def _do_insert() -> None:
+        try:
+            sb = _get_supabase()
+
+            # Cifrar context at rest (puede contener PII del transcript)
+            from agent.config_loader import _encrypt_value
+            encrypted_context = _encrypt_value(context) if context else None
+
+            # Cancelar callbacks pendientes anteriores al mismo número
+            try:
+                await asyncio.to_thread(
+                    lambda: sb.table("scheduled_callbacks")
+                    .update({
+                        "status": "cancelled",
+                        "failure_reason": "Reemplazado por nuevo callback",
+                    })
+                    .eq("client_id", client_id)
+                    .eq("phone", phone)
+                    .eq("status", "pending")
+                    .execute()
+                )
+            except Exception:
+                logger.exception("Error cancelando callbacks previos (bg)")
+
+            insert_data = {
+                "client_id": client_id,
+                "agent_id": agent_id,
+                "phone": phone,
+                "scheduled_at": scheduled_at.isoformat(),
+                "timezone": str(tz),
+                "context": encrypted_context,
+                "origin_call_id": origin_call_id,
+                "max_attempts": max_attempts,
+            }
+            if origin_type:
+                insert_data["origin_type"] = origin_type
+            if campaign_id:
+                insert_data["campaign_id"] = campaign_id
+
             await asyncio.to_thread(
-                lambda: sb.table("scheduled_callbacks")
-                .update({"status": "cancelled", "failure_reason": "Reemplazado por nuevo callback"})
-                .eq("client_id", client_id)
-                .eq("phone", phone)
-                .eq("status", "pending")
-                .execute()
+                lambda: sb.table("scheduled_callbacks").insert(insert_data).execute()
             )
             logger.info(
-                "Cancelados %d callback(s) previos de %s antes de crear nuevo",
-                len(existing.data), phone,
-            )
-    except Exception:
-        logger.exception("Error cancelando callbacks previos")
-
-    try:
-        # Cifrar context at rest (puede contener PII del transcript)
-        from agent.config_loader import _encrypt_value
-        encrypted_context = _encrypt_value(context) if context else None
-
-        insert_data = {
-            "client_id": client_id,
-            "agent_id": agent_id,
-            "phone": phone,
-            "scheduled_at": scheduled_at.isoformat(),
-            "timezone": str(tz),
-            "context": encrypted_context,
-            "origin_call_id": origin_call_id,
-            "max_attempts": max_attempts,
-        }
-        if origin_type:
-            insert_data["origin_type"] = origin_type
-        if campaign_id:
-            insert_data["campaign_id"] = campaign_id
-
-        result = await asyncio.to_thread(
-            lambda: sb.table("scheduled_callbacks").insert(insert_data).execute()
-        )
-
-        if result.data:
-            # Formatear hora para confirmación
-            hora_local = scheduled_at.strftime("%I:%M %p").lstrip("0")
-            fecha_local = scheduled_at.strftime("%d/%m/%Y")
-            logger.info(
-                "Callback programado: %s → %s a las %s (%s)",
+                "Callback programado (bg): %s → %s a las %s (%s)",
                 phone, fecha_local, hora_local, tz,
             )
-            return (
-                f"Callback programado exitosamente para el {fecha_local} a las {hora_local}. "
-                f"Confirma al usuario que le llamaremos a esa hora al número {phone}."
-            )
-        return "Error al guardar el callback. Pide disculpas e intenta de nuevo."
+        except Exception:
+            logger.exception("Error insertando callback %s en background", phone)
+            # Limpiar la entrada de idempotencia para permitir retry manual
+            _recent_schedules.pop(key, None)
 
-    except Exception:
-        logger.exception("Error programando callback para %s", phone)
-        return (
-            "Hubo un error al programar la llamada. "
-            "Pide disculpas y dile que un asesor lo contactará."
-        )
+    # Fire and forget — el LLM recibe confirmación inmediatamente
+    asyncio.create_task(_do_insert())
+
+    return confirmation_msg
