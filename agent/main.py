@@ -1707,15 +1707,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             # en el script de la campaña (no inyectar el greeting del agente que es
             # del modo inbound).
             _gl_instruction = (
-                "\n\nIMPORTANTE: Al iniciar la conversación, saluda al usuario "
-                "siguiendo EXACTAMENTE el guión de apertura definido en este prompt. "
-                "Inicia inmediatamente sin esperar a que el usuario hable."
+                "\n\n## INSTRUCCIÓN DE INICIO CRÍTICA ##\n"
+                "APENAS inicie esta conversación, ANTES de esperar cualquier input del usuario, "
+                "SALUDA INMEDIATAMENTE siguiendo EXACTAMENTE el guión de apertura definido arriba. "
+                "NO esperes que el usuario diga nada primero. TÚ HABLAS PRIMERO."
             )
         else:
             _gl_greeting = config.agent.greeting or "Hola, en qué puedo ayudarte?"
             _gl_instruction = (
-                f"\n\nIMPORTANTE: Al iniciar la conversación, saluda al usuario "
-                f"diciendo EXACTAMENTE: \"{_gl_greeting}\". Hazlo inmediatamente."
+                f"\n\n## INSTRUCCIÓN DE INICIO CRÍTICA ##\n"
+                f"APENAS inicie esta conversación, ANTES de esperar cualquier input del usuario, "
+                f"SALUDA INMEDIATAMENTE diciendo EXACTAMENTE: \"{_gl_greeting}\". "
+                f"NO esperes que el usuario diga nada primero. TÚ HABLAS PRIMERO."
             )
         if hasattr(voice_agent, '_instructions') and voice_agent.instructions:
             voice_agent._instructions = voice_agent.instructions + _gl_instruction
