@@ -231,6 +231,29 @@ def build_gemini_live_model(config: AgentConfig):
         "output_audio_transcription": types.AudioTranscriptionConfig(),
     }
 
+    # VAD tuning: menos sensible a interrupciones cortas ("mm", "ajá", respiros)
+    # para que el agente termine frases cortas como "con quién tengo el gusto".
+    # El usuario todavía puede interrumpir hablando con intención clara.
+    # - START_SENSITIVITY_LOW: necesita más confianza para detectar speech
+    # - END_SENSITIVITY_HIGH: cierra turno del usuario rápido (responde rápido)
+    # - silence_duration_ms=600: espera 600ms de silencio (vs 100ms default)
+    # - prefix_padding_ms=200: más contexto previo (mejor transcripción)
+    try:
+        kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_LOW,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                prefix_padding_ms=200,
+                silence_duration_ms=600,
+            ),
+        )
+    except (AttributeError, TypeError):
+        # Si la versión del SDK no soporta estos campos, continuar sin config
+        import logging as _lg
+        _lg.getLogger("voice-ai").warning(
+            "Gemini Live: realtime_input_config no soportado en esta versión"
+        )
+
     # Pasar el system_prompt como instructions — Gemini Live lo usa como
     # system_instruction. Sin esto, Gemini Live ignora el prompt del agente
     # (incluyendo override de campañas outbound).
