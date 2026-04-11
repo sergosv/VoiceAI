@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from api.cost_rates import build_cost_breakdown
 from api.deps import get_supabase
@@ -334,3 +335,36 @@ async def delete_call_recording(
         "recording_status": "deleted",
     }).eq("id", call_id).execute()
     return None
+
+
+class LegalHoldRequest(BaseModel):
+    legal_hold: bool
+    reason: str | None = None
+
+
+@router.patch("/{call_id}/legal-hold")
+async def set_legal_hold(
+    call_id: str,
+    body: LegalHoldRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Marca/desmarca una llamada con legal hold. Protege de retention policy."""
+    sb = get_supabase()
+    existing = sb.table("calls").select("id, client_id").eq("id", call_id).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Llamada no encontrada")
+
+    # Multi-tenancy
+    if user.role == "client" and existing.data[0].get("client_id") != user.client_id:
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    update_data: dict = {"legal_hold": body.legal_hold}
+    if body.legal_hold:
+        update_data["legal_hold_reason"] = body.reason or "Sin razón especificada"
+        update_data["legal_hold_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        update_data["legal_hold_reason"] = None
+        update_data["legal_hold_at"] = None
+
+    sb.table("calls").update(update_data).eq("id", call_id).execute()
+    return {"ok": True, "legal_hold": body.legal_hold}

@@ -64,28 +64,38 @@ _INJECTION_PATTERNS = [
 
 
 # Frases que indican molestia real (no objeción refleja)
-# Requieren cierre graceful inmediato para proteger marca y número
+# Requieren cierre graceful inmediato para proteger marca y número.
+# Los patterns usan \b o anchors para evitar falsos positivos en narrativa.
 _ESCALATION_PATTERNS = [
     re.compile(p, re.IGNORECASE) for p in [
-        r"d[eé]j[ae]me en paz",
-        r"no (me )?(vuelva[ns]?|insista[ns]?) a (llamar|marcar|contactar)",
-        r"ya le dije que no",
-        r"no insista[ns]?",
-        r"voy a (reportar|denunciar|bloquear)",
-        r"(es|esto es) acoso",
-        r"los voy a demandar",
-        r"(llamo|hablo) a (profeco|condusef|policía|policia)",
-        r"no me (est[eé]n? |)molest(ando|en)",
-        r"mét(anse|ete) su (producto|oferta|llamada)",
-        r"ya (p[aá]r[ea]le|b[aá]stale|es[tá] bueno)",
-        r"(colgu[ée]|voy a colgar)",
-        r"(quite|quiten|saque|saquen)me de (su|la) lista",
-        r"no (quiero|deseo) (que me llamen|sus llamadas|nada)",
-        r"leave me alone",
-        r"stop calling( me)?",
-        r"do not call( me)? again",
-        r"(i.ll|i will) (report|sue|block) you",
-        r"this is harassment",
+        # Español
+        r"\bd[eé]j[ae]me en paz\b",
+        r"\bno (me )?(vuelva[ns]?|insista[ns]?) a (llamar|marcar|contactar)",
+        r"\bno insista[ns]?\b",
+        r"\bvoy a (reportar|denunciar|bloquear)(los| este número)?\b",
+        r"\b(esto es|es) acoso\b",
+        r"\blos voy a demandar\b",
+        r"\b(llamo|voy a llamar|hablo) a (la )?(profeco|condusef|policía|policia)\b",
+        r"\bno me (est[eé]n? )?molest(ando|en)\b",
+        r"\bmét(anse|ete) su (producto|oferta|llamada)\b",
+        r"\b(qu[ií]te[nm]?e?|saque[nm]?e?)\s*me?\s*de (su|la) lista\b",
+        r"\bqu[ií]te[nm]?me\b",
+        r"\bno (quiero|deseo) (que me llamen|sus llamadas|nada)\b",
+        r"\bya (le he|te he) dicho (que no|mil veces)",
+        # Inglés
+        r"\bleave me alone\b",
+        r"\bstop calling( me)?\b",
+        r"\bdo not call( me)? again\b",
+        r"\b(i.ll|i will) (report|sue|block) you\b",
+        r"\bthis is harassment\b",
+        r"\btake me off (your|the) list\b",
+        # Portugués
+        r"\bme deix[ae] em paz\b",
+        r"\bpare de (me )?liga[rt]\b",
+        r"\bnão (me )?lig(ue|ues|uem) mais\b",
+        r"\bisso é assédio\b",
+        r"\bvou (denunciar|processar|bloquear)\b",
+        r"\bme tir(e|a) (da|dessa) lista\b",
     ]
 ]
 

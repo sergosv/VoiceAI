@@ -1112,9 +1112,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 task = asyncio.ensure_future(_eval_user_message_hooks(ev.transcript))
                 _bg_tasks.add(task)
                 task.add_done_callback(_bg_tasks.discard)
-            # Inyectar elapsed time al LLM cada 5 turnos del usuario
+            # Inyectar elapsed time al LLM cada 3 turnos del usuario
             _user_turns = lifecycle._user_turns
-            if _user_turns > 0 and _user_turns % 5 == 0 and config.agent.agent_mode != "gemini_live":
+            if _user_turns > 0 and _user_turns % 3 == 0 and config.agent.agent_mode != "gemini_live":
                 _elapsed = int((datetime.now(timezone.utc) - handler._started_at).total_seconds())
                 _elapsed_min = _elapsed // 60
                 _elapsed_sec = _elapsed % 60
@@ -1595,12 +1595,19 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # referencias relativas como "mañana", "el lunes", etc.
     try:
         _bh = config.client.business_hours or {}
-        _tz_name = _bh.get("timezone", "America/Mexico_City")
+        _tz_name = _bh.get("timezone") or "America/Mexico_City"
         try:
             from zoneinfo import ZoneInfo
             _tz_obj = ZoneInfo(_tz_name)
         except Exception:
-            _tz_obj = timezone.utc
+            # Fallback a Mexico City (plataforma LATAM), no UTC
+            try:
+                from zoneinfo import ZoneInfo
+                _tz_obj = ZoneInfo("America/Mexico_City")
+                _tz_name = "America/Mexico_City"
+            except Exception:
+                _tz_obj = timezone(timedelta(hours=-6))  # UTC-6 sin DST
+                _tz_name = "America/Mexico_City"
         _now_local = datetime.now(_tz_obj)
         _dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
         _day_name = _dias[_now_local.weekday()]

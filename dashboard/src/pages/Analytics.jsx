@@ -339,6 +339,7 @@ export function Analytics() {
   const [salesFunnel, setSalesFunnel] = useState(null)
   const [campaigns, setCampaigns] = useState([])
   const [funnelCampaignId, setFunnelCampaignId] = useState('')
+  const [retentionStats, setRetentionStats] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -356,7 +357,8 @@ export function Analytics() {
       api.get(`/analytics/top-intents?days=${days}${cq}`).catch(() => []),
       api.get(`/analytics/proactive-stats?days=${days}${cq}`).catch(() => null),
       api.get(`/analytics/sales-funnel?days=${days}${cq}${funnelCampaignId ? `&campaign_id=${funnelCampaignId}` : ''}`).catch(() => null),
-    ]).then(([sum, vol, st, hr, ag, dur, sent, qual, intents, proactive, funnel]) => {
+      api.get(`/analytics/retention-stats?days=${days}`).catch(() => null),
+    ]).then(([sum, vol, st, hr, ag, dur, sent, qual, intents, proactive, funnel, retention]) => {
       if (cancelled) return
       setSummary(sum)
       setVolume(vol)
@@ -369,6 +371,7 @@ export function Analytics() {
       setTopIntents(intents || [])
       setProactiveStats(proactive)
       setSalesFunnel(funnel)
+      setRetentionStats(retention)
     }).catch(err => {
       if (!cancelled) toast.error(err.message)
     }).finally(() => {
@@ -616,6 +619,30 @@ export function Analytics() {
               <p className="text-xs text-text-muted">Sin llamadas outbound en este período</p>
             )}
           </Card>
+
+          {/* Retention stats */}
+          {retentionStats && (
+            <Card>
+              <h3 className="text-sm font-semibold text-text-secondary mb-4">Retención de grabaciones</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <div className="text-2xl font-bold text-text-primary">{retentionStats.active_recordings || 0}</div>
+                  <div className="text-xs text-text-muted mt-1">Grabaciones activas</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-orange-400">{retentionStats.deleted_in_period || 0}</div>
+                  <div className="text-xs text-text-muted mt-1">Eliminadas ({retentionStats.period_days}d)</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold text-text-primary">{retentionStats.retention_days || 90}</div>
+                  <div className="text-xs text-text-muted mt-1">Días de retención</div>
+                </div>
+              </div>
+              <p className="text-[11px] text-text-muted mt-4">
+                Las grabaciones con legal hold NO se eliminan automáticamente.
+              </p>
+            </Card>
+          )}
         </>
       )}
     </div>

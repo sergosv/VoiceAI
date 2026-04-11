@@ -60,10 +60,11 @@ async def _cleanup_old_recordings() -> None:
     sb = get_supabase()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
 
-    # Buscar calls con recording_key y started_at más viejo que cutoff
+    # Buscar calls con recording_key y started_at más viejo que cutoff.
+    # Excluir llamadas con legal_hold activo.
     result = sb.table("calls").select("id, recording_key, started_at").not_.is_(
         "recording_key", "null"
-    ).lt("started_at", cutoff).limit(100).execute()
+    ).eq("legal_hold", False).lt("started_at", cutoff).limit(100).execute()
 
     if not result.data:
         logger.info("Retention: no hay grabaciones para eliminar")

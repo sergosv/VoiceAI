@@ -6,9 +6,11 @@ import csv
 import io
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from agent.phone_utils import normalize_phone
 from api.deps import get_supabase
@@ -18,10 +20,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Rate limiter: prevenir enumeración de números vía DNC API
+limiter = Limiter(key_func=get_remote_address)
+
 
 class DNCEntry(BaseModel):
     phone: str
     reason: str | None = None
+    client_id: str | None = None  # Solo usado si admin sin impersonar
 
 
 class DNCOut(BaseModel):
@@ -33,7 +39,9 @@ class DNCOut(BaseModel):
 
 
 @router.get("")
+@limiter.limit("30/minute")
 async def list_dnc(
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -136,9 +144,13 @@ async def add_dnc(
 ):
     """Agrega un número a la lista DNC."""
     sb = get_supabase()
-    client_id = user.impersonating_client_id or user.client_id
+    # Admin sin impersonar puede pasar client_id en el body
+    client_id = user.impersonating_client_id or user.client_id or entry.client_id
     if not client_id:
-        raise HTTPException(status_code=400, detail="Se requiere client_id")
+        raise HTTPException(
+            status_code=400,
+            detail="Se requiere client_id (pasar en body si eres admin sin impersonar)",
+        )
 
     normalized = normalize_phone(entry.phone)
     result = sb.table("dnc_entries").upsert({
@@ -170,7 +182,9 @@ async def remove_dnc(
 
 
 @router.get("/check/{phone}")
+@limiter.limit("30/minute")
 async def check_dnc(
+    request: Request,
     phone: str,
     user: CurrentUser = Depends(get_current_user),
 ):
