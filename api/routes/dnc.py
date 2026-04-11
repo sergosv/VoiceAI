@@ -127,7 +127,7 @@ async def bulk_add_dnc(
             "phone": normalize_phone(phone),
             "reason": body.reason or "Import masivo",
             "source": "import",
-            "added_by": user.auth_uid,
+            "added_by": user.auth_user_id,
         })
 
     if not entries:
@@ -158,7 +158,7 @@ async def add_dnc(
         "phone": normalized,
         "reason": entry.reason or "Agregado manualmente",
         "source": "manual",
-        "added_by": user.auth_uid,
+        "added_by": user.auth_user_id,
     }, on_conflict="client_id,phone").execute()
 
     return {"ok": True, "data": result.data[0] if result.data else None}

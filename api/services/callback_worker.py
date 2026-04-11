@@ -35,8 +35,26 @@ def stop_callback_worker() -> None:
         logger.info("Callback worker detenido")
 
 
+async def _reap_stuck_callbacks() -> int:
+    """Recupera callbacks que quedaron atorados en in_progress > 10 min.
+
+    Esto pasa si el worker cae a mitad de ejecución (Railway kill,
+    network, crash). Los devuelve a pending para retry.
+    """
+    from datetime import datetime, timedelta, timezone
+    from api.deps import get_supabase
+    sb = get_supabase()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    result = sb.table("scheduled_callbacks").update({
+        "status": "pending",
+        "failure_reason": "Recuperado de in_progress atorado",
+    }).eq("status", "in_progress").lt("last_attempt_at", cutoff).execute()
+    return len(result.data or [])
+
+
 async def _worker_loop() -> None:
     """Loop principal del worker."""
+    reap_counter = 0
     while True:
         try:
             from api.services.callback_service import process_pending_callbacks
@@ -46,6 +64,19 @@ async def _worker_loop() -> None:
                     "Callback worker: procesados=%d, ok=%d, fallidos=%d",
                     stats["processed"], stats["succeeded"], stats["failed"],
                 )
+            # Cada 5 ciclos (5 min) recuperar callbacks atorados
+            reap_counter += 1
+            if reap_counter >= 5:
+                reap_counter = 0
+                try:
+                    reaped = await _reap_stuck_callbacks()
+                    if reaped > 0:
+                        logger.warning(
+                            "Callback reaper: %d callbacks recuperados de in_progress atorado",
+                            reaped,
+                        )
+                except Exception:
+                    logger.exception("Error en callback reaper")
         except asyncio.CancelledError:
             logger.info("Callback worker cancelado")
             return

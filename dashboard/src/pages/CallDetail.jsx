@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones, Mic, Clock, PhoneOff, PhoneIncoming, PhoneOutgoing, User, Bot, Timer } from 'lucide-react'
+import { ArrowLeft, Phone, Brain, AlertCircle, Target, TrendingUp, Zap, ArrowRightLeft, Star, Activity, Headphones, Mic, Clock, PhoneOff, PhoneIncoming, PhoneOutgoing, User, Bot, Timer, Lock, Unlock } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 import { Card } from '../components/ui/Card'
@@ -128,6 +128,21 @@ export function CallDetail() {
       .catch(() => navigate('/calls'))
       .finally(() => setLoading(false))
   }, [id])
+
+  async function toggleLegalHold() {
+    const newState = !call.legal_hold
+    const reason = newState ? window.prompt('Razon del legal hold (opcional):') : null
+    if (newState && reason === null) return // cancelled
+    try {
+      await api.patch(`/calls/${call.id}/legal-hold`, {
+        legal_hold: newState,
+        reason: reason || null,
+      })
+      setCall(prev => ({ ...prev, legal_hold: newState, legal_hold_reason: reason }))
+    } catch (e) {
+      alert(`Error: ${e.message}`)
+    }
+  }
 
   if (loading) return <PageLoader />
   if (!call) return null
@@ -561,13 +576,36 @@ export function CallDetail() {
         {/* Grabación */}
         {call.recording_url && (
           <Card className="lg:col-span-3 space-y-3">
-            <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
-              <Headphones size={16} className="text-accent" /> Grabacion
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-text-secondary flex items-center gap-2">
+                <Headphones size={16} className="text-accent" /> Grabacion
+                {call.legal_hold && (
+                  <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-yellow-500/15 text-yellow-400 flex items-center gap-1">
+                    <Lock size={11} /> Legal Hold
+                  </span>
+                )}
+              </h2>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={toggleLegalHold}
+                title={call.legal_hold ? 'Quitar legal hold (permitir borrado)' : 'Proteger de borrado automático'}
+              >
+                {call.legal_hold ? <Unlock size={14} /> : <Lock size={14} />}
+                {call.legal_hold ? 'Quitar hold' : 'Legal hold'}
+              </Button>
+            </div>
+            {call.legal_hold && call.legal_hold_reason && (
+              <p className="text-xs text-yellow-400/80">Razon: {call.legal_hold_reason}</p>
+            )}
             <AudioPlayer
               url={call.recording_url}
               onDelete={() => {
                 if (!call.id) return
+                if (call.legal_hold) {
+                  alert('Esta grabación tiene legal hold. Quita el hold antes de eliminar.')
+                  return
+                }
                 api.delete(`/calls/${call.id}/recording`)
                   .then(() => setCall(prev => ({ ...prev, recording_url: null })))
                   .catch(() => {})

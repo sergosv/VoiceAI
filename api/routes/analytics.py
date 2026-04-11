@@ -418,10 +418,10 @@ async def retention_stats(
     sb = get_supabase()
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-    # Grabaciones eliminadas por retención
+    # Grabaciones eliminadas por retención (filtro por fecha real de borrado)
     deleted = sb.table("calls").select("id", count="exact").eq(
         "recording_status", "deleted_retention"
-    ).gte("ended_at", since).execute()
+    ).gte("recording_deleted_at", since).execute()
 
     # Grabaciones activas
     active = sb.table("calls").select("id", count="exact").not_.is_(

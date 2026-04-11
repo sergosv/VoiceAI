@@ -83,6 +83,7 @@ async def _cleanup_old_recordings() -> None:
                 sb.table("calls").update({
                     "recording_key": None,
                     "recording_status": "deleted_retention",
+                    "recording_deleted_at": datetime.now(timezone.utc).isoformat(),
                 }).eq("id", row["id"]).execute()
                 deleted += 1
             else:

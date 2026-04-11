@@ -126,20 +126,26 @@ async def callback_stats(
 
 @router.post("/bulk-cancel")
 async def bulk_cancel_callbacks(
+    target_client_id: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Cancela todos los callbacks pendientes del cliente."""
-    sb = get_supabase()
-    client_id = user.impersonating_client_id or user.client_id
+    """Cancela todos los callbacks pendientes del cliente.
 
-    query = sb.table("scheduled_callbacks").update({
+    Admin sin impersonar debe pasar target_client_id en query param.
+    """
+    sb = get_supabase()
+    client_id = user.impersonating_client_id or user.client_id or target_client_id
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Se requiere client_id. Admin debe pasar target_client_id en query.",
+        )
+
+    result = sb.table("scheduled_callbacks").update({
         "status": "cancelled",
         "failure_reason": "Cancelado masivamente",
-    }).eq("status", "pending")
-    if client_id:
-        query = query.eq("client_id", client_id)
+    }).eq("status", "pending").eq("client_id", client_id).execute()
 
-    result = query.execute()
     return {"ok": True, "cancelled": len(result.data or [])}
 
 
