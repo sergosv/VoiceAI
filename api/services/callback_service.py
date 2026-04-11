@@ -129,27 +129,20 @@ async def _execute_callback(sb, cb: dict) -> None:
     try:
         active = sb.table("active_calls").select("id").eq(
             "client_id", client_id
-        ).execute()
+        ).eq("phone", _normalized).limit(1).execute()
         if active.data:
-            # Verificar si alguna de las llamadas activas es con este phone
-            call_ids = [a["id"] for a in active.data]
-            # El active_calls no tiene phone directo, revisar por room_name/metadata
-            # Aproximación: postponer 5 min si hay cualquier llamada activa con este client
-            active_calls = sb.table("calls").select("id, caller_number, callee_number").in_(
-                "livekit_room_name", [a.get("room_name", "") for a in active.data if a.get("room_name")]
-            ).execute()
-            for ac in active_calls.data or []:
-                if ac.get("caller_number") == _normalized or ac.get("callee_number") == _normalized:
-                    logger.warning(
-                        "Callback %s postponed: número %s tiene llamada activa",
-                        cb_id, phone,
-                    )
-                    # Re-schedule en 5 minutos
-                    retry_at = datetime.now(timezone.utc) + timedelta(minutes=5)
-                    sb.table("scheduled_callbacks").update({
-                        "scheduled_at": retry_at.isoformat(),
-                    }).eq("id", cb_id).execute()
-                    return
+            logger.warning(
+                "Callback %s postponed: número %s tiene llamada activa",
+                cb_id, phone,
+            )
+            # Re-schedule en 5 minutos, volver a pending
+            retry_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+            sb.table("scheduled_callbacks").update({
+                "status": "pending",
+                "scheduled_at": retry_at.isoformat(),
+                "failure_reason": "Postponed: llamada activa con el número",
+            }).eq("id", cb_id).execute()
+            return
     except Exception:
         logger.exception("Error verificando active_calls para callback %s", cb_id)
 

@@ -409,6 +409,37 @@ async def analytics_proactive_stats(
     }
 
 
+@router.get("/retention-stats")
+async def retention_stats(
+    user: CurrentUser = Depends(get_current_user),
+    days: int = Query(30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Estadísticas del worker de retención de grabaciones."""
+    sb = get_supabase()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Grabaciones eliminadas por retención
+    deleted = sb.table("calls").select("id", count="exact").eq(
+        "recording_status", "deleted_retention"
+    ).gte("ended_at", since).execute()
+
+    # Grabaciones activas
+    active = sb.table("calls").select("id", count="exact").not_.is_(
+        "recording_key", "null"
+    ).execute()
+
+    # Config
+    import os
+    retention_days = int(os.environ.get("RECORDING_RETENTION_DAYS", "90"))
+
+    return {
+        "deleted_in_period": deleted.count or 0,
+        "active_recordings": active.count or 0,
+        "retention_days": retention_days,
+        "period_days": days,
+    }
+
+
 @router.get("/sales-funnel")
 async def analytics_sales_funnel(
     user: CurrentUser = Depends(get_current_user),

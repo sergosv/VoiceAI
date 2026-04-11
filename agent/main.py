@@ -417,10 +417,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # Registrar llamada activa (después de pasar validaciones de concurrencia y créditos)
     try:
+        # Normalizar el phone según dirección
+        _ac_phone = None
+        try:
+            from agent.phone_utils import normalize_phone as _np_ac
+            _target = caller_number if not outbound_mode else called_number
+            if _target:
+                _ac_phone = _np_ac(_target)
+        except Exception:
+            pass
         sb.table("active_calls").insert({
             "client_id": config.client.id,
             "agent_id": config.agent.id,
             "room_name": ctx.room.name,
+            "phone": _ac_phone,
         }).execute()
     except Exception:
         logger.exception("Error registering active call — continuing anyway")
@@ -1580,6 +1590,32 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.exception("Error en quality scoring async")
 
     ctx.add_shutdown_callback(on_shutdown)
+
+    # Inyectar contexto temporal (fecha, día) para que el LLM pueda resolver
+    # referencias relativas como "mañana", "el lunes", etc.
+    try:
+        _bh = config.client.business_hours or {}
+        _tz_name = _bh.get("timezone", "America/Mexico_City")
+        try:
+            from zoneinfo import ZoneInfo
+            _tz_obj = ZoneInfo(_tz_name)
+        except Exception:
+            _tz_obj = timezone.utc
+        _now_local = datetime.now(_tz_obj)
+        _dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+        _day_name = _dias[_now_local.weekday()]
+        _date_ctx = (
+            f"\n\n## Contexto temporal\n"
+            f"Hoy es {_day_name} {_now_local.strftime('%d/%m/%Y')}. "
+            f"Hora local actual: {_now_local.strftime('%H:%M')} ({_tz_name}).\n"
+            f"Usa esta información para resolver referencias como 'mañana', "
+            f"'el lunes', 'en 2 horas', etc."
+        )
+        if hasattr(voice_agent, "_instructions") and voice_agent.instructions:
+            voice_agent._instructions = voice_agent.instructions + _date_ctx
+            logger.info("Contexto temporal inyectado: %s %s", _day_name, _now_local.strftime("%d/%m/%Y %H:%M"))
+    except Exception:
+        logger.exception("Error inyectando contexto temporal")
 
     # Recording disclosure: inyectar en prompt solo si egress arrancó correctamente
     # (si recording_key existe pero egress_id es None, la grabación falló)

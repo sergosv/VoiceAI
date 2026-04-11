@@ -46,10 +46,11 @@ async def list_dnc(
     query = sb.table("dnc_entries").select("*", count="exact").order("created_at", desc=True)
     if client_id:
         query = query.eq("client_id", client_id)
-    if search:
-        # Normalizar búsqueda para match con formato guardado
-        normalized_search = normalize_phone(search) if search.strip() else search
-        query = query.ilike("phone", f"%{normalized_search}%")
+    if search and search.strip():
+        # Solo dígitos para match con formato E.164 guardado
+        digits_only = "".join(c for c in search if c.isdigit())
+        if digits_only:
+            query = query.ilike("phone", f"%{digits_only}%")
 
     offset = (page - 1) * per_page
     result = query.range(offset, offset + per_page - 1).execute()
