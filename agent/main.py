@@ -1457,11 +1457,37 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 await lk_api.aclose()
 
                 # Validar que el archivo se escribió en R2
+                # NOTA: NO importar de `api.services.recording_service` — el módulo
+                # `api` no existe en LiveKit Cloud. Usar boto3 directamente.
                 if recording_key:
                     await asyncio.sleep(5)  # Dar tiempo a R2 para finalizar escritura
-                    from api.services.recording_service import check_exists
 
-                    exists = await asyncio.to_thread(check_exists, recording_key)
+                    def _check_r2_exists(key: str) -> bool:
+                        try:
+                            import boto3
+                            from botocore.config import Config as BotoConfig
+                            from botocore.exceptions import ClientError as _ClientError
+                            _s3 = boto3.client(
+                                "s3",
+                                endpoint_url=os.environ.get("R2_ENDPOINT", ""),
+                                aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID", ""),
+                                aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY", ""),
+                                config=BotoConfig(s3={"addressing_style": "path"}),
+                                region_name="auto",
+                            )
+                            _s3.head_object(
+                                Bucket=os.environ.get("R2_BUCKET", "voiceai-recordings"),
+                                Key=key,
+                            )
+                            return True
+                        except _ClientError as e:
+                            if e.response.get("Error", {}).get("Code") == "404":
+                                return False
+                            return False
+                        except Exception:
+                            return False
+
+                    exists = await asyncio.to_thread(_check_r2_exists, recording_key)
                     if exists:
                         recording_status = "completed"
                         logger.info("Recording verified in R2: %s", recording_key)
