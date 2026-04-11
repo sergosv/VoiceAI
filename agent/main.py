@@ -183,12 +183,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 outbound_agent_id = meta.get("agent_id")
                 callback_context = meta.get("callback_context", "")
                 callback_id = meta.get("callback_id")
-                # NO setear campaign_script — eso reemplaza todo el prompt del agente.
-                # El contexto del callback se inyecta como ADICIÓN al prompt original.
-                logger.info(
-                    "Modo callback detectado, callback_id: %s, agent_id: %s",
-                    callback_id, outbound_agent_id,
-                )
+                # Si el callback vino de una campaña, usar el campaign_script
+                # para que el agente retome la conversación con el contexto correcto
+                if meta.get("campaign_script"):
+                    campaign_script = meta.get("campaign_script")
+                    campaign_id = meta.get("campaign_id")
+                    logger.info(
+                        "Callback de CAMPAÑA detectado: campaign_id=%s, callback_id=%s",
+                        campaign_id, callback_id,
+                    )
+                else:
+                    logger.info(
+                        "Callback de INBOUND detectado, callback_id: %s, agent_id: %s",
+                        callback_id, outbound_agent_id,
+                    )
         except (json.JSONDecodeError, AttributeError):
             pass
 
@@ -845,10 +853,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         lifecycle=lifecycle,
     )
 
-    # Inyectar session handler y origin call ID para scheduled callbacks
+    # Inyectar session handler y origin info para scheduled callbacks
     if hasattr(voice_agent, "_session_handler"):
         voice_agent._session_handler = handler
         voice_agent._origin_call_id = None
+        # Determinar tipo de origen para que el callback use el prompt correcto
+        if campaign_id:
+            voice_agent._origin_type = "campaign"
+            voice_agent._campaign_id = campaign_id
+        elif outbound_mode:
+            voice_agent._origin_type = "outbound"
+        else:
+            voice_agent._origin_type = "inbound"
 
     # Inyectar métricas de uso para conteo real de TTS/LLM
     # (handler debe existir antes de esta línea)

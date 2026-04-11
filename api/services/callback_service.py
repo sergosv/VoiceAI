@@ -85,14 +85,37 @@ async def _execute_callback(sb, cb: dict) -> None:
 
         room_name = f"callback-{cb_id[:8]}"
 
+        # Si el callback vino de una campaña, recuperar el script para usarlo
+        origin_type = cb.get("origin_type")
+        callback_campaign_id = cb.get("campaign_id")
+        campaign_script = None
+        if origin_type == "campaign" and callback_campaign_id:
+            try:
+                camp = sb.table("campaigns").select("script").eq(
+                    "id", callback_campaign_id
+                ).limit(1).execute()
+                if camp.data and camp.data[0].get("script"):
+                    campaign_script = camp.data[0]["script"]
+                    logger.info(
+                        "Callback %s usará campaign script (%d chars) de campaña %s",
+                        cb_id, len(campaign_script), callback_campaign_id,
+                    )
+            except Exception:
+                logger.exception("Error recuperando campaign script para callback %s", cb_id)
+
         # Metadata para que el agente sepa que es un callback
-        room_metadata = json.dumps({
+        meta_dict = {
             "type": "callback",
             "callback_id": cb_id,
             "client_id": client_id,
             "agent_id": agent_id,
             "callback_context": context[:500] if context else "",
-        })
+            "origin_type": origin_type or "inbound",
+        }
+        if campaign_script:
+            meta_dict["campaign_script"] = campaign_script
+            meta_dict["campaign_id"] = callback_campaign_id
+        room_metadata = json.dumps(meta_dict)
 
         # Crear room con agent dispatch
         await lk_api.room.create_room(CreateRoomRequest(

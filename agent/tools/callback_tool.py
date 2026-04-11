@@ -83,6 +83,8 @@ async def schedule_callback(
     origin_call_id: str | None = None,
     client_timezone: str | None = None,
     max_attempts: int = 3,
+    origin_type: str | None = None,
+    campaign_id: str | None = None,
 ) -> str:
     """Programa un callback (devolución de llamada) para una hora futura.
 
@@ -129,19 +131,23 @@ async def schedule_callback(
     sb = _get_supabase()
 
     try:
+        insert_data = {
+            "client_id": client_id,
+            "agent_id": agent_id,
+            "phone": phone,
+            "scheduled_at": scheduled_at.isoformat(),
+            "timezone": str(tz),
+            "context": context,
+            "origin_call_id": origin_call_id,
+            "max_attempts": max_attempts,
+        }
+        if origin_type:
+            insert_data["origin_type"] = origin_type
+        if campaign_id:
+            insert_data["campaign_id"] = campaign_id
+
         result = await asyncio.to_thread(
-            lambda: sb.table("scheduled_callbacks")
-            .insert({
-                "client_id": client_id,
-                "agent_id": agent_id,
-                "phone": phone,
-                "scheduled_at": scheduled_at.isoformat(),
-                "timezone": str(tz),
-                "context": context,
-                "origin_call_id": origin_call_id,
-                "max_attempts": max_attempts,
-            })
-            .execute()
+            lambda: sb.table("scheduled_callbacks").insert(insert_data).execute()
         )
 
         if result.data:

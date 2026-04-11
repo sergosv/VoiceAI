@@ -56,6 +56,8 @@ class VoiceAgent(Agent):
         self._memory_contact_id: str | None = None
         self._origin_call_id: str | None = None
         self._session_handler: Any | None = None
+        self._origin_type: str | None = None  # 'inbound', 'outbound', 'campaign'
+        self._campaign_id: str | None = None
         # SIP transfer context — inyectado desde main.py
         self._room_name: str = ""
         self._sip_participant_identity: str = ""
@@ -666,6 +668,8 @@ class VoiceAgent(Agent):
             context=conversation_context,
             origin_call_id=self._origin_call_id,
             client_timezone=_client_tz,
+            origin_type=getattr(self, "_origin_type", None),
+            campaign_id=getattr(self, "_campaign_id", None),
         )
 
         # Hook: PostToolCall
