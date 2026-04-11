@@ -187,6 +187,39 @@ async def schedule_callback(
 
     sb = _get_supabase()
 
+    # Normalizar teléfono para consistencia con DNC
+    try:
+        from agent.phone_utils import normalize_phone as _np
+        phone = _np(phone)
+    except Exception:
+        pass
+
+    # Cancelar callbacks pendientes anteriores al mismo número (max 1 activo)
+    try:
+        existing = await asyncio.to_thread(
+            lambda: sb.table("scheduled_callbacks")
+            .select("id")
+            .eq("client_id", client_id)
+            .eq("phone", phone)
+            .eq("status", "pending")
+            .execute()
+        )
+        if existing.data:
+            await asyncio.to_thread(
+                lambda: sb.table("scheduled_callbacks")
+                .update({"status": "cancelled", "failure_reason": "Reemplazado por nuevo callback"})
+                .eq("client_id", client_id)
+                .eq("phone", phone)
+                .eq("status", "pending")
+                .execute()
+            )
+            logger.info(
+                "Cancelados %d callback(s) previos de %s antes de crear nuevo",
+                len(existing.data), phone,
+            )
+    except Exception:
+        logger.exception("Error cancelando callbacks previos")
+
     try:
         insert_data = {
             "client_id": client_id,

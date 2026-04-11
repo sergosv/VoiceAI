@@ -323,6 +323,8 @@ async def add_campaign_contacts(
     if existing.data[0]["status"] == "running":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pausa la campaña antes de agregar contactos")
 
+    from agent.phone_utils import normalize_phone as _np
+
     entries = []
 
     # Agregar por contact_id
@@ -332,7 +334,7 @@ async def add_campaign_contacts(
             entries.append({
                 "campaign_id": campaign_id,
                 "contact_id": c["id"],
-                "phone": c["phone"],
+                "phone": _np(c["phone"]),
                 "status": "pending",
             })
 
@@ -340,7 +342,7 @@ async def add_campaign_contacts(
     for phone in req.phone_numbers:
         entries.append({
             "campaign_id": campaign_id,
-            "phone": phone,
+            "phone": _np(phone),
             "status": "pending",
         })
 

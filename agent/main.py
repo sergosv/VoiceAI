@@ -1583,12 +1583,23 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Recording disclosure: inyectar en prompt solo si egress arrancó correctamente
     # (si recording_key existe pero egress_id es None, la grabación falló)
     if recording_egress_id and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
-        voice_agent._instructions = voice_agent.instructions + (
-            "\n\nIMPORTANTE: Esta llamada está siendo grabada. En tu PRIMER saludo, "
-            "menciona brevemente: 'Le informo que esta llamada puede ser grabada "
-            "con fines de calidad.' Hazlo de forma natural, no robótica."
-        )
-        logger.info("Recording disclosure inyectado en system prompt")
+        _disclosure_lang = (config.client.language or "es").lower()
+        _disclosures = {
+            "es": ("Esta llamada está siendo grabada. En tu PRIMER saludo, menciona brevemente: "
+                   "'Le informo que esta llamada puede ser grabada con fines de calidad.' "
+                   "Hazlo de forma natural, no robótica."),
+            "en": ("This call is being recorded. In your FIRST greeting, briefly mention: "
+                   "'Please note this call may be recorded for quality purposes.' "
+                   "Say it naturally, not robotic."),
+            "pt": ("Esta chamada está sendo gravada. Na sua PRIMEIRA saudação, mencione brevemente: "
+                   "'Informo que esta chamada pode ser gravada para fins de qualidade.' "
+                   "Fale de forma natural."),
+        }
+        # Detectar idioma base (es-en → es, en-us → en)
+        _lang_key = _disclosure_lang.split("-")[0].split("_")[0]
+        _disclosure_text = _disclosures.get(_lang_key, _disclosures["es"])
+        voice_agent._instructions = voice_agent.instructions + f"\n\nIMPORTANTE: {_disclosure_text}"
+        logger.info("Recording disclosure inyectado en system prompt (lang=%s)", _lang_key)
 
     # Callback: inyectar contexto de la conversación anterior al prompt del agente
     if callback_context and hasattr(voice_agent, '_instructions') and voice_agent.instructions:

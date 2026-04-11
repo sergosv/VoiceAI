@@ -20,10 +20,21 @@ from api.deps import get_supabase
 logger = logging.getLogger(__name__)
 
 
+MAX_CONCURRENT_CALLBACKS = 5
+_callback_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    global _callback_semaphore
+    if _callback_semaphore is None:
+        _callback_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CALLBACKS)
+    return _callback_semaphore
+
+
 async def process_pending_callbacks() -> dict:
     """Busca callbacks pendientes cuya hora ya llegó y los ejecuta.
 
-    Retorna estadísticas de ejecución.
+    Máximo MAX_CONCURRENT_CALLBACKS ejecuciones en paralelo.
     """
     sb = get_supabase()
     now = datetime.now(timezone.utc).isoformat()
@@ -38,15 +49,27 @@ async def process_pending_callbacks() -> dict:
     if not result.data:
         return {"processed": 0, "succeeded": 0, "failed": 0}
 
+    sem = _get_semaphore()
     stats = {"processed": 0, "succeeded": 0, "failed": 0}
 
-    for cb in result.data:
+    async def _run_with_sem(cb):
+        async with sem:
+            try:
+                await _execute_callback(sb, cb)
+                return True
+            except Exception:
+                logger.exception("Error ejecutando callback %s", cb["id"])
+                return False
+
+    results = await asyncio.gather(
+        *(_run_with_sem(cb) for cb in result.data),
+        return_exceptions=True,
+    )
+    for r in results:
         stats["processed"] += 1
-        try:
-            await _execute_callback(sb, cb)
+        if r is True:
             stats["succeeded"] += 1
-        except Exception:
-            logger.exception("Error ejecutando callback %s", cb["id"])
+        else:
             stats["failed"] += 1
 
     return stats
@@ -62,12 +85,15 @@ async def _execute_callback(sb, cb: dict) -> None:
     attempts = cb.get("attempts", 0) + 1
     max_attempts = cb.get("max_attempts", 3)
 
+    from agent.phone_utils import normalize_phone as _np
+    _normalized = _np(phone)
+
     # DNC check: si el número fue agregado a la lista entre el momento de programar
     # y el de ejecutar, NO llamar
     try:
         dnc = sb.table("dnc_entries").select("id").eq(
             "client_id", client_id
-        ).eq("phone", phone).limit(1).execute()
+        ).eq("phone", _normalized).limit(1).execute()
         if dnc.data:
             logger.warning(
                 "Callback %s cancelado: número %s en DNC",
@@ -80,6 +106,34 @@ async def _execute_callback(sb, cb: dict) -> None:
             return
     except Exception:
         logger.exception("Error verificando DNC para callback %s", cb_id)
+
+    # Active call check: no llamar si ya hay una llamada activa con ese número
+    try:
+        active = sb.table("active_calls").select("id").eq(
+            "client_id", client_id
+        ).execute()
+        if active.data:
+            # Verificar si alguna de las llamadas activas es con este phone
+            call_ids = [a["id"] for a in active.data]
+            # El active_calls no tiene phone directo, revisar por room_name/metadata
+            # Aproximación: postponer 5 min si hay cualquier llamada activa con este client
+            active_calls = sb.table("calls").select("id, caller_number, callee_number").in_(
+                "livekit_room_name", [a.get("room_name", "") for a in active.data if a.get("room_name")]
+            ).execute()
+            for ac in active_calls.data or []:
+                if ac.get("caller_number") == _normalized or ac.get("callee_number") == _normalized:
+                    logger.warning(
+                        "Callback %s postponed: número %s tiene llamada activa",
+                        cb_id, phone,
+                    )
+                    # Re-schedule en 5 minutos
+                    retry_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+                    sb.table("scheduled_callbacks").update({
+                        "scheduled_at": retry_at.isoformat(),
+                    }).eq("id", cb_id).execute()
+                    return
+    except Exception:
+        logger.exception("Error verificando active_calls para callback %s", cb_id)
 
     # Marcar como in_progress
     sb.table("scheduled_callbacks").update({

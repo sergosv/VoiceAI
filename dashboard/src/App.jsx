@@ -23,6 +23,7 @@ const Contacts = lazy(() => import('./pages/Contacts').then(m => ({ default: m.C
 const ContactDetail = lazy(() => import('./pages/ContactDetail').then(m => ({ default: m.ContactDetail })))
 const Appointments = lazy(() => import('./pages/Appointments').then(m => ({ default: m.Appointments })))
 const Callbacks = lazy(() => import('./pages/Callbacks').then(m => ({ default: m.Callbacks })))
+const DNC = lazy(() => import('./pages/DNC').then(m => ({ default: m.DNC })))
 const Campaigns = lazy(() => import('./pages/Campaigns').then(m => ({ default: m.Campaigns })))
 const CampaignDetail = lazy(() => import('./pages/CampaignDetail').then(m => ({ default: m.CampaignDetail })))
 const Integrations = lazy(() => import('./pages/Integrations').then(m => ({ default: m.Integrations })))
@@ -80,6 +81,7 @@ export default function App() {
                 <Route path="/contacts/:id" element={<ContactDetail />} />
                 <Route path="/appointments" element={<Appointments />} />
                 <Route path="/callbacks" element={<Callbacks />} />
+                <Route path="/dnc" element={<DNC />} />
                 <Route path="/campaigns" element={<Campaigns />} />
                 <Route path="/campaigns/:id" element={<CampaignDetail />} />
                 <Route path="/documents" element={<Documents />} />

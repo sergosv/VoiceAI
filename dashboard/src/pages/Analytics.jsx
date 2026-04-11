@@ -336,6 +336,7 @@ export function Analytics() {
   const [qualityDist, setQualityDist] = useState(null)
   const [topIntents, setTopIntents] = useState([])
   const [proactiveStats, setProactiveStats] = useState(null)
+  const [salesFunnel, setSalesFunnel] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -352,7 +353,8 @@ export function Analytics() {
       api.get(`/analytics/quality-distribution?days=${days}${cq}`).catch(() => null),
       api.get(`/analytics/top-intents?days=${days}${cq}`).catch(() => []),
       api.get(`/analytics/proactive-stats?days=${days}${cq}`).catch(() => null),
-    ]).then(([sum, vol, st, hr, ag, dur, sent, qual, intents, proactive]) => {
+      api.get(`/analytics/sales-funnel?days=${days}${cq}`).catch(() => null),
+    ]).then(([sum, vol, st, hr, ag, dur, sent, qual, intents, proactive, funnel]) => {
       if (cancelled) return
       setSummary(sum)
       setVolume(vol)
@@ -364,6 +366,7 @@ export function Analytics() {
       setQualityDist(qual)
       setTopIntents(intents || [])
       setProactiveStats(proactive)
+      setSalesFunnel(funnel)
     }).catch(err => {
       if (!cancelled) toast.error(err.message)
     }).finally(() => {
@@ -533,6 +536,58 @@ export function Analytics() {
               )}
             </Card>
           </div>
+
+          {/* Sales Funnel (outbound) */}
+          {salesFunnel && salesFunnel.funnel && salesFunnel.funnel.total_dialed > 0 && (
+            <Card>
+              <h3 className="text-sm font-semibold text-text-secondary mb-4 flex items-center gap-2">
+                <BarChart3 size={16} /> Embudo de ventas (outbound)
+              </h3>
+              <div className="space-y-3">
+                {[
+                  { label: 'Marcadas', value: salesFunnel.funnel.total_dialed, rate: null },
+                  { label: 'Conectadas', value: salesFunnel.funnel.connected, rate: salesFunnel.funnel.connection_rate },
+                  { label: 'Conversación', value: salesFunnel.funnel.had_conversation, rate: salesFunnel.funnel.conversation_rate },
+                  { label: 'Interés', value: salesFunnel.funnel.showed_interest, rate: salesFunnel.funnel.interest_rate },
+                  { label: 'Cierre', value: salesFunnel.funnel.closed, rate: salesFunnel.funnel.close_rate },
+                  { label: 'Citas agendadas', value: salesFunnel.funnel.appointments, rate: salesFunnel.funnel.appointment_rate },
+                ].map((stage, i) => {
+                  const pct = salesFunnel.funnel.total_dialed > 0
+                    ? (stage.value / salesFunnel.funnel.total_dialed) * 100
+                    : 0
+                  return (
+                    <div key={i} className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-text-secondary">{stage.label}</span>
+                        <span className="font-mono text-text-primary">
+                          {stage.value}
+                          {stage.rate != null && <span className="text-text-muted"> ({stage.rate}%)</span>}
+                        </span>
+                      </div>
+                      <div className="h-2 bg-bg-hover rounded-full overflow-hidden">
+                        <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Top objeciones */}
+              {salesFunnel.top_objections && salesFunnel.top_objections.length > 0 && (
+                <div className="mt-6">
+                  <h4 className="text-xs text-text-muted mb-2">Top objeciones</h4>
+                  <div className="space-y-1.5">
+                    {salesFunnel.top_objections.slice(0, 5).map((o, i) => (
+                      <div key={i} className="flex justify-between text-xs">
+                        <span className="text-text-secondary truncate mr-2">{o.objection}</span>
+                        <span className="font-mono text-text-muted">{o.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
         </>
       )}
     </div>

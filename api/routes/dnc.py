@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from agent.phone_utils import normalize_phone
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, get_current_user
 
@@ -64,9 +65,10 @@ async def add_dnc(
     if not client_id:
         raise HTTPException(status_code=400, detail="Se requiere client_id")
 
+    normalized = normalize_phone(entry.phone)
     result = sb.table("dnc_entries").upsert({
         "client_id": client_id,
-        "phone": entry.phone,
+        "phone": normalized,
         "reason": entry.reason or "Agregado manualmente",
         "source": "manual",
         "added_by": user.auth_uid,
@@ -103,8 +105,9 @@ async def check_dnc(
     if not client_id:
         return {"blocked": False}
 
+    normalized = normalize_phone(phone)
     result = sb.table("dnc_entries").select("id").eq(
         "client_id", client_id
-    ).eq("phone", phone).limit(1).execute()
+    ).eq("phone", normalized).limit(1).execute()
 
-    return {"blocked": bool(result.data), "phone": phone}
+    return {"blocked": bool(result.data), "phone": normalized}

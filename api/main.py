@@ -65,6 +65,7 @@ from api.services.chat_store import start_cleanup_loop
 from api.services.conversation_cleanup import start_conversation_cleanup
 from api.services.proactive_worker import start_proactive_worker
 from api.services.callback_worker import start_callback_worker
+from api.services.recording_retention import start_retention_worker
 from api.services.call_evaluator import start_evaluation_worker
 from api.tasks.credit_alerts import start_credit_alert_worker
 
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_cleanup_loop()
     start_proactive_worker()
     start_callback_worker()
+    start_retention_worker()
     start_conversation_cleanup()
     start_evaluation_worker()
     start_credit_alert_worker()

@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Phone, FileText, Settings, Users, CreditCard, DollarSign,
   LogOut, Radio, Menu, X, UserRound, Calendar, Megaphone, Plug, MessageCircle,
   ChevronDown, Bot, Sparkles, BarChart3, FlaskConical, Bell, ClipboardList, Shield, CircleUser,
-  Monitor, BookCopy, UserCog, ScrollText, Key, PhoneCall, AlertCircle,
+  Monitor, BookCopy, UserCog, ScrollText, Key, PhoneCall, AlertCircle, Ban,
 } from 'lucide-react'
 
 // clientOnly: true = solo visible para clientes (o admin impersonando)
@@ -32,6 +32,7 @@ const navGroups = [
       { to: '/contacts', icon: UserRound, label: 'Contactos' },
       { to: '/appointments', icon: Calendar, label: 'Citas' },
       { to: '/callbacks', icon: PhoneCall, label: 'Callbacks' },
+      { to: '/dnc', icon: Ban, label: 'No-Llamar (DNC)' },
     ],
   },
   {
