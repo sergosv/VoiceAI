@@ -313,13 +313,7 @@ class VoiceAgent(Agent):
 
     async def filter_disabled_tools(self) -> None:
         """Legacy wrapper — ya se aplica en constructor vía _filter_tools_sync."""
-        pass
-        logger.info(
-            "Tools activos para '%s' (%s): %s",
-            self._config.agent.slug,
-            self._config.agent.agent_category,
-            [t.id for t in filtered],
-        )
+        return None
 
     # ── Hook helpers para tools ─────────────────────────────
 
