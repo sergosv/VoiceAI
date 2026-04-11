@@ -62,6 +62,25 @@ async def _execute_callback(sb, cb: dict) -> None:
     attempts = cb.get("attempts", 0) + 1
     max_attempts = cb.get("max_attempts", 3)
 
+    # DNC check: si el número fue agregado a la lista entre el momento de programar
+    # y el de ejecutar, NO llamar
+    try:
+        dnc = sb.table("dnc_entries").select("id").eq(
+            "client_id", client_id
+        ).eq("phone", phone).limit(1).execute()
+        if dnc.data:
+            logger.warning(
+                "Callback %s cancelado: número %s en DNC",
+                cb_id, phone,
+            )
+            sb.table("scheduled_callbacks").update({
+                "status": "cancelled",
+                "failure_reason": "Número en lista Do-Not-Call al momento de ejecutar",
+            }).eq("id", cb_id).execute()
+            return
+    except Exception:
+        logger.exception("Error verificando DNC para callback %s", cb_id)
+
     # Marcar como in_progress
     sb.table("scheduled_callbacks").update({
         "status": "in_progress",

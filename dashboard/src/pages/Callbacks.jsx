@@ -7,7 +7,7 @@ import { PageLoader } from '../components/ui/Spinner'
 import { useToast } from '../context/ToastContext'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
-import { PhoneCall, Clock, Bot, XCircle, CheckCircle, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, Play, Trash2 } from 'lucide-react'
+import { PhoneCall, Clock, Bot, XCircle, CheckCircle, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight, Play, Trash2, Megaphone, PhoneIncoming } from 'lucide-react'
 
 const STATUS_CONFIG = {
   pending: { label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-400', icon: Clock },
@@ -15,6 +15,12 @@ const STATUS_CONFIG = {
   completed: { label: 'Completado', color: 'bg-green-500/20 text-green-400', icon: CheckCircle },
   failed: { label: 'Fallido', color: 'bg-red-500/20 text-red-400', icon: AlertTriangle },
   cancelled: { label: 'Cancelado', color: 'bg-gray-500/20 text-gray-400', icon: XCircle },
+}
+
+const ORIGIN_CONFIG = {
+  campaign: { label: 'Campaña', color: 'bg-purple-500/15 text-purple-400', icon: Megaphone },
+  inbound: { label: 'Recepción', color: 'bg-cyan-500/15 text-cyan-400', icon: PhoneIncoming },
+  outbound: { label: 'Outbound', color: 'bg-orange-500/15 text-orange-400', icon: PhoneCall },
 }
 
 export function Callbacks() {
@@ -142,6 +148,8 @@ export function Callbacks() {
           {callbacks.map(cb => {
             const cfg = STATUS_CONFIG[cb.status] || STATUS_CONFIG.pending
             const Icon = cfg.icon
+            const originCfg = ORIGIN_CONFIG[cb.origin_type] || ORIGIN_CONFIG.inbound
+            const OriginIcon = originCfg.icon
             const scheduledDate = new Date(cb.scheduled_at)
             const isPast = scheduledDate < new Date()
 
@@ -158,6 +166,9 @@ export function Callbacks() {
                     <span className="font-mono text-sm font-medium">{cb.phone}</span>
                     <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${cfg.color}`}>
                       {cfg.label}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1 ${originCfg.color}`}>
+                      <OriginIcon size={11} /> {originCfg.label}
                     </span>
                     {cb.agent_name && (
                       <span className="flex items-center gap-1 text-[11px] text-text-muted">

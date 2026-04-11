@@ -416,6 +416,27 @@ class SessionHandler:
             )
             # Continuar con call_id=None — el resto de finalize funciona parcialmente
 
+        # Si esta llamada vino de un scheduled callback, linkear result_call_id
+        if call_id and self._room_name and self._room_name.startswith("callback-"):
+            try:
+                _cb_id_short = self._room_name.replace("callback-", "")
+                # buscar el callback por prefijo del room_name
+                _cb = sb.table("scheduled_callbacks").select("id").eq(
+                    "status", "in_progress"
+                ).execute()
+                for _row in _cb.data or []:
+                    if _row["id"].startswith(_cb_id_short):
+                        sb.table("scheduled_callbacks").update({
+                            "result_call_id": call_id,
+                        }).eq("id", _row["id"]).execute()
+                        logger.info(
+                            "Callback %s linkeado a call %s",
+                            _row["id"], call_id,
+                        )
+                        break
+            except Exception:
+                logger.exception("Error linkeando callback con call_id")
+
         # Guardar call_events individuales en DB
         if call_id and self._lifecycle and hasattr(self._lifecycle, "events"):
             try:

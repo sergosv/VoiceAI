@@ -1074,8 +1074,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                             )
                         ))
                     # Auto-DNC: agregar número a lista de no-llamar
+                    # (aplica tanto para outbound como inbound: si el usuario pide
+                    # explícitamente que no lo llamen, respetar en ambos casos)
                     _dnc_phone = caller_number if not outbound_mode else handler._callee_number
-                    if _dnc_phone and outbound_mode:
+                    if _dnc_phone:
                         try:
                             _sb_dnc = get_supabase()
                             _sb_dnc.table("dnc_entries").upsert({
@@ -1578,8 +1580,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     ctx.add_shutdown_callback(on_shutdown)
 
-    # Recording disclosure: inyectar en prompt si hay grabación activa
-    if recording_key and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
+    # Recording disclosure: inyectar en prompt solo si egress arrancó correctamente
+    # (si recording_key existe pero egress_id es None, la grabación falló)
+    if recording_egress_id and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
         voice_agent._instructions = voice_agent.instructions + (
             "\n\nIMPORTANTE: Esta llamada está siendo grabada. En tu PRIMER saludo, "
             "menciona brevemente: 'Le informo que esta llamada puede ser grabada "

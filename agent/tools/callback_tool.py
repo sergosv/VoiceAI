@@ -36,6 +36,45 @@ def _resolve_tz(tz_name: str | None) -> datetime.tzinfo:
     return timezone(timedelta(hours=-6))
 
 
+_DAY_MAP = {
+    0: ("lun", "lun-vie"),
+    1: ("mar", "lun-vie"),
+    2: ("mie", "lun-vie"),
+    3: ("jue", "lun-vie"),
+    4: ("vie", "lun-vie"),
+    5: ("sab", None),
+    6: ("dom", None),
+}
+
+
+def _is_in_business_hours(dt: datetime, business_hours: dict) -> bool:
+    """Verifica si un datetime cae dentro del horario laboral.
+
+    business_hours format: {"lun-vie": "09:00-18:00", "sab": "09:00-14:00"}
+    """
+    weekday = dt.weekday()
+    day_key, range_key = _DAY_MAP.get(weekday, (None, None))
+
+    # Buscar entry específica del día primero, luego el rango lun-vie
+    entry = business_hours.get(day_key) if day_key else None
+    if not entry and range_key:
+        entry = business_hours.get(range_key)
+
+    if not entry:
+        return False  # No configurado = fuera de horario
+
+    try:
+        start_str, end_str = entry.split("-")
+        start_h, start_m = map(int, start_str.strip().split(":"))
+        end_h, end_m = map(int, end_str.strip().split(":"))
+        minutes = dt.hour * 60 + dt.minute
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m
+        return start_minutes <= minutes <= end_minutes
+    except (ValueError, AttributeError):
+        return True  # Si el formato es inválido, ser permisivo
+
+
 def _parse_scheduled_time(
     date_str: str,
     time_str: str,
@@ -127,6 +166,24 @@ async def schedule_callback(
             "Solo puedo programar callbacks hasta 30 días en el futuro. "
             "Confirma una fecha más cercana con el usuario."
         )
+
+    # Validar business hours si el cliente los tiene configurados
+    try:
+        _sb_bh = _get_supabase()
+        _client = await asyncio.to_thread(
+            lambda: _sb_bh.table("clients").select("business_hours").eq(
+                "id", client_id
+            ).limit(1).execute()
+        )
+        _bh = _client.data[0].get("business_hours") if _client.data else None
+        if _bh:
+            if not _is_in_business_hours(scheduled_at, _bh):
+                return (
+                    "Esa hora está fuera del horario de atención. "
+                    "Pregúntale al usuario otra hora dentro del horario laboral."
+                )
+    except Exception:
+        logger.warning("No se pudo validar business_hours, continuando sin validación")
 
     sb = _get_supabase()
 
