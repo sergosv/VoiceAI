@@ -81,7 +81,13 @@ async def _execute_callback(sb, cb: dict) -> None:
     phone = cb["phone"]
     agent_id = cb["agent_id"]
     client_id = cb["client_id"]
-    context = cb.get("context", "")
+    # Descifrar context (puede estar encriptado con Fernet)
+    raw_context = cb.get("context", "") or ""
+    try:
+        from agent.config_loader import _decrypt_key
+        context = _decrypt_key(raw_context) or raw_context
+    except Exception:
+        context = raw_context
     attempts = cb.get("attempts", 0) + 1
     max_attempts = cb.get("max_attempts", 3)
 
@@ -106,6 +112,18 @@ async def _execute_callback(sb, cb: dict) -> None:
             return
     except Exception:
         logger.exception("Error verificando DNC para callback %s", cb_id)
+
+    # Transición atómica pending → in_progress. Si otra instancia del worker
+    # ya lo tomó, el UPDATE retorna 0 filas y abortamos.
+    claim = sb.table("scheduled_callbacks").update({
+        "status": "in_progress",
+        "attempts": attempts,
+        "last_attempt_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", cb_id).eq("status", "pending").execute()
+
+    if not claim.data:
+        logger.info("Callback %s ya tomado por otro worker, saltando", cb_id)
+        return
 
     # Active call check: no llamar si ya hay una llamada activa con ese número
     try:
@@ -135,12 +153,7 @@ async def _execute_callback(sb, cb: dict) -> None:
     except Exception:
         logger.exception("Error verificando active_calls para callback %s", cb_id)
 
-    # Marcar como in_progress
-    sb.table("scheduled_callbacks").update({
-        "status": "in_progress",
-        "attempts": attempts,
-        "last_attempt_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("id", cb_id).execute()
+    # (status ya se actualizó atómicamente arriba vía claim)
 
     lk_api: LiveKitAPI | None = None
     try:
@@ -235,6 +248,30 @@ async def _execute_callback(sb, cb: dict) -> None:
                 "status": "failed",
                 "failure_reason": str(e)[:500],
             }).eq("id", cb_id).execute()
+            # Notificar al owner del cliente
+            try:
+                client = sb.table("clients").select("owner_email, name").eq(
+                    "id", client_id
+                ).limit(1).execute()
+                if client.data and client.data[0].get("owner_email"):
+                    from api.services.email_service import send_email
+                    owner_email = client.data[0]["owner_email"]
+                    client_name = client.data[0].get("name", "")
+                    await send_email(
+                        to=owner_email,
+                        subject=f"Callback fallido: {phone}",
+                        html=(
+                            f"<p>Hola,</p>"
+                            f"<p>El callback programado para <strong>{phone}</strong> falló "
+                            f"después de {attempts} intentos.</p>"
+                            f"<p><strong>Razón:</strong> {str(e)[:300]}</p>"
+                            f"<p>Cliente: {client_name}</p>"
+                            f"<p>Puedes revisar los detalles en el dashboard de callbacks.</p>"
+                        ),
+                    )
+                    logger.info("Alerta enviada a %s por callback fallido", owner_email)
+            except Exception:
+                logger.exception("Error enviando alerta de callback fallido")
         else:
             # Reintentar en 10 minutos
             retry_at = datetime.now(timezone.utc) + timedelta(minutes=10)

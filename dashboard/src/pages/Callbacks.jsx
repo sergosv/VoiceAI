@@ -98,6 +98,23 @@ export function Callbacks() {
     }
   }
 
+  async function handleBulkCancel() {
+    const ok = await confirmDialog({
+      title: 'Cancelar todos los pendientes',
+      message: 'Se cancelaran TODOS los callbacks pendientes. Continuar?',
+      confirmText: 'Cancelar todos',
+      variant: 'danger',
+    })
+    if (!ok) return
+    try {
+      const res = await api.post('/callbacks/bulk-cancel')
+      toast.success(`${res.cancelled} callbacks cancelados`)
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
   const totalPages = Math.ceil(total / perPage)
 
   if (loading && page === 1) return <PageLoader />
@@ -111,12 +128,17 @@ export function Callbacks() {
             Devoluciones de llamada prometidas por tus agentes
           </p>
         </div>
-        {isAdmin && (
-          <Button onClick={handleProcess} disabled={processing} variant="secondary">
-            <Play size={14} />
-            {processing ? 'Procesando...' : 'Ejecutar pendientes'}
+        <div className="flex gap-2">
+          <Button onClick={handleBulkCancel} variant="secondary">
+            <XCircle size={14} /> Cancelar pendientes
           </Button>
-        )}
+          {isAdmin && (
+            <Button onClick={handleProcess} disabled={processing} variant="secondary">
+              <Play size={14} />
+              {processing ? 'Procesando...' : 'Ejecutar pendientes'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Filtros */}

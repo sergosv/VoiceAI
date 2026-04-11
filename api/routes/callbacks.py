@@ -76,9 +76,18 @@ async def list_callbacks(
 
     result = query.execute()
 
+    # Descifrar context si está encriptado
+    from agent.config_loader import _decrypt_key
+
     callbacks = []
     for row in result.data or []:
         agent_info = row.pop("agents", None) or {}
+        ctx = row.get("context")
+        if ctx:
+            try:
+                row["context"] = _decrypt_key(ctx) or ctx
+            except Exception:
+                pass
         callbacks.append({
             **row,
             "agent_name": agent_info.get("name"),
@@ -113,6 +122,25 @@ async def callback_stats(
             stats[s] += 1
 
     return stats
+
+
+@router.post("/bulk-cancel")
+async def bulk_cancel_callbacks(
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Cancela todos los callbacks pendientes del cliente."""
+    sb = get_supabase()
+    client_id = user.impersonating_client_id or user.client_id
+
+    query = sb.table("scheduled_callbacks").update({
+        "status": "cancelled",
+        "failure_reason": "Cancelado masivamente",
+    }).eq("status", "pending")
+    if client_id:
+        query = query.eq("client_id", client_id)
+
+    result = query.execute()
+    return {"ok": True, "cancelled": len(result.data or [])}
 
 
 @router.patch("/{callback_id}/cancel")

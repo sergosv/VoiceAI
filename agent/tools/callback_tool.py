@@ -221,13 +221,17 @@ async def schedule_callback(
         logger.exception("Error cancelando callbacks previos")
 
     try:
+        # Cifrar context at rest (puede contener PII del transcript)
+        from agent.config_loader import _encrypt_value
+        encrypted_context = _encrypt_value(context) if context else None
+
         insert_data = {
             "client_id": client_id,
             "agent_id": agent_id,
             "phone": phone,
             "scheduled_at": scheduled_at.isoformat(),
             "timezone": str(tz),
-            "context": context,
+            "context": encrypted_context,
             "origin_call_id": origin_call_id,
             "max_attempts": max_attempts,
         }

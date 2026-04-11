@@ -414,6 +414,7 @@ async def analytics_sales_funnel(
     user: CurrentUser = Depends(get_current_user),
     client_id: str | None = None,
     agent_id: str | None = None,
+    campaign_id: str | None = None,
     days: int = Query(30, ge=1, le=365),
 ) -> dict[str, Any]:
     """Funnel de ventas outbound con tasas de conversión por etapa.
@@ -425,26 +426,35 @@ async def analytics_sales_funnel(
     cid = _effective_cid(user, client_id)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
+    # Si se filtra por campaign_id, obtener los room_names de esa campaña
+    campaign_room_prefix = None
+    if campaign_id:
+        campaign_room_prefix = f"campaign-{campaign_id[:8]}"
+
     # Obtener todas las llamadas outbound del período
     query = sb.table("calls").select(
         "id, direction, duration_seconds, status, sentimiento, intencion, "
-        "lead_score, siguiente_accion, disposition, transcript"
+        "lead_score, siguiente_accion, disposition, transcript, livekit_room_name"
     ).eq("direction", "outbound").gte("started_at", since)
     if cid:
         query = query.eq("client_id", cid)
     if agent_id:
         query = query.eq("agent_id", agent_id)
+    if campaign_room_prefix:
+        query = query.like("livekit_room_name", f"{campaign_room_prefix}%")
     calls = query.execute().data or []
 
     # También obtener análisis de campañas
     camp_query = sb.table("campaign_calls").select(
         "id, status, analysis_data, result_summary"
     ).gte("created_at", since)
-    if cid:
+    if campaign_id:
+        camp_query = camp_query.eq("campaign_id", campaign_id)
+    elif cid:
         camp_query = camp_query.in_(
             "campaign_id",
             [c["id"] for c in sb.table("campaigns").select("id").eq("client_id", cid).execute().data or []]
-        ) if cid else camp_query
+        )
     campaign_calls = camp_query.execute().data or []
 
     # ── Funnel metrics ──

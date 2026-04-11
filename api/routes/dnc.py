@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent.phone_utils import normalize_phone
@@ -34,14 +37,19 @@ async def list_dnc(
     user: CurrentUser = Depends(get_current_user),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None, description="Buscar por teléfono"),
 ):
-    """Lista números en DNC del cliente."""
+    """Lista números en DNC del cliente con búsqueda opcional."""
     sb = get_supabase()
     client_id = user.impersonating_client_id or user.client_id
 
     query = sb.table("dnc_entries").select("*", count="exact").order("created_at", desc=True)
     if client_id:
         query = query.eq("client_id", client_id)
+    if search:
+        # Normalizar búsqueda para match con formato guardado
+        normalized_search = normalize_phone(search) if search.strip() else search
+        query = query.ilike("phone", f"%{normalized_search}%")
 
     offset = (page - 1) * per_page
     result = query.range(offset, offset + per_page - 1).execute()
@@ -52,6 +60,72 @@ async def list_dnc(
         "page": page,
         "per_page": per_page,
     }
+
+
+@router.get("/export")
+async def export_dnc(user: CurrentUser = Depends(get_current_user)):
+    """Exporta toda la lista DNC como CSV."""
+    sb = get_supabase()
+    client_id = user.impersonating_client_id or user.client_id
+
+    query = sb.table("dnc_entries").select("*").order("created_at", desc=True)
+    if client_id:
+        query = query.eq("client_id", client_id)
+    result = query.execute()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["phone", "reason", "source", "created_at"])
+    for row in result.data or []:
+        writer.writerow([
+            row.get("phone", ""),
+            row.get("reason", "") or "",
+            row.get("source", ""),
+            row.get("created_at", ""),
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=dnc_list.csv"},
+    )
+
+
+class DNCBulkImport(BaseModel):
+    phones: list[str]
+    reason: str | None = None
+
+
+@router.post("/bulk")
+async def bulk_add_dnc(
+    body: DNCBulkImport,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Agrega múltiples números a la lista DNC."""
+    sb = get_supabase()
+    client_id = user.impersonating_client_id or user.client_id
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Se requiere client_id")
+
+    entries = []
+    for phone in body.phones:
+        phone = phone.strip()
+        if not phone:
+            continue
+        entries.append({
+            "client_id": client_id,
+            "phone": normalize_phone(phone),
+            "reason": body.reason or "Import masivo",
+            "source": "import",
+            "added_by": user.auth_uid,
+        })
+
+    if not entries:
+        raise HTTPException(status_code=400, detail="Sin números válidos")
+
+    sb.table("dnc_entries").upsert(entries, on_conflict="client_id,phone").execute()
+    return {"ok": True, "added": len(entries)}
 
 
 @router.post("")

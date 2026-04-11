@@ -48,6 +48,11 @@ class VoiceAgent(Agent):
             kwargs["mcp_servers"] = mcp_servers
         super().__init__(**kwargs)
         self._config = config
+
+        # Filtrar tools en construcción (sin await — se hace al no-registrar
+        # los disabled). Para Gemini Live esto es crítico porque update_tools
+        # en runtime es rechazado por el modelo.
+        self._filter_tools_sync()
         self._api_integrations = {
             integ["name"]: integ for integ in (api_integrations or [])
         }
@@ -276,19 +281,39 @@ class VoiceAgent(Agent):
         "schedule_appointment",
     }
 
-    async def filter_disabled_tools(self) -> None:
-        """Elimina tools deshabilitados del schema visible al LLM."""
+    def _filter_tools_sync(self) -> None:
+        """Filtra tools sin usar update_tools() — modifica directamente.
+
+        Funciona en construcción, antes de que el modelo se inicialice.
+        Para Gemini Live esto es esencial porque update_tools() en runtime
+        es rechazado silenciosamente.
+        """
         enabled = self._config.client.enabled_tools or []
         is_pa = self._config.agent.agent_category == "personal_assistant"
         filtered = []
         for t in self.tools:
             if t.id in self._PA_TOOLS:
-                # PA tools solo visibles para asistentes personales
                 if is_pa:
                     filtered.append(t)
             elif t.id in self._ALWAYS_AVAILABLE or t.id in enabled:
                 filtered.append(t)
-        await self.update_tools(filtered)
+        # Mutar la lista interna directamente y sincronizar chat_ctx
+        self._tools = filtered
+        if hasattr(self, "_chat_ctx") and self._chat_ctx is not None:
+            try:
+                self._chat_ctx = self._chat_ctx.copy(tools=self._tools)
+            except Exception:
+                pass
+        logger.info(
+            "Tools filtradas en construcción para '%s' (%s): %s",
+            self._config.agent.slug,
+            self._config.agent.agent_category,
+            [t.id for t in filtered],
+        )
+
+    async def filter_disabled_tools(self) -> None:
+        """Legacy wrapper — ya se aplica en constructor vía _filter_tools_sync."""
+        pass
         logger.info(
             "Tools activos para '%s' (%s): %s",
             self._config.agent.slug,

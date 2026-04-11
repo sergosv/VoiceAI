@@ -16,6 +16,27 @@ DB_QUERY_TIMEOUT_S = 5.0
 logger = logging.getLogger(__name__)
 
 
+def _encrypt_value(plaintext: str | None) -> str | None:
+    """Encrypt a string with ENCRYPTION_KEY. Returns 'enc:' prefixed token
+    or plaintext if encryption not available."""
+    if not plaintext:
+        return plaintext
+    try:
+        from api.crypto import encrypt_value
+        return encrypt_value(plaintext)
+    except ImportError:
+        # Agent-only context
+        encryption_key = os.getenv("ENCRYPTION_KEY", "")
+        if not encryption_key:
+            return plaintext
+        try:
+            from cryptography.fernet import Fernet
+            f = Fernet(encryption_key.encode())
+            return f"enc:{f.encrypt(plaintext.encode()).decode()}"
+        except Exception:
+            return plaintext
+
+
 def _decrypt_key(value: str | None) -> str | None:
     """Decrypt API key, handling both encrypted ('enc:' prefix) and legacy plaintext."""
     if not value:
