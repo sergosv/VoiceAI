@@ -139,6 +139,18 @@ class TestVoiceAgentCreation:
         agent = build_agent(config)
         assert inspect.iscoroutinefunction(agent.filter_disabled_tools)
 
+    @pytest.mark.asyncio
+    async def test_filter_disabled_tools_runs_without_error(self) -> None:
+        """filter_disabled_tools debe poder ejecutarse sin crashear.
+
+        Regresión: un refactor dejó código muerto con variable undefined
+        que crasheaba el agente en cada llamada.
+        """
+        config = _make_config()
+        agent = build_agent(config)
+        # Debe poder llamarse sin raise
+        await agent.filter_disabled_tools()
+
 
 # ── 4. Greeting mechanism — cada modo usa el mecanismo correcto ──
 
