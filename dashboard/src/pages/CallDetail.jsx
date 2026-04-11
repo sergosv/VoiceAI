@@ -99,6 +99,8 @@ const EVENT_CONFIG = {
   timeout_inactivity: { label: 'Timeout', color: 'bg-yellow-400' },
   error: { label: 'Error', color: 'bg-red-500' },
   call_ended: { label: 'Fin', color: 'bg-gray-400' },
+  escalation_detected: { label: 'Escalada detectada', color: 'bg-red-500' },
+  voicemail_detected: { label: 'Buzón detectado', color: 'bg-purple-500' },
 }
 
 const INTENT_RT_LABELS = {

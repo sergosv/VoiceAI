@@ -1076,6 +1076,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                     logger.warning(
                         "Escalada de molestia detectada: %s", escalation.violations
                     )
+                    # Registrar evento para auditoría (queda en call_events)
+                    try:
+                        lifecycle.add_event("escalation_detected", {
+                            "violations": escalation.violations,
+                            "user_text": ev.transcript[:200],
+                            "turn": lifecycle._user_turns,
+                        })
+                    except Exception:
+                        logger.exception("Error registrando escalation event")
                     if config.agent.agent_mode != "gemini_live":
                         asyncio.ensure_future(session.generate_reply(
                             instructions=(

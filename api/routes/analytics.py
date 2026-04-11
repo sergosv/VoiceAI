@@ -440,6 +440,56 @@ async def retention_stats(
     }
 
 
+@router.get("/escalations")
+async def analytics_escalations(
+    user: CurrentUser = Depends(get_current_user),
+    client_id: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+) -> dict[str, Any]:
+    """Escalaciones de molestia detectadas en el período."""
+    sb = get_supabase()
+    cid = _effective_cid(user, client_id)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Buscar call_events tipo escalation_detected
+    query = sb.table("call_events").select(
+        "call_id, event, timestamp, details"
+    ).eq("event", "escalation_detected").gte("timestamp", since)
+    events = query.execute().data or []
+
+    # Si hay client_id, filtrar por calls de ese cliente
+    if cid and events:
+        call_ids = list({e["call_id"] for e in events if e.get("call_id")})
+        if call_ids:
+            calls = sb.table("calls").select("id").eq("client_id", cid).in_(
+                "id", call_ids
+            ).execute()
+            valid_ids = {c["id"] for c in calls.data or []}
+            events = [e for e in events if e.get("call_id") in valid_ids]
+
+    # Agrupar por día
+    by_day: dict[str, int] = {}
+    for e in events:
+        ts = e.get("timestamp", "")[:10]
+        if ts:
+            by_day[ts] = by_day.get(ts, 0) + 1
+
+    return {
+        "total": len(events),
+        "period_days": days,
+        "by_day": [{"date": d, "count": c} for d, c in sorted(by_day.items())],
+        "recent": [
+            {
+                "call_id": e.get("call_id"),
+                "timestamp": e.get("timestamp"),
+                "text": (e.get("details") or {}).get("user_text", ""),
+                "violations": (e.get("details") or {}).get("violations", []),
+            }
+            for e in events[:20]
+        ],
+    }
+
+
 @router.get("/sales-funnel")
 async def analytics_sales_funnel(
     user: CurrentUser = Depends(get_current_user),
