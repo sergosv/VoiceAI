@@ -1,4 +1,13 @@
-"""Generación de embeddings con Gemini text-embedding-004."""
+"""Generación de embeddings con Gemini gemini-embedding-001.
+
+NOTA: text-embedding-004 fue deprecado en enero 2026 por Google.
+Migramos a gemini-embedding-001 con output_dimensionality=768 para
+mantener compatibilidad con los embeddings ya guardados en la DB
+(que son de 768 dims por el modelo anterior).
+
+gemini-embedding-001 usa Matryoshka Representation Learning (MRL)
+así que truncar a 768 dims preserva la calidad del vector.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +15,14 @@ import logging
 import os
 
 from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
 # Reutilizar el singleton de genai.Client
 _client: genai.Client | None = None
 
-EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMS = 768
 
 
@@ -29,6 +39,7 @@ async def generate_embedding(text: str) -> list[float]:
     response = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
+        config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMS),
     )
     return list(response.embeddings[0].values)
 
@@ -42,5 +53,6 @@ async def generate_embeddings_batch(texts: list[str]) -> list[list[float]]:
     response = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=texts,
+        config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMS),
     )
     return [list(e.values) for e in response.embeddings]
