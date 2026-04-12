@@ -783,8 +783,71 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 config.agent.gemini_live_voice,
                 config.agent.gemini_live_thinking_level,
             )
+            # CRÍTICO: Para Gemini Live, las instructions deben pasarse al
+            # RealtimeModel al construirlo. update_instructions() no funciona
+            # después de session.start(). Construimos el prompt completo AQUÍ
+            # incluyendo greeting, disclosure, fecha, y callback context.
+            from dataclasses import replace as _dc_replace
+            _gl_prompt = config.agent.system_prompt
+
+            # Greeting
+            if outbound_mode and campaign_script:
+                _gl_prompt += (
+                    "\n\n## INSTRUCCIÓN DE INICIO CRÍTICA ##\n"
+                    "APENAS inicie esta conversación, ANTES de esperar cualquier input del usuario, "
+                    "SALUDA INMEDIATAMENTE siguiendo EXACTAMENTE el guión de apertura definido arriba. "
+                    "NO esperes que el usuario diga nada primero. TÚ HABLAS PRIMERO."
+                )
+            else:
+                _gl_gr = config.agent.greeting or "Hola, en qué puedo ayudarte?"
+                _gl_prompt += (
+                    f"\n\n## INSTRUCCIÓN DE INICIO CRÍTICA ##\n"
+                    f"APENAS inicie esta conversación, ANTES de esperar cualquier input del usuario, "
+                    f"SALUDA INMEDIATAMENTE diciendo EXACTAMENTE: \"{_gl_gr}\". "
+                    f"NO esperes que el usuario diga nada primero. TÚ HABLAS PRIMERO."
+                )
+
+            # Recording disclosure
+            if recording_egress_id:
+                _dl = (config.client.language or "es").lower().split("-")[0].split("_")[0]
+                _disc = {
+                    "es": "'Le informo que esta llamada puede ser grabada con fines de calidad.'",
+                    "en": "'Please note this call may be recorded for quality purposes.'",
+                    "pt": "'Informo que esta chamada pode ser gravada para fins de qualidade.'",
+                }
+                _gl_prompt += f"\n\nIMPORTANTE: En tu PRIMER saludo, menciona brevemente: {_disc.get(_dl, _disc['es'])}"
+
+            # Callback context
+            if callback_context:
+                _gl_prompt += (
+                    "\n\n## DEVOLUCIÓN DE LLAMADA\n"
+                    "ESTA ES UNA DEVOLUCIÓN DE LLAMADA. El usuario pidió que le llamaras.\n"
+                    f"Contexto de la conversación anterior:\n{callback_context}\n"
+                    "Retoma donde quedaron. NO repitas todo desde cero."
+                )
+
+            # Fecha/hora
+            try:
+                _bh_tz = (config.client.business_hours or {}).get("timezone") or "America/Mexico_City"
+                try:
+                    from zoneinfo import ZoneInfo
+                    _tz_gl = ZoneInfo(_bh_tz)
+                except Exception:
+                    _tz_gl = timezone(timedelta(hours=-6))
+                _now_gl = datetime.now(_tz_gl)
+                _dias_gl = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+                _gl_prompt += (
+                    f"\n\nHoy es {_dias_gl[_now_gl.weekday()]} {_now_gl.strftime('%d/%m/%Y')}, "
+                    f"hora local: {_now_gl.strftime('%H:%M')}."
+                )
+            except Exception:
+                pass
+
+            # Pasar el prompt completo al model
+            _gl_config = _dc_replace(config.agent, system_prompt=_gl_prompt)
+
             session = AgentSession(
-                llm=build_gemini_live_model(config.agent),
+                llm=build_gemini_live_model(_gl_config),
                 vad=vad,
                 turn_detection=MultilingualModel(),
                 min_endpointing_delay=0.5,
@@ -1626,42 +1689,46 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     ctx.add_shutdown_callback(on_shutdown)
 
+    # ── Las siguientes inyecciones de prompt solo aplican para Pipeline/Realtime.
+    # ── Para Gemini Live, todo se construyó ANTES del modelo (línea ~786).
+    _is_gemini_live_mode = config.agent.agent_mode == "gemini_live"
+
     # Inyectar contexto temporal (fecha, día) para que el LLM pueda resolver
     # referencias relativas como "mañana", "el lunes", etc.
-    try:
-        _bh = config.client.business_hours or {}
-        _tz_name = _bh.get("timezone") or "America/Mexico_City"
+    if not _is_gemini_live_mode:
         try:
-            from zoneinfo import ZoneInfo
-            _tz_obj = ZoneInfo(_tz_name)
-        except Exception:
-            # Fallback a Mexico City (plataforma LATAM), no UTC
+            _bh = config.client.business_hours or {}
+            _tz_name = _bh.get("timezone") or "America/Mexico_City"
             try:
                 from zoneinfo import ZoneInfo
-                _tz_obj = ZoneInfo("America/Mexico_City")
-                _tz_name = "America/Mexico_City"
+                _tz_obj = ZoneInfo(_tz_name)
             except Exception:
-                _tz_obj = timezone(timedelta(hours=-6))  # UTC-6 sin DST
-                _tz_name = "America/Mexico_City"
-        _now_local = datetime.now(_tz_obj)
-        _dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-        _day_name = _dias[_now_local.weekday()]
-        _date_ctx = (
-            f"\n\n## Contexto temporal\n"
-            f"Hoy es {_day_name} {_now_local.strftime('%d/%m/%Y')}. "
-            f"Hora local actual: {_now_local.strftime('%H:%M')} ({_tz_name}).\n"
-            f"Usa esta información para resolver referencias como 'mañana', "
-            f"'el lunes', 'en 2 horas', etc."
-        )
-        if hasattr(voice_agent, "_instructions") and voice_agent.instructions:
-            voice_agent._instructions = voice_agent.instructions + _date_ctx
-            logger.info("Contexto temporal inyectado: %s %s", _day_name, _now_local.strftime("%d/%m/%Y %H:%M"))
-    except Exception:
-        logger.exception("Error inyectando contexto temporal")
+                try:
+                    from zoneinfo import ZoneInfo
+                    _tz_obj = ZoneInfo("America/Mexico_City")
+                    _tz_name = "America/Mexico_City"
+                except Exception:
+                    _tz_obj = timezone(timedelta(hours=-6))
+                    _tz_name = "America/Mexico_City"
+            _now_local = datetime.now(_tz_obj)
+            _dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+            _day_name = _dias[_now_local.weekday()]
+            _date_ctx = (
+                f"\n\n## Contexto temporal\n"
+                f"Hoy es {_day_name} {_now_local.strftime('%d/%m/%Y')}. "
+                f"Hora local actual: {_now_local.strftime('%H:%M')} ({_tz_name}).\n"
+                f"Usa esta información para resolver referencias como 'mañana', "
+                f"'el lunes', 'en 2 horas', etc."
+            )
+            if hasattr(voice_agent, "_instructions") and voice_agent.instructions:
+                voice_agent._instructions = voice_agent.instructions + _date_ctx
+                logger.info("Contexto temporal inyectado: %s %s", _day_name, _now_local.strftime("%d/%m/%Y %H:%M"))
+        except Exception:
+            logger.exception("Error inyectando contexto temporal")
 
     # Recording disclosure: inyectar en prompt solo si egress arrancó correctamente
-    # (si recording_key existe pero egress_id es None, la grabación falló)
-    if recording_egress_id and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
+    # (Para Gemini Live, ya se inyectó en la construcción del modelo)
+    if not _is_gemini_live_mode and recording_egress_id and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
         _disclosure_lang = (config.client.language or "es").lower()
         _disclosures = {
             "es": ("Esta llamada está siendo grabada. En tu PRIMER saludo, menciona brevemente: "
@@ -1681,7 +1748,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.info("Recording disclosure inyectado en system prompt (lang=%s)", _lang_key)
 
     # Callback: inyectar contexto de la conversación anterior al prompt del agente
-    if callback_context and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
+    # (Para Gemini Live, ya se inyectó en la construcción del modelo)
+    if not _is_gemini_live_mode and callback_context and hasattr(voice_agent, '_instructions') and voice_agent.instructions:
         voice_agent._instructions = voice_agent.instructions + (
             "\n\n## DEVOLUCIÓN DE LLAMADA\n"
             "ESTA ES UNA DEVOLUCIÓN DE LLAMADA. El usuario pidió que le llamaras.\n"
@@ -1700,8 +1768,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 "pregunta en qué puedes ayudarle."
             )
 
-    # Gemini Live: inyectar greeting en system prompt (no soporta generate_reply)
-    if config.agent.agent_mode == "gemini_live":
+    # Gemini Live: greeting ya se inyectó en la construcción del modelo.
+    # Este bloque solo aplica si por alguna razón no se inyectó arriba.
+    if False and config.agent.agent_mode == "gemini_live":
         if outbound_mode and campaign_script:
             # Outbound con campaign_script: dejar que Gemini genere el saludo basado
             # en el script de la campaña (no inyectar el greeting del agente que es
