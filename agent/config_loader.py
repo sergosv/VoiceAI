@@ -168,6 +168,13 @@ class AgentConfig:
         return self.voice_config.get("gemini_live_thinking_level", "minimal")
 
     @property
+    def tts_speed(self) -> float | None:
+        val = self.voice_config.get("tts_speed")
+        if val is not None:
+            return float(val)
+        return None
+
+    @property
     def voice_mode(self) -> str:
         """Alias de agent_mode para backward compat."""
         return self.agent_mode

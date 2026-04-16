@@ -209,6 +209,8 @@ class AgentUpdateRequest(BaseModel):
     realtime_api_key: str | None = None
     realtime_voice: str | None = None
     realtime_model: str | None = None
+    # Cartesia-specific (sonic-3: 0.6–2.0, 1.0 = normal)
+    tts_speed: float | None = None
     # Gemini Live
     gemini_live_model: str | None = None
     gemini_live_voice: str | None = None

@@ -304,6 +304,9 @@ async def update_agent(
     if req.gemini_live_thinking_level is not None:
         voice_config["gemini_live_thinking_level"] = req.gemini_live_thinking_level
         voice_changed = True
+    if req.tts_speed is not None:
+        voice_config["tts_speed"] = req.tts_speed if req.tts_speed != 0 else None
+        voice_changed = True
     if voice_changed:
         updates["voice_config"] = voice_config
 

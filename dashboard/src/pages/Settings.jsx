@@ -1299,6 +1299,7 @@ export function Settings() {
     agent_mode: 'pipeline', stt_provider: 'deepgram', llm_provider: 'google', tts_provider: 'cartesia',
     stt_api_key: '', llm_api_key: '', tts_api_key: '', realtime_api_key: '',
     realtime_voice: 'alloy', realtime_model: 'gpt-4o-realtime-preview', voice_id: '',
+    tts_speed: null,
     gemini_live_model: 'gemini-3.1-flash-live-preview', gemini_live_voice: 'Puck',
     gemini_live_thinking_level: 'minimal',
     role_description: '', orchestrator_enabled: true, orchestrator_priority: 0,
@@ -1345,6 +1346,7 @@ export function Settings() {
       realtime_voice: vc.realtime_voice || 'alloy',
       realtime_model: vc.realtime_model || 'gpt-4o-realtime-preview',
       voice_id: vc.voice_id || '',
+      tts_speed: vc.tts_speed ?? null,
       gemini_live_model: vc.gemini_live_model || 'gemini-3.1-flash-live-preview',
       gemini_live_voice: vc.gemini_live_voice || 'Puck',
       gemini_live_thinking_level: vc.gemini_live_thinking_level || 'minimal',
@@ -1512,6 +1514,7 @@ export function Settings() {
         tts_provider: form.tts_provider,
         realtime_voice: form.realtime_voice,
         realtime_model: form.realtime_model,
+        tts_speed: form.tts_speed ?? 0,
         gemini_live_model: form.gemini_live_model,
         gemini_live_voice: form.gemini_live_voice,
         gemini_live_thinking_level: form.gemini_live_thinking_level,
@@ -2293,6 +2296,41 @@ export function Settings() {
                             onVoiceAssigned={(voiceId) => setForm(f => ({ ...f, voice_id: voiceId }))}
                             onClonedVoicesChange={setClonedVoices}
                           />
+                        </div>
+                      )}
+
+                      {/* Cartesia Voice Tuning */}
+                      {form.tts_provider === 'cartesia' && (
+                        <div className="p-4 rounded-lg border border-green-500/30 bg-green-500/5">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Volume2 size={16} className="text-green-400" />
+                            <span className="text-sm font-medium">Ajustes de voz Cartesia</span>
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-xs text-gray-400">Velocidad de habla</label>
+                              <span className="text-xs font-mono text-accent">
+                                {form.tts_speed != null ? `${form.tts_speed}x` : '1.0x (default)'}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.6"
+                              max="2.0"
+                              step="0.1"
+                              value={form.tts_speed ?? 1.0}
+                              onChange={e => {
+                                const val = parseFloat(e.target.value)
+                                setForm(f => ({ ...f, tts_speed: val === 1.0 ? null : val }))
+                              }}
+                              className="w-full accent-green-400 cursor-pointer"
+                            />
+                            <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                              <span>0.6x Lenta</span>
+                              <span>1.0x Normal</span>
+                              <span>2.0x Rapida</span>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

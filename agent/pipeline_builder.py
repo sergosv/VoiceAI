@@ -167,8 +167,9 @@ def build_tts(config: AgentConfig, language: str):
         kwargs = {
             "model": "sonic-3",
             "language": language,
-            "speed": 1.0,
         }
+        if config.tts_speed is not None:
+            kwargs["speed"] = float(config.tts_speed)
         if voice_id:
             kwargs["voice"] = voice_id
         if api_key:
