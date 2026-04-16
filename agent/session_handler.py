@@ -325,13 +325,17 @@ class SessionHandler:
 
         sb = _get_supabase()
 
-        # Guardar call log
+        # Guardar call log — normalizamos los teléfonos igual que el checkpoint
+        # para que la fila quede consistente (sin normalizar en un lado y con
+        # normalización en otro, lo que rompía joins/reportes por número).
+        _norm_caller = normalize_phone(self._caller_number) if self._caller_number else None
+        _norm_callee = normalize_phone(self._callee_number) if self._callee_number else None
         call_data = {
             "client_id": self._client_id,
             "agent_id": self._agent_id,
             "direction": self._direction,
-            "caller_number": self._caller_number,
-            "callee_number": self._callee_number,
+            "caller_number": _norm_caller,
+            "callee_number": _norm_callee,
             "livekit_room_name": self._room_name,
             "duration_seconds": duration_seconds,
             "cost_livekit": float(costs["livekit"]),
@@ -467,8 +471,8 @@ class SessionHandler:
                 "agent_id": self._agent_id,
                 "room_name": self._room_name,
                 "direction": self._direction,
-                "caller_number": self._caller_number,
-                "callee_number": self._callee_number,
+                "caller_number": _norm_caller,
+                "callee_number": _norm_callee,
                 "duration_seconds": duration_seconds,
                 "cost_total": float(total_cost),
                 "status": status,
@@ -537,11 +541,32 @@ class SessionHandler:
                 phone = self._callee_number or self._caller_number
                 cc = None
 
-                # Buscar campaign_call por teléfono si lo tenemos
-                # Buscar en "calling" primero, luego "failed" (el cleanup pudo
-                # marcarla prematuramente mientras la llamada aún estaba activa)
-                for search_status in ["calling", "failed"]:
-                    if phone:
+                # Estrategia de match, de más precisa a menos:
+                #   1) por call_entry_id codificado en room_name (`campaign-XX-YY`)
+                #   2) por phone (si lo tenemos normalizado)
+                #   3) si nada matchea, NO hacemos fallback ciego: peligroso con
+                #      llamadas concurrentes de la misma campaña que podrían
+                #      trampearse. Preferimos dejar la fila como estaba y loggear.
+                entry_prefix: str | None = None
+                if self._room_name and self._room_name.startswith("campaign-"):
+                    _parts = self._room_name.split("-")
+                    if len(_parts) >= 3 and _parts[2]:
+                        entry_prefix = _parts[2]
+
+                # Intento 1: call_entry_id prefix (match exacto)
+                if entry_prefix:
+                    cc = (
+                        sb.table("campaign_calls")
+                        .select("id, campaign_id, contact_id, phone")
+                        .eq("campaign_id", self._campaign_id)
+                        .like("id", f"{entry_prefix}%")
+                        .limit(1)
+                        .execute()
+                    )
+
+                # Intento 2: por phone en status "calling" o "failed"
+                if (not cc or not cc.data) and phone:
+                    for search_status in ["calling", "failed"]:
                         cc = (
                             sb.table("campaign_calls")
                             .select("id, campaign_id, contact_id, phone")
@@ -554,18 +579,12 @@ class SessionHandler:
                         if cc and cc.data:
                             break
 
-                    # Fallback: buscar por campaign_id + status sin phone
-                    if not cc or not cc.data:
-                        cc = (
-                            sb.table("campaign_calls")
-                            .select("id, campaign_id, contact_id, phone")
-                            .eq("campaign_id", self._campaign_id)
-                            .eq("status", search_status)
-                            .limit(1)
-                            .execute()
-                        )
-                        if cc and cc.data:
-                            break
+                if not cc or not cc.data:
+                    logger.warning(
+                        "No se encontró campaign_call para campaign=%s, room=%s, phone=%s — "
+                        "no se actualiza para evitar tocar fila equivocada",
+                        self._campaign_id, self._room_name, phone,
+                    )
 
                 if cc and cc.data:
                     cc_id = cc.data[0]["id"]

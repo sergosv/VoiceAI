@@ -1,17 +1,22 @@
 """Generación de embeddings con Gemini gemini-embedding-001.
 
 NOTA: text-embedding-004 fue deprecado en enero 2026 por Google.
-Migramos a gemini-embedding-001 con output_dimensionality=768 para
-mantener compatibilidad con los embeddings ya guardados en la DB
-(que son de 768 dims por el modelo anterior).
+Migramos a gemini-embedding-001 con output_dimensionality=768.
 
-gemini-embedding-001 usa Matryoshka Representation Learning (MRL)
-así que truncar a 768 dims preserva la calidad del vector.
+gemini-embedding-001 usa Matryoshka Representation Learning (MRL).
+Cuando output_dimensionality < 3072, Google recomienda L2-normalizar
+el vector resultante para que la similitud coseno mantenga calidad
+(sin eso, los componentes truncados sesgan la magnitud).
+
+Los embeddings que existían antes de esta migración (generados con
+text-embedding-004) viven en un espacio vectorial distinto y no son
+comparables con los nuevos. Ver migración 057 y scripts/reembed_memories.py.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import os
 
 from google import genai
@@ -33,19 +38,27 @@ def _get_client() -> genai.Client:
     return _client
 
 
+def _l2_normalize(vec: list[float]) -> list[float]:
+    """Normaliza el vector a norma unitaria. Requerido para MRL truncado."""
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm <= 0.0:
+        return vec
+    return [v / norm for v in vec]
+
+
 async def generate_embedding(text: str) -> list[float]:
-    """Genera un embedding de 768 dimensiones para el texto dado."""
+    """Genera un embedding de 768 dimensiones (L2-normalizado) para el texto dado."""
     client = _get_client()
     response = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
         config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMS),
     )
-    return list(response.embeddings[0].values)
+    return _l2_normalize(list(response.embeddings[0].values))
 
 
 async def generate_embeddings_batch(texts: list[str]) -> list[list[float]]:
-    """Genera embeddings para múltiples textos en un solo request."""
+    """Genera embeddings (L2-normalizados) para múltiples textos en un solo request."""
     if not texts:
         return []
 
@@ -55,4 +68,4 @@ async def generate_embeddings_batch(texts: list[str]) -> list[list[float]]:
         contents=texts,
         config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMS),
     )
-    return [list(e.values) for e in response.embeddings]
+    return [_l2_normalize(list(e.values)) for e in response.embeddings]

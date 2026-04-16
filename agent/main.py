@@ -108,6 +108,23 @@ def _handle_sigterm(signum: int, frame: object) -> None:
 signal.signal(signal.SIGTERM, _handle_sigterm)
 
 
+def _extract_call_entry_prefix(room_name: str | None) -> str | None:
+    """Extrae el prefijo de call_entry_id desde el nombre de la room.
+
+    El outbound_service crea rooms como `campaign-{campid[:8]}-{callentry[:8]}`.
+    Devolvemos ese último segmento para filtrar `campaign_calls.id LIKE prefix%`
+    y así matchear exactamente la fila correcta aun con llamadas concurrentes.
+    Retorna None si el room_name no sigue este patrón.
+    """
+    if not room_name or not room_name.startswith("campaign-"):
+        return None
+    parts = room_name.split("-")
+    # Esperamos 3 segmentos: "campaign", "{campid8}", "{callentry8}"
+    if len(parts) < 3 or not parts[2]:
+        return None
+    return parts[2]
+
+
 @server.rtc_session(agent_name="voice-ai-platform")
 async def entrypoint(ctx: agents.JobContext) -> None:
     """Punto de entrada para cada llamada."""
@@ -416,14 +433,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         return
 
     # Registrar llamada activa (después de pasar validaciones de concurrencia y créditos)
+    # NOTA: en outbound, caller_number/called_number están vacíos hasta que
+    # SIP conecta. Insertamos con phone=NULL y actualizamos post-conexión
+    # (ver bloque "Outbound: esperando a que la persona conteste" más abajo).
     try:
-        # Normalizar el phone según dirección
+        # `caller_number` = sip.phoneNumber = parte externa en AMBAS direcciones
+        #   - inbound: quien nos llamó
+        #   - outbound: a quién llamamos
         _ac_phone = None
         try:
             from agent.phone_utils import normalize_phone as _np_ac
-            _target = caller_number if not outbound_mode else called_number
-            if _target:
-                _ac_phone = _np_ac(_target)
+            if caller_number:
+                _ac_phone = _np_ac(caller_number)
         except Exception:
             pass
         sb.table("active_calls").insert({
@@ -845,6 +866,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
             # Pasar el prompt completo al model
             _gl_config = _dc_replace(config.agent, system_prompt=_gl_prompt)
+
+            # Sincronizar voice_agent con el mismo prompt para que cualquier
+            # consumidor (hooks, update_tools, fallback paths) vea lo mismo
+            # que el RealtimeModel.
+            if hasattr(voice_agent, "_instructions"):
+                voice_agent._instructions = _gl_prompt
 
             session = AgentSession(
                 llm=build_gemini_live_model(_gl_config),
@@ -1525,7 +1552,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 if recording_key:
                     await asyncio.sleep(5)  # Dar tiempo a R2 para finalizar escritura
 
-                    def _check_r2_exists(key: str) -> bool:
+                    def _check_r2_exists(key: str) -> str:
+                        """Devuelve 'exists', 'missing' o 'unknown'.
+                        'unknown' para errores que no son 404 (permisos, red, 5xx)
+                        para no marcar como failed una grabación que sí pudo haber quedado."""
                         try:
                             import boto3
                             from botocore.config import Config as BotoConfig
@@ -1542,22 +1572,35 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                                 Bucket=os.environ.get("R2_BUCKET", "voiceai-recordings"),
                                 Key=key,
                             )
-                            return True
+                            return "exists"
                         except _ClientError as e:
-                            if e.response.get("Error", {}).get("Code") == "404":
-                                return False
-                            return False
+                            code = e.response.get("Error", {}).get("Code")
+                            status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                            if code == "404" or status == 404:
+                                return "missing"
+                            logger.warning("R2 head_object error (code=%s status=%s) — tratando como unknown", code, status)
+                            return "unknown"
                         except Exception:
-                            return False
+                            logger.exception("R2 head_object excepción — tratando como unknown")
+                            return "unknown"
 
-                    exists = await asyncio.to_thread(_check_r2_exists, recording_key)
-                    if exists:
+                    r2_state = await asyncio.to_thread(_check_r2_exists, recording_key)
+                    if r2_state == "exists":
                         recording_status = "completed"
                         logger.info("Recording verified in R2: %s", recording_key)
-                    else:
+                    elif r2_state == "missing":
                         recording_status = "failed"
                         logger.warning(
                             "Recording NOT found in R2 after egress stop: %s",
+                            recording_key,
+                        )
+                    else:
+                        # No pudimos verificar — dejamos el status como "completed"
+                        # porque el egress stop_egress no lanzó error. Un job de
+                        # backfill puede revisar después.
+                        recording_status = "completed"
+                        logger.warning(
+                            "Recording R2 check inconclusive (unknown), asumiendo completed: %s",
                             recording_key,
                         )
             except Exception:
@@ -1768,31 +1811,6 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 "pregunta en qué puedes ayudarle."
             )
 
-    # Gemini Live: greeting ya se inyectó en la construcción del modelo.
-    # Este bloque solo aplica si por alguna razón no se inyectó arriba.
-    if False and config.agent.agent_mode == "gemini_live":
-        if outbound_mode and campaign_script:
-            # Outbound con campaign_script: dejar que Gemini genere el saludo basado
-            # en el script de la campaña (no inyectar el greeting del agente que es
-            # del modo inbound).
-            _gl_instruction = (
-                "\n\n## INSTRUCCIÓN DE INICIO CRÍTICA ##\n"
-                "APENAS inicie esta conversación, ANTES de esperar cualquier input del usuario, "
-                "SALUDA INMEDIATAMENTE siguiendo EXACTAMENTE el guión de apertura definido arriba. "
-                "NO esperes que el usuario diga nada primero. TÚ HABLAS PRIMERO."
-            )
-        else:
-            _gl_greeting = config.agent.greeting or "Hola, en qué puedo ayudarte?"
-            _gl_instruction = (
-                f"\n\n## INSTRUCCIÓN DE INICIO CRÍTICA ##\n"
-                f"APENAS inicie esta conversación, ANTES de esperar cualquier input del usuario, "
-                f"SALUDA INMEDIATAMENTE diciendo EXACTAMENTE: \"{_gl_greeting}\". "
-                f"NO esperes que el usuario diga nada primero. TÚ HABLAS PRIMERO."
-            )
-        if hasattr(voice_agent, '_instructions') and voice_agent.instructions:
-            voice_agent._instructions = voice_agent.instructions + _gl_instruction
-        logger.info("Gemini Live: greeting inyectado en system prompt")
-
     # Iniciar sesión — envuelto en try/except para garantizar que on_shutdown se ejecute
     try:
         await session.start(
@@ -1838,6 +1856,18 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             outbound_caller = called_number or config.agent.phone_number
             handler._caller_number = outbound_caller
             handler._callee_number = outbound_callee
+            # Actualizar active_calls.phone ahora que sabemos a quién llamamos
+            # (sin esto, el check de "llamada activa" en callback_service falla).
+            try:
+                from agent.phone_utils import normalize_phone as _np_upd
+                _ac_ph = _np_upd(outbound_callee) if outbound_callee else None
+                if _ac_ph:
+                    sb = get_supabase()
+                    sb.table("active_calls").update({"phone": _ac_ph}).eq(
+                        "room_name", ctx.room.name
+                    ).execute()
+            except Exception:
+                logger.exception("Error actualizando active_calls.phone outbound")
             # Actualizar identity SIP para transfer
             if hasattr(voice_agent, "_room_name"):
                 for p in ctx.room.remote_participants.values():
@@ -1850,23 +1880,33 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.warning("Outbound: nadie contestó en 60s, cerrando sesión")
             lifecycle.record_no_answer()
             # Actualizar campaign_calls a no_answer
+            # Usamos el call_entry_id codificado en el room_name para matchear
+            # exactamente la fila correcta (evita trampear filas de llamadas
+            # concurrentes de la misma campaña).
             if campaign_id:
                 try:
                     _sb_timeout = get_supabase()
-                    # Buscar por campaign_id + status calling (puede haber varias, limitar a 1)
-                    _cc = (
+                    _entry_prefix = _extract_call_entry_prefix(ctx.room.name)
+                    _q = (
                         _sb_timeout.table("campaign_calls")
                         .select("id")
                         .eq("campaign_id", campaign_id)
                         .eq("status", "calling")
-                        .limit(1)
-                        .execute()
                     )
+                    if _entry_prefix:
+                        _q = _q.like("id", f"{_entry_prefix}%")
+                    _cc = _q.limit(1).execute()
                     if _cc.data:
                         _sb_timeout.table("campaign_calls").update({
                             "status": "no_answer",
                             "result_summary": "El contacto no contestó la llamada (sin respuesta después de 60s)",
                         }).eq("id", _cc.data[0]["id"]).execute()
+                    elif not _entry_prefix:
+                        logger.warning(
+                            "Timeout outbound sin call_entry_id matcheable (room=%s), "
+                            "no se actualizó campaign_calls",
+                            ctx.room.name,
+                        )
                 except Exception:
                     logger.exception("Error actualizando campaign_call a no_answer")
             return

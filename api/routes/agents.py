@@ -304,8 +304,13 @@ async def update_agent(
     if req.gemini_live_thinking_level is not None:
         voice_config["gemini_live_thinking_level"] = req.gemini_live_thinking_level
         voice_changed = True
-    if req.tts_speed is not None:
-        voice_config["tts_speed"] = req.tts_speed if req.tts_speed != 0 else None
+    if req.tts_speed_default:
+        # Reset explícito al default de Cartesia
+        if "tts_speed" in voice_config:
+            voice_config["tts_speed"] = None
+            voice_changed = True
+    elif req.tts_speed is not None:
+        voice_config["tts_speed"] = req.tts_speed
         voice_changed = True
     if voice_changed:
         updates["voice_config"] = voice_config

@@ -58,6 +58,15 @@ class CallLifecycleTracker:
         self._answered_at: datetime | None = None
         self._first_speech_agent_at: datetime | None = None
         self._first_speech_user_at: datetime | None = None
+        # Última vez que el usuario habló (turno más reciente). Se usa para
+        # medir latencia real del agente: tiempo desde el último turno del
+        # usuario hasta que el agente responde. first_speech_user_at marca
+        # el inicio del turno y dejaría fuera la duración del habla.
+        self._last_speech_user_at: datetime | None = None
+        # Snapshot de `_last_speech_user_at` en el instante en que el agente
+        # habla por primera vez. Permite medir latencia real sin incluir la
+        # duración del turno del usuario.
+        self._user_last_speech_before_agent_first: datetime | None = None
         self._ended_at: datetime | None = None
 
         # Estado de desconexión
@@ -91,6 +100,7 @@ class CallLifecycleTracker:
     def record_user_speech(self) -> None:
         """Registra un turno de habla del usuario."""
         self._user_turns += 1
+        self._last_speech_user_at = datetime.now(timezone.utc)
         if self._user_turns == 1:
             self.add_event("first_speech_user")
 
@@ -99,6 +109,9 @@ class CallLifecycleTracker:
         self._agent_turns += 1
         if self._agent_turns == 1:
             self.add_event("first_speech_agent")
+            # Capturar la última vez que habló el usuario antes de esta respuesta
+            # para calcular latencia real del agente.
+            self._user_last_speech_before_agent_first = self._last_speech_user_at
 
     def record_sip_connected(self, caller: str | None, called: str | None) -> None:
         """SIP participant se conectó (persona contestó o llamada entrante)."""
@@ -247,21 +260,25 @@ class CallLifecycleTracker:
 
     @property
     def agent_response_latency_ms(self) -> int | None:
-        """Latencia desde que el usuario terminó su primer turno hasta que el agente respondió.
+        """Latencia real desde que el usuario dejó de hablar hasta que el agente respondió.
 
-        Aproximación: tiempo entre first_speech_user y first_speech_agent
-        (o viceversa si el agente habla primero).
+        - Si el agente habla primero (outbound greeting): `answered_at → first_speech_agent`.
+        - Si el usuario habla primero (inbound): usa el último `record_user_speech`
+          antes del primer turno del agente (fin del turno del usuario), no el
+          inicio. Sin esto, la métrica incluiría la duración del habla del
+          usuario y sobreestimaría la latencia.
         """
         if not self._first_speech_user_at or not self._first_speech_agent_at:
             return None
-        # Si el agente habla primero (outbound greeting), medir cuánto tardó
-        # desde que contestó hasta que habló
+        # Agente habla primero (outbound greeting)
         if self._first_speech_agent_at < self._first_speech_user_at:
             if self._answered_at:
                 return max(0, int((self._first_speech_agent_at - self._answered_at).total_seconds() * 1000))
             return None
-        # Si el usuario habla primero (inbound), medir cuánto tardó el agente
-        return max(0, int((self._first_speech_agent_at - self._first_speech_user_at).total_seconds() * 1000))
+        # Usuario habla primero: medir desde el último turno del usuario
+        # antes de la respuesta del agente.
+        reference = self._user_last_speech_before_agent_first or self._first_speech_user_at
+        return max(0, int((self._first_speech_agent_at - reference).total_seconds() * 1000))
 
     @property
     def greeting_latency_ms(self) -> int | None:

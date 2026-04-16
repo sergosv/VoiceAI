@@ -211,6 +211,10 @@ class AgentUpdateRequest(BaseModel):
     realtime_model: str | None = None
     # Cartesia-specific (sonic-3: 0.6–2.0, 1.0 = normal)
     tts_speed: float | None = None
+    # Cuando es true, resetea tts_speed al default de Cartesia (borra el valor).
+    # Se usa así porque el contrato de este schema es "None = no cambiar",
+    # lo cual impide distinguir "no tocar" de "resetear a default".
+    tts_speed_default: bool | None = None
     # Gemini Live
     gemini_live_model: str | None = None
     gemini_live_voice: str | None = None

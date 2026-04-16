@@ -1514,7 +1514,8 @@ export function Settings() {
         tts_provider: form.tts_provider,
         realtime_voice: form.realtime_voice,
         realtime_model: form.realtime_model,
-        tts_speed: form.tts_speed ?? 0,
+        tts_speed: form.tts_speed,
+        tts_speed_default: form.tts_speed == null,
         gemini_live_model: form.gemini_live_model,
         gemini_live_voice: form.gemini_live_voice,
         gemini_live_thinking_level: form.gemini_live_thinking_level,
@@ -2328,7 +2329,7 @@ export function Settings() {
                             <div className="flex justify-between text-[10px] text-gray-500 mt-1">
                               <span>0.6x Lenta</span>
                               <span>1.0x Normal</span>
-                              <span>2.0x Rapida</span>
+                              <span>2.0x Rápida</span>
                             </div>
                           </div>
                         </div>

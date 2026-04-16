@@ -11,9 +11,10 @@ from agent.embeddings import generate_embedding
 
 logger = logging.getLogger(__name__)
 
-# Timeout agresivo para que Gemini Live no cancele el tool call.
-# Si embeddings + RPC tarda más de esto, retornamos sin datos y el agente continúa.
-_RECALL_TIMEOUT_S = 2.5
+# Timeout para que Gemini Live no cancele el tool call.
+# generate_embedding (Gemini) + RPC Supabase: en p95 suele ser <3s,
+# dejamos 4s de margen. Si se excede, retornamos sin datos y el agente continúa.
+_RECALL_TIMEOUT_S = 4.0
 
 
 async def recall_memory_search(
@@ -44,7 +45,7 @@ async def recall_memory_search(
             timeout=_RECALL_TIMEOUT_S,
         )
     except asyncio.TimeoutError:
-        logger.warning("recall_memory timeout (%ss), retornando sin datos", _RECALL_TIMEOUT_S)
+        logger.warning("recall_memory timeout (%.1fs), retornando sin datos", _RECALL_TIMEOUT_S)
         return "No pude buscar en el historial ahora, continúa la conversación normalmente."
     except Exception:
         logger.exception("Error en recall_memory_search")
