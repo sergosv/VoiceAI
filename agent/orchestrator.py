@@ -150,6 +150,9 @@ class OrchestratorAgent(Agent):
         self._agent_turns: list[dict] = []
         self._turn_count: int = 0
         self._conversation_summary: str = ""
+        # Cache del último mensaje del agente ya incluido en el summary, para
+        # no duplicarlo cuando llm_node se invoca varias veces para el mismo turno.
+        self._last_assistant_seen: str | None = None
 
     @property
     def config(self) -> ResolvedConfig:
@@ -169,9 +172,18 @@ class OrchestratorAgent(Agent):
 
     def _extract_last_user_message(self, chat_ctx: llm.ChatContext) -> str | None:
         """Extrae el último mensaje del usuario del chat context."""
+        return self._extract_last_message_for_role(chat_ctx, "user")
+
+    def _extract_last_assistant_message(self, chat_ctx: llm.ChatContext) -> str | None:
+        """Extrae el último mensaje del agente del chat context."""
+        return self._extract_last_message_for_role(chat_ctx, "assistant")
+
+    @staticmethod
+    def _extract_last_message_for_role(
+        chat_ctx: llm.ChatContext, role: str,
+    ) -> str | None:
         for item in reversed(chat_ctx.items):
-            if hasattr(item, "role") and item.role == "user":
-                # ChatMessage o similar
+            if hasattr(item, "role") and item.role == role:
                 if hasattr(item, "text_content") and item.text_content:
                     return item.text_content
                 if hasattr(item, "content"):
@@ -257,13 +269,20 @@ class OrchestratorAgent(Agent):
             "timestamp": time.time(),
         })
 
-        # Actualizar resumen de conversación (últimos mensajes)
+        # Actualizar resumen de conversación (últimos mensajes).
+        # Incluimos tanto turnos del usuario como del agente para que el
+        # coordinador (decide_agent) tenga el contexto completo; antes veía
+        # solo user y perdía la mitad de la conversación.
+        last_assistant = self._extract_last_assistant_message(chat_ctx)
+        if last_assistant and last_assistant != self._last_assistant_seen:
+            self._conversation_summary += f"\nAgente: {last_assistant[:100]}"
+            self._last_assistant_seen = last_assistant
         if user_msg:
             self._conversation_summary += f"\nUsuario: {user_msg[:100]}"
-            # Mantener el resumen corto
-            lines = self._conversation_summary.strip().split("\n")
-            if len(lines) > 10:
-                self._conversation_summary = "\n".join(lines[-10:])
+        # Mantener el resumen acotado
+        lines = self._conversation_summary.strip().split("\n")
+        if len(lines) > 10:
+            self._conversation_summary = "\n".join(lines[-10:])
 
         # Swap system prompt al del agente seleccionado
         self._swap_system_prompt(chat_ctx, selected_sub.instructions)

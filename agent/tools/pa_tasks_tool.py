@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from supabase import Client
 
@@ -105,7 +105,7 @@ async def pa_complete_task(
     if item.get("is_completed"):
         return False  # Ya estaba completada
 
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     metadata = item.get("metadata") or {}
     if isinstance(metadata, str):
         metadata = json.loads(metadata)

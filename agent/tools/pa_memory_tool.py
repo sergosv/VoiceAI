@@ -1,6 +1,7 @@
 """Herramientas de memoria persistente para el Asistente Personal.
 
-Usa pgvector (VECTOR 768) con text-embedding-004 para búsqueda semántica.
+Usa pgvector (VECTOR 768) con gemini-embedding-001 (MRL truncado a 768 dims
+y L2-normalizado; ver agent/embeddings.py) para búsqueda semántica.
 Tabla: pa_memory_items (facts, preferences, tasks, notes, reminders).
 """
 

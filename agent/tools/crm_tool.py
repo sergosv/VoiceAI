@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -43,8 +44,8 @@ async def save_contact(
         sb = _get_supabase()
 
         # Verificar si el contacto ya existe para no sobreescribir source
-        existing = (
-            sb.table("contacts")
+        existing = await asyncio.to_thread(
+            lambda: sb.table("contacts")
             .select("id")
             .eq("client_id", client_id)
             .eq("phone", phone)
@@ -55,8 +56,8 @@ async def save_contact(
             # Contacto nuevo: incluir source
             data["source"] = source
 
-        result = (
-            sb.table("contacts")
+        result = await asyncio.to_thread(
+            lambda: sb.table("contacts")
             .upsert(data, on_conflict="client_id,phone")
             .execute()
         )
@@ -78,8 +79,8 @@ async def update_contact_notes(
     """Actualiza las notas de un contacto existente."""
     try:
         sb = _get_supabase()
-        result = (
-            sb.table("contacts")
+        result = await asyncio.to_thread(
+            lambda: sb.table("contacts")
             .update({"notes": notes})
             .eq("client_id", client_id)
             .eq("phone", phone)

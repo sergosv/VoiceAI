@@ -161,6 +161,15 @@ async def schedule_callback(
     Returns:
         Mensaje de confirmación o error.
     """
+    # Validar phone antes de cualquier otra cosa. Si el agente corre en un
+    # canal sin teléfono (ej. widget web) `phone` llega vacío; sin este check
+    # terminábamos insertando filas huérfanas que el dialer nunca puede llamar.
+    if not phone or not phone.strip():
+        return (
+            "No tengo un número de teléfono para devolverle la llamada. "
+            "Pídele al usuario que te dicte su número y llama de nuevo este tool."
+        )
+
     tz = _resolve_tz(client_timezone)
 
     try:
@@ -198,6 +207,16 @@ async def schedule_callback(
         phone = _np(phone)
     except Exception:
         pass
+
+    # Verificar que quedó un teléfono con al menos 8 dígitos (validación
+    # defensiva: normalize_phone devuelve el input tal cual si no detecta
+    # formato reconocible, p. ej. "abc").
+    _digits = sum(1 for c in phone if c.isdigit())
+    if _digits < 8:
+        return (
+            "El número de teléfono no parece válido. "
+            "Confirma con el usuario su número completo con lada."
+        )
 
     # ── Idempotencia: si ya programamos este callback recientemente, devolver
     #    el mismo resultado sin tocar DB (evita duplicados cuando Gemini

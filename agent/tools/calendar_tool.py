@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -78,9 +79,11 @@ async def schedule_appointment(
 
     sb = _get_supabase()
 
-    # Verificar conflictos
-    conflicts = (
-        sb.table("appointments")
+    # Verificar conflictos (pre-check para dar un mensaje rápido y legible;
+    # la atomicidad real la garantiza el EXCLUDE constraint de la migración 058
+    # que captura el race de dos callers pidiendo el mismo horario simultáneo).
+    conflicts = await asyncio.to_thread(
+        lambda: sb.table("appointments")
         .select("id, title, start_time, end_time")
         .eq("client_id", client_id)
         .eq("status", "confirmed")
@@ -99,8 +102,8 @@ async def schedule_appointment(
     # Upsert contacto
     contact_id = None
     if caller_phone:
-        contact_result = (
-            sb.table("contacts")
+        contact_result = await asyncio.to_thread(
+            lambda: sb.table("contacts")
             .upsert(
                 {
                     "client_id": client_id,
@@ -115,7 +118,9 @@ async def schedule_appointment(
         if contact_result.data:
             contact_id = contact_result.data[0]["id"]
 
-    # Crear cita
+    # Crear cita — envuelto en try/except para capturar el constraint
+    # `no_overlapping_appointments` (migración 058) que previene double-booking
+    # cuando dos callers llegan al mismo slot al mismo tiempo.
     title = f"Cita - {patient_name}"
     appointment_data = {
         "client_id": client_id,
@@ -126,26 +131,45 @@ async def schedule_appointment(
         "end_time": end_dt.isoformat(),
         "status": "confirmed",
     }
-    result = sb.table("appointments").insert(appointment_data).execute()
+    try:
+        result = await asyncio.to_thread(
+            lambda: sb.table("appointments").insert(appointment_data).execute()
+        )
+    except Exception as e:
+        err_str = str(e).lower()
+        if "no_overlapping_appointments" in err_str or "exclude" in err_str or "conflicting key" in err_str:
+            logger.warning(
+                "Race detectado: slot %s tomado mientras agendábamos para %s",
+                start_dt.isoformat(), patient_name,
+            )
+            return (
+                "Ese horario acaba de ser reservado por alguien más. "
+                "¿Podemos buscar otro horario?"
+            )
+        logger.exception("Error inesperado insertando cita")
+        return "Hubo un error al guardar la cita. Por favor intenta de nuevo."
     if not result.data:
         return "Hubo un error al guardar la cita. Por favor intenta de nuevo."
 
     # Google Calendar (opcional)
     google_event_id = None
     if google_calendar_id and google_service_account_key:
-        google_event_id = _create_google_event(
-            calendar_id=google_calendar_id,
-            service_account_key=google_service_account_key,
-            title=title,
-            description=description or f"Cita agendada por teléfono para {patient_name}",
-            start_time=start_dt,
-            end_time=end_dt,
-            tz_name=tz_name,
+        google_event_id = await asyncio.to_thread(
+            _create_google_event,
+            google_calendar_id,
+            google_service_account_key,
+            title,
+            description or f"Cita agendada por teléfono para {patient_name}",
+            start_dt,
+            end_dt,
+            tz_name,
         )
         if google_event_id:
-            sb.table("appointments").update(
-                {"google_event_id": google_event_id}
-            ).eq("id", result.data[0]["id"]).execute()
+            await asyncio.to_thread(
+                lambda: sb.table("appointments").update(
+                    {"google_event_id": google_event_id}
+                ).eq("id", result.data[0]["id"]).execute()
+            )
 
     formatted_date = start_dt.strftime("%d/%m/%Y")
     formatted_time = start_dt.strftime("%H:%M")
