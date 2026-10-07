@@ -19,6 +19,7 @@ export function ClientCreate() {
     voice_key: 'es_female_warm',
     language: 'es',
     owner_email: '',
+    send_welcome_email: true,
   })
   const [saving, setSaving] = useState(false)
 
@@ -38,8 +39,18 @@ export function ClientCreate() {
     e.preventDefault()
     setSaving(true)
     try {
-      const created = await api.post('/clients', form)
-      toast.success(`Cliente ${created.name} creado`)
+      const payload = { ...form }
+      if (!payload.owner_email) {
+        delete payload.owner_email
+        payload.send_welcome_email = false
+      }
+      const created = await api.post('/clients', payload)
+      const suffix = form.owner_email && form.send_welcome_email
+        ? ' — email de bienvenida enviado'
+        : form.owner_email
+          ? ' — acceso creado (sin email)'
+          : ''
+      toast.success(`Cliente ${created.name} creado${suffix}`)
       navigate(`/admin/clients/${created.id}`)
     } catch (err) {
       toast.error(err.message)
@@ -90,7 +101,32 @@ export function ClientCreate() {
               { value: 'es-en', label: 'Bilingüe' },
             ]}
           />
-          <Input label="Email del dueño" type="email" value={form.owner_email} onChange={e => setForm(f => ({ ...f, owner_email: e.target.value }))} />
+          <Input
+            label="Email del dueño"
+            type="email"
+            value={form.owner_email}
+            onChange={e => setForm(f => ({ ...f, owner_email: e.target.value }))}
+            placeholder="dueno@empresa.com"
+          />
+
+          {form.owner_email && (
+            <>
+              <label className="flex items-center gap-2 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  checked={form.send_welcome_email}
+                  onChange={e => setForm(f => ({ ...f, send_welcome_email: e.target.checked }))}
+                />
+                Enviar email de bienvenida con contraseña temporal
+              </label>
+              <p className="text-xs text-white/50">
+                Se creará un usuario con rol <strong>client</strong> asociado a este cliente.
+                {form.send_welcome_email
+                  ? ' Recibirá sus credenciales por email.'
+                  : ' Tendrás que enviarle las credenciales manualmente.'}
+              </p>
+            </>
+          )}
 
           <Button type="submit" disabled={saving} className="w-full">
             {saving ? 'Creando...' : 'Crear cliente'}

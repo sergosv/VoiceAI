@@ -82,6 +82,78 @@ def _dashboard_url() -> str:
     return os.environ.get("DASHBOARD_URL", "https://agentes.innotecnia.app")
 
 
+async def send_twilio_health_alert(
+    to: str | list[str],
+    status: str,
+    severity: str,
+    error_type: str | None,
+    message: str | None,
+    parent_sid: str,
+    *,
+    recovered: bool = False,
+) -> dict | None:
+    """Alerta de salud de la cuenta Twilio parent.
+
+    Incluye timestamp UTC, tipo de error, parent SID y link a Twilio Status Page
+    para que el admin descarte outage global antes de investigar credenciales.
+    """
+    from datetime import datetime, timezone
+
+    is_critical = severity == "critical"
+    css_class = "critical" if is_critical else "warning" if severity == "warning" else "info"
+    safe_error = _esc(error_type or "unknown")
+    safe_msg = _esc(message or "")
+    safe_sid = _esc(parent_sid)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    if recovered:
+        subject = "Twilio parent RECUPERADO — llamadas vuelven a operar"
+        header_text = "Servicio Twilio recuperado"
+        header_class = "info"
+        body = (
+            '<p>La cuenta parent de Twilio está operando normalmente de nuevo.</p>'
+            '<p class="detail">Los agentes pueden recibir y hacer llamadas sin intervención adicional.</p>'
+        )
+    else:
+        urgency = "CRÍTICO" if is_critical else "Aviso"
+        subject = f"Twilio parent {urgency}: {error_type or 'health check failed'}"
+        header_text = f"{urgency}: Twilio parent con problemas"
+        header_class = css_class
+        impact = (
+            "Todos los clientes sin BYOT pueden estar afectados."
+            if is_critical
+            else "Puede ser transitorio. Si persiste al siguiente check (5 min), escalar."
+        )
+        body = f"""
+        <p><strong>Tipo de error:</strong> <code>{safe_error}</code></p>
+        <p><strong>Detalle:</strong> {safe_msg}</p>
+        <p class="detail">{impact}</p>
+        """
+
+    html = f"""
+    {_STYLE}
+    <div class="card">
+        <div class="header {header_class}">{header_text}</div>
+        {body}
+        <p class="detail">
+            <strong>Parent SID:</strong> <code>{safe_sid}</code><br>
+            <strong>Timestamp:</strong> {ts}
+        </p>
+        <p>
+            <a href="https://status.twilio.com" class="btn">Ver Twilio Status</a>
+        </p>
+        <p class="detail" style="margin-top:12px">
+            Si <a href="https://status.twilio.com" style="color:#00f0ff">status.twilio.com</a>
+            reporta incidente, es outage global — esperar resolución.
+            Si Twilio reporta todo operacional, revisar credenciales y Sentry
+            (tag <code>twilio_parent_health</code>).
+        </p>
+        <div class="footer">VoiceAI Platform — innotecnia.app</div>
+    </div>
+    """
+    return await send_email(to, subject, html)
+
+
 async def send_low_balance_alert(
     to: str,
     client_name: str,
@@ -144,6 +216,39 @@ async def send_quality_alert(
         <p class="detail">{safe_summary}</p>
         <a href="{_dashboard_url()}/quality" class="btn">Ver evaluaciones</a>
         <div class="footer">Call ID: {_esc(call_id[:8])}... — VoiceAI Platform</div>
+    </div>
+    """
+    return await send_email(to, subject, html)
+
+
+async def send_welcome_email(
+    to: str,
+    client_name: str,
+    temp_password: str,
+    login_url: str | None = None,
+) -> dict | None:
+    """Email de bienvenida al owner de un cliente recién creado.
+
+    Incluye credenciales temporales y link al dashboard. Se espera que el
+    usuario cambie su contraseña en el primer login.
+    """
+    safe_name = _esc(client_name)
+    safe_email = _esc(to)
+    safe_pwd = _esc(temp_password)
+    url = login_url or f"{_dashboard_url()}/login"
+
+    subject = f"Bienvenido a VoiceAI — acceso para {client_name}"
+    html = f"""
+    {_STYLE}
+    <div class="card">
+        <div class="header info">Bienvenido a VoiceAI</div>
+        <p>Hola, tu cuenta de <strong>{safe_name}</strong> está lista.</p>
+        <p>Usa estas credenciales para iniciar sesión:</p>
+        <p><strong>Usuario:</strong> <code>{safe_email}</code></p>
+        <p><strong>Contraseña temporal:</strong> <code>{safe_pwd}</code></p>
+        <p class="detail">Por seguridad, cámbiala después de iniciar sesión desde tu perfil.</p>
+        <a href="{url}" class="btn">Ir al dashboard</a>
+        <div class="footer">VoiceAI Platform — innotecnia.app</div>
     </div>
     """
     return await send_email(to, subject, html)

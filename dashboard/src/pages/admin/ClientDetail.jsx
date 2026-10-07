@@ -65,6 +65,12 @@ export function ClientDetail() {
   // Orchestration state
   const [orchOpen, setOrchOpen] = useState(false)
 
+  // Twilio subaccount state
+  const [showSuspendModal, setShowSuspendModal] = useState(false)
+  const [suspendReason, setSuspendReason] = useState('')
+  const [suspending, setSuspending] = useState(false)
+  const [reactivating, setReactivating] = useState(false)
+
   useEffect(() => {
     Promise.all([
       api.get(`/clients/${id}`),
@@ -261,6 +267,49 @@ export function ClientDetail() {
       toast.error(err.message)
     } finally {
       setSearchingNumbers(false)
+    }
+  }
+
+  async function handleSuspendSubaccount(e) {
+    e.preventDefault()
+    setSuspending(true)
+    try {
+      const result = await api.post(
+        `/admin/clients/${id}/twilio-subaccount/suspend`,
+        { reason: suspendReason || null },
+      )
+      setClient(c => ({ ...c, twilio_subaccount_status: result.status }))
+      toast.success(`Subaccount suspendida — ${client.name} no recibe/hace llamadas`)
+      setShowSuspendModal(false)
+      setSuspendReason('')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSuspending(false)
+    }
+  }
+
+  async function handleReactivateSubaccount() {
+    const ok = await confirm({
+      title: 'Reactivar subaccount Twilio',
+      message: `Reactivar la subaccount de ${client.name}. La propagacion puede tardar hasta 1 minuto antes de que las llamadas fluyan.`,
+      confirmText: 'Reactivar',
+      variant: 'warning',
+    })
+    if (!ok) return
+    setReactivating(true)
+    try {
+      const result = await api.post(`/admin/clients/${id}/twilio-subaccount/reactivate`)
+      setClient(c => ({ ...c, twilio_subaccount_status: result.status }))
+      toast.success(`Subaccount reactivada — puede tardar hasta 1 minuto`)
+      // Re-fetch cliente por si Twilio regresó estado intermedio
+      setTimeout(() => {
+        api.get(`/clients/${id}`).then(setClient).catch(() => {})
+      }, 3000)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setReactivating(false)
     }
   }
 
@@ -554,6 +603,105 @@ export function ClientDetail() {
         </Card>
       </div>
 
+      {/* Twilio Subaccount */}
+      {(() => {
+        const sid = client.twilio_subaccount_sid
+        const subStatus = client.twilio_subaccount_status
+        if (!sid) {
+          return (
+            <Card className="!p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-text-secondary">Twilio Subaccount</h2>
+                  <p className="text-xs text-text-muted mt-1">
+                    Se creará automáticamente al asignar el primer número al cliente.
+                  </p>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-bg-secondary text-text-muted uppercase tracking-wide">
+                  Sin configurar
+                </span>
+              </div>
+            </Card>
+          )
+        }
+
+        const statusMeta = {
+          provisioning: { label: 'Provisionando', classes: 'bg-blue-500/15 text-blue-400', tooltip: 'Configuración en progreso — subaccount creada, SIP trunk pendiente.' },
+          active: { label: 'Activa', classes: 'bg-green-500/15 text-green-400', tooltip: 'Subaccount lista, recibiendo y haciendo llamadas normalmente.' },
+          suspended: { label: 'Suspendida', classes: 'bg-yellow-500/15 text-yellow-400', tooltip: 'Llamadas interrumpidas por decisión admin. Reversible.' },
+          closed: { label: 'Cerrada', classes: 'bg-red-500/15 text-red-400', tooltip: 'Cerrada permanentemente — Twilio no permite reactivar.' },
+        }[subStatus] || { label: subStatus || 'Desconocido', classes: 'bg-gray-500/15 text-gray-400', tooltip: '' }
+
+        const canSuspend = subStatus === 'active'
+        const canReactivate = subStatus === 'suspended'
+        const isTerminal = subStatus === 'closed'
+
+        return (
+          <Card className="!p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-text-secondary">Twilio Subaccount</h2>
+                <p className="text-xs text-text-muted mt-1 font-mono truncate" title={sid}>
+                  SID: {sid}
+                </p>
+                {client.twilio_subaccount_created_at && (
+                  <p className="text-[10px] text-text-muted mt-0.5">
+                    Creada: {new Date(client.twilio_subaccount_created_at).toLocaleDateString('es-MX', {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                    })}
+                  </p>
+                )}
+              </div>
+              <span
+                className={`text-[11px] px-2 py-0.5 rounded font-medium ${statusMeta.classes}`}
+                title={statusMeta.tooltip}
+              >
+                {statusMeta.label}
+              </span>
+            </div>
+
+            {isTerminal && (
+              <div className="text-xs text-text-muted">
+                Esta subaccount está cerrada permanentemente. Para restaurar servicio, crea una nueva subaccount desde el soporte Twilio.
+              </div>
+            )}
+
+            {!isTerminal && (
+              <div className="flex flex-wrap gap-2">
+                {canSuspend && (
+                  <Button
+                    variant="secondary"
+                    className="!border-yellow-500/30 !text-yellow-400 hover:!bg-yellow-500/10"
+                    onClick={() => setShowSuspendModal(true)}
+                    disabled={suspending}
+                  >
+                    Suspender subaccount
+                  </Button>
+                )}
+                {canReactivate && (
+                  <Button
+                    variant="secondary"
+                    className="!border-green-500/30 !text-green-400 hover:!bg-green-500/10"
+                    onClick={handleReactivateSubaccount}
+                    disabled={reactivating}
+                  >
+                    {reactivating
+                      ? <><Loader2 size={14} className="animate-spin mr-1.5 inline" /> Reactivando... puede tardar hasta 1 minuto</>
+                      : 'Reactivar subaccount'}
+                  </Button>
+                )}
+                {subStatus === 'provisioning' && (
+                  <p className="text-xs text-text-muted flex items-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin" />
+                    Esperando creación del SIP trunk. Reintenta asignando un número.
+                  </p>
+                )}
+              </div>
+            )}
+          </Card>
+        )
+      })()}
+
       {/* Modo Inteligente (Orchestration) */}
       <Card className="space-y-0">
         <button
@@ -844,6 +992,54 @@ export function ClientDetail() {
           />
         </Suspense>
       )}
+
+      {/* Modal: Suspender Twilio subaccount */}
+      <Modal
+        open={showSuspendModal}
+        onClose={() => !suspending && setShowSuspendModal(false)}
+        title="Suspender subaccount Twilio"
+      >
+        <form onSubmit={handleSuspendSubaccount} className="space-y-4">
+          <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-sm space-y-1">
+            <div className="flex items-center gap-2 text-yellow-400">
+              <AlertTriangle size={14} />
+              <span className="font-medium">Acción inmediata</span>
+            </div>
+            <p className="text-text-secondary">
+              Al suspender, <strong className="text-text-primary">{client.name}</strong> dejará de recibir y hacer llamadas inmediatamente. Las llamadas activas se interrumpirán.
+            </p>
+            <p className="text-xs text-text-muted">
+              La acción es reversible desde esta misma pantalla.
+            </p>
+          </div>
+          <Textarea
+            label="Motivo (opcional — queda en audit log)"
+            value={suspendReason}
+            onChange={e => setSuspendReason(e.target.value)}
+            rows={3}
+            maxLength={500}
+            placeholder="Ej: Reporte de spam, falta de pago, solicitud del cliente..."
+          />
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowSuspendModal(false)}
+              disabled={suspending}
+              className="flex-1"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={suspending}
+              className="flex-1 !bg-yellow-500 hover:!bg-yellow-600 !text-white"
+            >
+              {suspending ? 'Suspendiendo...' : 'Confirmar suspensión'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Modal: Regalar créditos */}
       <Modal open={showGiftModal} onClose={() => setShowGiftModal(false)} title="Regalar creditos">

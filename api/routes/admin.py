@@ -7,13 +7,182 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from api.audit import log_audit
 from api.deps import get_supabase
 from api.middleware.auth import CurrentUser, require_admin
+from api.services import phone_service
 
 router = APIRouter()
 logger = logging.getLogger("api.admin")
+
+
+# --- Twilio Subaccount Management ---
+
+
+class SubaccountSuspendRequest(BaseModel):
+    """Request para suspender una subaccount Twilio.
+
+    El motivo se persiste en audit_logs junto con user_id y timestamp para
+    trazabilidad. El rol admin es obligatorio (require_admin).
+    """
+
+    reason: str | None = Field(None, max_length=500)
+
+
+class SubaccountStatusOut(BaseModel):
+    """Estado de la subaccount tras un cambio."""
+
+    subaccount_sid: str
+    status: str  # provisioning | active | suspended | closed
+
+
+@router.post("/clients/{client_id}/twilio-subaccount/suspend", response_model=SubaccountStatusOut)
+async def suspend_twilio_subaccount(
+    client_id: str,
+    req: SubaccountSuspendRequest,
+    admin: CurrentUser = Depends(require_admin),
+) -> SubaccountStatusOut:
+    """Suspende la subaccount Twilio de un cliente.
+
+    Efecto inmediato: el cliente deja de recibir/hacer llamadas. Llamadas
+    activas se interrumpen. Operación reversible vía /reactivate.
+    """
+    import asyncio
+
+    sb = get_supabase()
+    result = (
+        sb.table("clients")
+        .select("twilio_subaccount_sid, twilio_subaccount_status, name")
+        .eq("id", client_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+
+    row = result.data[0]
+    sub_sid = row.get("twilio_subaccount_sid")
+    current = row.get("twilio_subaccount_status")
+    if not sub_sid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cliente no tiene subaccount Twilio configurada",
+        )
+    if current == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Subaccount cerrada permanentemente, no se puede suspender",
+        )
+    if current == "suspended":
+        return SubaccountStatusOut(subaccount_sid=sub_sid, status="suspended")
+
+    try:
+        new_status = await asyncio.to_thread(
+            phone_service.update_subaccount_twilio_status, sub_sid, "suspended",
+        )
+    except Exception as e:
+        logger.exception("Twilio suspend failed for %s", sub_sid)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error suspendiendo subaccount en Twilio: {e}",
+        )
+
+    sb.table("clients").update({
+        "twilio_subaccount_status": new_status,
+    }).eq("id", client_id).execute()
+
+    log_audit(
+        action="twilio_subaccount.suspended",
+        user_id=admin.id,
+        client_id=client_id,
+        resource_type="twilio_subaccount",
+        resource_id=sub_sid,
+        details={
+            "reason": req.reason,
+            "client_name": row.get("name"),
+            "previous_status": current,
+        },
+    )
+    logger.info(
+        "Admin %s suspendió subaccount %s (cliente %s, motivo: %s)",
+        admin.email, sub_sid, client_id, req.reason or "<sin motivo>",
+    )
+    return SubaccountStatusOut(subaccount_sid=sub_sid, status=new_status)
+
+
+@router.post("/clients/{client_id}/twilio-subaccount/reactivate", response_model=SubaccountStatusOut)
+async def reactivate_twilio_subaccount(
+    client_id: str,
+    admin: CurrentUser = Depends(require_admin),
+) -> SubaccountStatusOut:
+    """Reactiva una subaccount Twilio previamente suspendida.
+
+    La propagación en Twilio puede tardar hasta ~1 minuto. El endpoint
+    retorna en cuanto Twilio acepta el cambio; la UI debe mostrar que
+    puede tardar antes de que las llamadas fluyan.
+    """
+    import asyncio
+
+    sb = get_supabase()
+    result = (
+        sb.table("clients")
+        .select("twilio_subaccount_sid, twilio_subaccount_status, name")
+        .eq("id", client_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente no encontrado")
+
+    row = result.data[0]
+    sub_sid = row.get("twilio_subaccount_sid")
+    current = row.get("twilio_subaccount_status")
+    if not sub_sid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cliente no tiene subaccount Twilio configurada",
+        )
+    if current == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Subaccount cerrada permanentemente, no se puede reactivar",
+        )
+    if current == "active":
+        return SubaccountStatusOut(subaccount_sid=sub_sid, status="active")
+
+    try:
+        new_status = await asyncio.to_thread(
+            phone_service.update_subaccount_twilio_status, sub_sid, "active",
+        )
+    except Exception as e:
+        logger.exception("Twilio reactivate failed for %s", sub_sid)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Error reactivando subaccount en Twilio: {e}",
+        )
+
+    sb.table("clients").update({
+        "twilio_subaccount_status": new_status,
+    }).eq("id", client_id).execute()
+
+    log_audit(
+        action="twilio_subaccount.reactivated",
+        user_id=admin.id,
+        client_id=client_id,
+        resource_type="twilio_subaccount",
+        resource_id=sub_sid,
+        details={
+            "client_name": row.get("name"),
+            "previous_status": current,
+        },
+    )
+    logger.info(
+        "Admin %s reactivó subaccount %s (cliente %s)",
+        admin.email, sub_sid, client_id,
+    )
+    return SubaccountStatusOut(subaccount_sid=sub_sid, status=new_status)
 
 
 # --- Schemas ---

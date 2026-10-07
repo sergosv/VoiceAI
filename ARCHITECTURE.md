@@ -848,6 +848,67 @@ En Twilio Console:
 
 ---
 
+## Twilio Subaccounts (MVP)
+
+Cada cliente queda aislado en una subaccount Twilio propia. Protege la cuenta principal y permite suspender un cliente sin afectar a los demás.
+
+### Máquina de estados `clients.twilio_subaccount_status`
+```
+NULL ─────► provisioning ─────► active ─────► suspended ────┐
+                                    ▲                        │
+                                    └────────────────────────┘
+                                                │
+                                                └────► closed (permanente)
+```
+
+- **NULL**: nunca se intentó crear — cliente grandfathered o recién creado sin número.
+- **provisioning**: subaccount creada en Twilio, Elastic SIP Trunk pendiente. El próximo intento de `ensure_client_subaccount` solo crea el trunk.
+- **active**: subaccount + trunk listos. Único estado operacional.
+- **suspended**: admin la suspendió desde UI. `ensure_client_subaccount` se niega a tocarla — requiere reactivación explícita.
+- **closed**: permanente, no reversible.
+
+### Prioridad de resolución de credenciales
+`api/services/phone_service.py::resolve_twilio_creds`:
+```
+BYOT (clients.twilio_account_sid)      ← cliente trajo su Twilio
+  ↓ si vacío
+Subaccount (clients.twilio_subaccount_sid) ← aislamiento platform-managed
+  ↓ si vacío
+Main (env TWILIO_ACCOUNT_SID)           ← grandfathered only
+```
+
+Fallback a main es **silencioso** (grandfathered clients deben seguir funcionando). Solo lanza excepción si una de las alternativas está marcada pero malformada (sid sin token o token no desencriptable).
+
+### Geo permissions — paso OBLIGATORIO
+Twilio Subaccounts **NO heredan geo permissions del parent**. Cada subaccount requiere activar permisos por país individualmente. El flujo `purchase_and_assign_phone` llama `enable_geo_permission(country, account_sid=sub_sid, auth_token=sub_token)` antes de comprar el número. Fallo de geo se loggea pero no bloquea — Twilio rechazaría la compra con error claro si falta.
+
+### TODO Fase 2
+- Consolidar `resolve_twilio_creds` y `get_client_twilio_creds` en una sola función (hoy coexisten: la segunda devuelve `(None, None)` sin BYOT como flag; la primera siempre resuelve). Riesgo de inconsistencia si se modifica una sin la otra.
+- Billing granular por subaccount (tracking de gasto Twilio por cliente).
+- Provider fallback (Telnyx/Bandwidth) ante caída de parent.
+
+### Migration Pattern: Additive Changes Only
+
+El refactor de Twilio Subaccounts se diseñó como cambios **puramente aditivos** al call path runtime, NO un rewrite. Decisión de diseño crítica — la razón por la que clientes grandfathered siguen funcionando sin tocar código.
+
+**Invariantes que respeta el patrón:**
+
+1. **Ninguna función del call path runtime lee columnas `twilio_subaccount_*`**. `agent/config_loader.py::_rows_to_resolved` (hot path en cada llamada entrante) ignora esas columnas — solo lee campos preexistentes. Clientes con subaccount y sin subaccount producen `ResolvedConfig` idéntico desde la perspectiva del agente.
+
+2. **Ninguna llamada Twilio API durante la llamada entrante/saliente**. El ruteo es infraestructura SIP configurada al momento de compra (`IncomingPhoneNumber.trunk_sid` → Elastic SIP Trunk → LiveKit origination URI). Nuestro backend no autentica contra Twilio por call.
+
+3. **Las columnas nuevas son todas `NULL`-safe**. `resolve_twilio_creds` fallback silencioso a MAIN, `_rows_to_resolved` no referencia las columnas, UI admin degrada a "Sin configurar" cuando SID es NULL.
+
+4. **El código nuevo solo se ejecuta en flujos admin explícitos**. `ensure_client_subaccount` corre únicamente dentro de `purchase_and_assign_phone`. Los clientes viejos nunca disparan `ensure_client_subaccount` hasta que el admin decide comprar un número nuevo para ellos — en cuyo caso el número viejo permanece en main y el nuevo va a la subaccount recién creada.
+
+**Consecuencia**: los dos universos (grandfathered en main, nuevos en subaccount) coexisten sin código de bifurcación en el hot path. No hay `if client.has_subaccount then X else Y` en `agent/main.py`.
+
+**Regresión protegida por**: `tests/test_grandfathered_call_path.py::test_grandfathered_client_config_loads_with_null_subaccount_fields` — usa spies para verificar que `resolve_twilio_creds` y `get_client_twilio_creds` NO se invocan durante `load_config_by_phone`. Si alguien introduce esa dependencia en el hot path, el test falla.
+
+**Regla operativa para futuros cambios en esta área**: cualquier modificación al call path runtime que necesite distinguir grandfathered vs subaccount debe justificar **por qué** en el PR. El default debe seguir siendo "no distinguir" — si se distingue, probablemente hay un diseño mejor que preserve el patrón aditivo.
+
+---
+
 ## Fases de Desarrollo
 
 ### FASE 1 — El Motor (estimado: 4-8 horas con Claude Code)

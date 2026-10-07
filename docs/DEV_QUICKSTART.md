@@ -19,8 +19,8 @@
 
 ```bash
 # Solo la primera vez
-git clone https://github.com/sergosv/VoiceAI.git C:\Claude\VoiceAI
-cd C:\Claude\VoiceAI
+git clone https://github.com/sergosv/VoiceAI.git C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 
 # Crear virtualenv (solo la primera vez)
 python -m venv venv
@@ -33,7 +33,7 @@ python -m venv venv
 ### Terminal 1: API (FastAPI)
 
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 
 # Activar virtualenv
 source venv/Scripts/activate    # bash/zsh en Warp
@@ -57,7 +57,7 @@ Health check: `http://localhost:8000/api/health`
 ### Terminal 2: Dashboard (React + Vite)
 
 ```bash
-cd C:\Claude\VoiceAI\dashboard
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')\dashboard
 
 # Instalar dependencias (solo si cambiaron)
 npm install
@@ -74,7 +74,7 @@ El dashboard queda en: `http://localhost:5173`
 ### Terminal 3: Agente de voz (LiveKit — solo si necesitas probar llamadas)
 
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 
 source venv/Scripts/activate
 source .env
@@ -92,7 +92,7 @@ python -m agent.main start
 
 ### Correr tests
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 source venv/Scripts/activate
 
 # Todos los tests
@@ -115,7 +115,7 @@ pytest -v --tb=short
 git push origin master
 
 # Agente de voz → LiveKit Cloud (manual)
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 lk agent deploy
 ```
 
@@ -133,7 +133,7 @@ psql -U postgres.tfecomyseybwlvmoypqh \
 ### Build del dashboard para producción
 
 ```bash
-cd C:\Claude\VoiceAI\dashboard
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')\dashboard
 npm run build
 # Output en dashboard/dist/ — servido por FastAPI como StaticFiles
 ```

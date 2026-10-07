@@ -9,7 +9,7 @@
 ## 1. Clonar y configurar entorno
 
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 
 # Crear virtualenv (solo la primera vez)
 python -m venv venv
@@ -44,7 +44,7 @@ Se necesitan **2 terminales** para desarrollo local:
 ### Terminal 1 — Backend API (FastAPI)
 
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 venv\Scripts\activate
 uvicorn api.main:app --reload --port 8000
 ```
@@ -55,7 +55,7 @@ uvicorn api.main:app --reload --port 8000
 ### Terminal 2 — Frontend Dashboard (Vite + React)
 
 ```bash
-cd C:\Claude\VoiceAI\dashboard
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')\dashboard
 npm install   # solo la primera vez
 npm run dev
 ```
@@ -68,7 +68,7 @@ npm run dev
 Solo necesario si estás probando llamadas telefónicas:
 
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 venv\Scripts\activate
 python -m agent.main dev
 ```
@@ -82,7 +82,7 @@ python -m agent.main dev
 ## 5. Tests
 
 ```bash
-cd C:\Claude\VoiceAI
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')
 venv\Scripts\activate
 pytest tests/ -v
 ```
@@ -92,7 +92,7 @@ pytest tests/ -v
 El dashboard se compila y FastAPI lo sirve como archivos estáticos:
 
 ```bash
-cd C:\Claude\VoiceAI\dashboard
+cd C:\Atlas\proyectos$(echo Innotecnia/VoiceAI | sed 's#/#\#g')\dashboard
 npm run build    # genera dashboard/dist/
 ```
 

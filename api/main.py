@@ -68,6 +68,7 @@ from api.services.callback_worker import start_callback_worker
 from api.services.recording_retention import start_retention_worker
 from api.services.call_evaluator import start_evaluation_worker
 from api.tasks.credit_alerts import start_credit_alert_worker
+from api.services.twilio_health import start_twilio_health_monitor
 
 def _rate_limit_key(request: Request) -> str:
     """Key function: usa client_id del JWT si existe, sino IP."""
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_conversation_cleanup()
     start_evaluation_worker()
     start_credit_alert_worker()
+    start_twilio_health_monitor()
     yield
 
 

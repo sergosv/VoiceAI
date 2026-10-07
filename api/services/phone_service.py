@@ -4,10 +4,22 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 
 from livekit import api as lk_api
 from supabase import Client
 logger = logging.getLogger(__name__)
+
+
+def _slugify_for_twilio(value: str) -> str:
+    """Normaliza un string a formato compatible con Twilio friendly_name.
+
+    Solo a-z, 0-9 y guiones. Max 64 chars (límite seguro).
+    """
+    slug = value.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s-]+", "-", slug).strip("-")
+    return slug[:64] or "client"
 
 
 def _get_twilio_client(
@@ -155,6 +167,263 @@ def get_client_twilio_creds(
     if not sid or not token_enc:
         return None, None
     return sid, decrypt_value(token_enc)
+
+
+def resolve_twilio_creds(sb: Client, client_id: str) -> tuple[str, str]:
+    """Resuelve credenciales Twilio con prioridad BYOT > Subaccount > Main.
+
+    Fallback silencioso a las env vars MAIN para clientes grandfathered sin BYOT
+    ni subaccount configurada. Solo lanza ValueError cuando alguna de las dos
+    alternativas está marcada pero resulta malformada (sid sin token, o token
+    que no puede desencriptarse).
+
+    TODO (Fase 2): consolidar con `get_client_twilio_creds` en una sola función.
+    Coexisten hoy porque `get_client_twilio_creds` devuelve (None, None) cuando
+    no hay BYOT (útil como flag), mientras esta siempre devuelve creds resueltas.
+    Unificar con un parámetro `include_fallback: bool` para evitar divergencia.
+    """
+    from api.crypto import decrypt_value
+
+    result = (
+        sb.table("clients")
+        .select(
+            "twilio_account_sid, twilio_auth_token, "
+            "twilio_subaccount_sid, twilio_subaccount_auth_token"
+        )
+        .eq("id", client_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data:
+        return os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]
+
+    row = result.data[0]
+
+    byot_sid = row.get("twilio_account_sid")
+    byot_token_enc = row.get("twilio_auth_token")
+    if byot_sid and byot_token_enc:
+        byot_token = decrypt_value(byot_token_enc)
+        if not byot_token:
+            raise ValueError(
+                f"BYOT auth_token no pudo desencriptarse para cliente {client_id}"
+            )
+        return byot_sid, byot_token
+    if byot_sid or byot_token_enc:
+        raise ValueError(
+            f"BYOT parcialmente configurado para cliente {client_id}: "
+            "requiere account_sid y auth_token"
+        )
+
+    sub_sid = row.get("twilio_subaccount_sid")
+    sub_token_enc = row.get("twilio_subaccount_auth_token")
+    if sub_sid and sub_token_enc:
+        sub_token = decrypt_value(sub_token_enc)
+        if not sub_token:
+            raise ValueError(
+                f"Subaccount auth_token no pudo desencriptarse para cliente {client_id}"
+            )
+        return sub_sid, sub_token
+    if sub_sid or sub_token_enc:
+        raise ValueError(
+            f"Subaccount parcialmente configurada para cliente {client_id}: "
+            "requiere sid y auth_token"
+        )
+
+    return os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]
+
+
+def create_twilio_subaccount(friendly_name: str) -> tuple[str, str]:
+    """Crea una subaccount Twilio bajo la cuenta parent (env TWILIO_ACCOUNT_SID).
+
+    Args:
+        friendly_name: Nombre visible en Twilio Console (ej. 'voiceai-prod-dr-garcia').
+            Se recomienda usar `_slugify_for_twilio()` en el caller.
+
+    Retorna (subaccount_sid, subaccount_auth_token) en texto plano.
+    El caller debe encriptar el token con `api.crypto.encrypt_value` antes de guardarlo.
+    """
+    master_client = _get_twilio_client()
+    account = master_client.api.v2010.accounts.create(friendly_name=friendly_name)
+    logger.info(
+        "Twilio subaccount creada: sid=%s friendly_name=%s",
+        account.sid, friendly_name,
+    )
+    return account.sid, account.auth_token
+
+
+def associate_number_to_trunk(
+    phone_sid: str,
+    trunk_sid: str,
+    *,
+    account_sid: str,
+    auth_token: str,
+) -> None:
+    """Asocia un IncomingPhoneNumber a un Elastic SIP Trunk.
+
+    Requerido después de comprar (o transferir) un número dentro de una subaccount
+    para que el ruteo de llamadas entrantes use el trunk LiveKit.
+    """
+    client = _get_twilio_client(account_sid, auth_token)
+    client.incoming_phone_numbers(phone_sid).update(trunk_sid=trunk_sid)
+    logger.info("Number %s asociado a trunk %s", phone_sid, trunk_sid)
+
+
+def transfer_number_to_subaccount(
+    phone_sid: str,
+    subaccount_sid: str,
+    *,
+    master_account_sid: str | None = None,
+    master_auth_token: str | None = None,
+) -> str:
+    """Transfiere un IncomingPhoneNumber desde la cuenta master a una subaccount.
+
+    Usa credenciales MASTER para autenticar (no las de la subaccount). Es una
+    operación instantánea — sin port-out, sin cambio de número. Solo aplica a
+    subaccounts bajo la misma master account.
+
+    Retorna el phone_sid (igual al input, por si el SDK lo renueva).
+    """
+    client = _get_twilio_client(master_account_sid, master_auth_token)
+    incoming = client.incoming_phone_numbers(phone_sid).update(
+        account_sid=subaccount_sid
+    )
+    logger.info(
+        "Número transferido: phone_sid=%s → subaccount=%s",
+        phone_sid, subaccount_sid,
+    )
+    return incoming.sid
+
+
+def update_subaccount_twilio_status(
+    subaccount_sid: str,
+    status: str,
+    *,
+    master_account_sid: str | None = None,
+    master_auth_token: str | None = None,
+) -> str:
+    """Cambia el status de una subaccount Twilio (via API del parent).
+
+    Args:
+        subaccount_sid: SID de la subaccount.
+        status: 'active' | 'suspended' | 'closed'.
+            - 'suspended' deshabilita llamadas entrantes/salientes inmediatamente.
+            - 'closed' es PERMANENTE e irreversible — Twilio no permite reactivar.
+            - 'active' revierte una subaccount previamente suspendida.
+
+    NOTA: el servicio acepta 'closed' aunque la UI admin NO lo expone. Reservado
+    para flujo administrativo fuera de MVP — requiere typed-confirmation (escribir
+    el nombre del cliente) antes de llegar a producción. Fase 2 debe implementar
+    ese flujo aquí, no duplicar la función.
+
+    Usa credenciales master para autenticar; Twilio requiere que el parent
+    administre el ciclo de vida de sus subaccounts.
+
+    Retorna el status retornado por Twilio (debería igualar al solicitado).
+    """
+    if status not in ("active", "suspended", "closed"):
+        raise ValueError(f"status inválido: {status}")
+    client = _get_twilio_client(master_account_sid, master_auth_token)
+    account = client.api.v2010.accounts(subaccount_sid).update(status=status)
+    logger.info(
+        "Twilio subaccount %s status → %s (api devolvió %s)",
+        subaccount_sid, status, account.status,
+    )
+    return account.status
+
+
+def ensure_client_subaccount(
+    sb: Client, client_id: str
+) -> tuple[str, str, str]:
+    """Garantiza que el cliente tenga subaccount + Elastic SIP Trunk.
+
+    Máquina de estados `twilio_subaccount_status`:
+      NULL            — nunca se intentó crear subaccount
+      'provisioning'  — subaccount creada en Twilio, trunk pendiente
+      'active'        — subaccount + trunk listos para recibir/hacer llamadas
+      'suspended'     — admin la suspendió desde UI
+      'closed'        — admin la cerró (permanente)
+
+    Idempotente:
+      - Si existen ambos y status='active', retorna.
+      - Si existe subaccount sin trunk (fallo previo), crea trunk y transiciona
+        'provisioning' → 'active'.
+      - Si no existe nada, crea subaccount (status='provisioning'), luego trunk,
+        luego transiciona a 'active'. Si falla antes del trunk, el estado queda
+        en 'provisioning' y el próximo intento solo crea el trunk.
+
+    Retorna (subaccount_sid, subaccount_auth_token_plaintext, trunk_sid).
+
+    No debe llamarse para clientes con BYOT activo — esos usan sus propias creds.
+    El caller debe resolver BYOT primero.
+    """
+    from api.crypto import decrypt_value, encrypt_value
+
+    result = (
+        sb.table("clients")
+        .select(
+            "slug, twilio_subaccount_sid, twilio_subaccount_auth_token, "
+            "twilio_subaccount_trunk_sid, twilio_subaccount_status"
+        )
+        .eq("id", client_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise ValueError(f"Cliente {client_id} no encontrado")
+
+    row = result.data[0]
+    sid = row.get("twilio_subaccount_sid")
+    token_enc = row.get("twilio_subaccount_auth_token")
+    trunk_sid = row.get("twilio_subaccount_trunk_sid")
+    current_status = row.get("twilio_subaccount_status")
+
+    # Subaccounts cerradas/suspendidas no deben reutilizarse silenciosamente:
+    # el admin debe decidir explícitamente reactivar.
+    if current_status in ("suspended", "closed"):
+        raise ValueError(
+            f"Cliente {client_id} tiene subaccount Twilio en estado "
+            f"'{current_status}' — requiere reactivación explícita por admin"
+        )
+
+    token: str | None = None
+    if sid and token_enc:
+        token = decrypt_value(token_enc)
+        if not token:
+            raise ValueError(
+                f"Subaccount existente para cliente {client_id} pero token "
+                "no pudo desencriptarse — revisa ENCRYPTION_KEY"
+            )
+
+    if not sid:
+        friendly = f"voiceai-prod-{_slugify_for_twilio(row['slug'])}"
+        sid, token = create_twilio_subaccount(friendly)
+        from datetime import datetime, timezone
+        sb.table("clients").update({
+            "twilio_subaccount_sid": sid,
+            "twilio_subaccount_auth_token": encrypt_value(token),
+            "twilio_subaccount_status": "provisioning",
+            "twilio_subaccount_created_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", client_id).execute()
+
+    assert token is not None  # invariante tras el bloque anterior
+
+    if not trunk_sid:
+        trunk_sid = setup_twilio_elastic_sip_trunk(
+            account_sid=sid, auth_token=token,
+        )
+        # Transición provisioning → active al completar el trunk
+        sb.table("clients").update({
+            "twilio_subaccount_trunk_sid": trunk_sid,
+            "twilio_subaccount_status": "active",
+        }).eq("id", client_id).execute()
+    elif current_status == "provisioning":
+        # Self-heal: trunk existe pero status quedó inconsistente
+        sb.table("clients").update({
+            "twilio_subaccount_status": "active",
+        }).eq("id", client_id).execute()
+
+    return sid, token, trunk_sid
 
 
 async def setup_livekit_sip(phone_number: str) -> tuple[str, str]:

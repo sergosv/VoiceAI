@@ -26,6 +26,9 @@ from api.schemas import (
 )
 from api.services.phone_service import (
     assign_phone_to_client,
+    associate_number_to_trunk,
+    enable_geo_permission,
+    ensure_client_subaccount,
     get_client_twilio_creds,
     purchase_phone_number,
     search_available_numbers,
@@ -37,8 +40,14 @@ from api.services.client_service import (
     build_system_prompt,
     create_client_in_db,
     create_gemini_store,
+    create_owner_user,
+    delete_gemini_store,
+    delete_owner_user,
+    generate_temp_password,
     load_voice_id,
 )
+from api.services.email_service import send_welcome_email
+from api.services.webhook_service import dispatch_event
 
 router = APIRouter()
 logger = logging.getLogger("api.clients")
@@ -138,42 +147,73 @@ async def list_available_numbers(
     return [AvailableNumberOut(**n) for n in numbers]
 
 
+def _country_from_phone(phone: str) -> str:
+    """Infiere el país ISO desde un número en formato E.164."""
+    if phone.startswith("+57"):
+        return "CO"
+    if phone.startswith("+56"):
+        return "CL"
+    if phone.startswith("+54"):
+        return "AR"
+    if phone.startswith("+1"):
+        return "US"
+    return "MX"
+
+
 @router.post("/{client_id}/purchase-phone", response_model=ClientOut)
 async def purchase_and_assign_phone(
     client_id: str,
     req: PurchaseNumberRequest,
     admin: CurrentUser = Depends(require_admin),
 ) -> ClientOut:
-    """Compra un número en Twilio y lo asigna al cliente con SIP config (solo admin)."""
+    """Compra un número en Twilio y lo asigna al cliente con SIP config (solo admin).
+
+    Flujo de resolución de credenciales:
+      1. BYOT: cliente tiene sus propias creds Twilio → usarlas directamente.
+      2. Subaccount: si no hay BYOT, asegurar que el cliente tenga subaccount + trunk
+         (crear al primer uso). Comprar número DENTRO de la subaccount y asociarlo
+         al trunk de la subaccount que apunta a LiveKit.
+      3. Main (grandfathered): ningún cliente nuevo cae aquí; solo aplica si el
+         admin expresamente omitió la subaccount. La ruta no lo permite.
+    """
     sb = get_supabase()
     byot_sid, byot_token = get_client_twilio_creds(sb, client_id)
+    country = _country_from_phone(req.phone_number)
 
-    # Si es BYOT, habilitar geo permissions para el país del número
+    twilio_trunk_sid: str | None = None
     if byot_sid:
+        creds_sid, creds_token = byot_sid, byot_token
+    else:
         try:
-            from api.services.phone_service import enable_geo_permission
-            # Detectar país del número (asume formato E.164)
-            country = "MX"  # Default, se puede mejorar con phonenumbers lib
-            if req.phone_number.startswith("+57"):
-                country = "CO"
-            elif req.phone_number.startswith("+56"):
-                country = "CL"
-            elif req.phone_number.startswith("+54"):
-                country = "AR"
-            elif req.phone_number.startswith("+1"):
-                country = "US"
-            await asyncio.to_thread(
-                enable_geo_permission, country,
-                account_sid=byot_sid, auth_token=byot_token,
+            creds_sid, creds_token, twilio_trunk_sid = await asyncio.to_thread(
+                ensure_client_subaccount, sb, client_id,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
             )
         except Exception as e:
-            logger.warning("No se pudieron habilitar geo permissions: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Error creando Twilio subaccount: {e}",
+            )
 
-    # Comprar número
+    # Habilitar geo permissions en la cuenta (BYOT o subaccount).
+    # Fallo no bloquea la compra — Twilio lo rechazaría con un error claro más adelante.
+    try:
+        await asyncio.to_thread(
+            enable_geo_permission, country,
+            account_sid=creds_sid, auth_token=creds_token,
+        )
+    except Exception as e:
+        logger.warning("No se pudieron habilitar geo permissions para %s: %s", country, e)
+
+    # Comprar número en la cuenta resuelta
     try:
         phone_sid, normalized_number = await asyncio.to_thread(
             purchase_phone_number, req.phone_number,
-            account_sid=byot_sid, auth_token=byot_token,
+            account_sid=creds_sid, auth_token=creds_token,
         )
     except Exception as e:
         raise HTTPException(
@@ -181,13 +221,27 @@ async def purchase_and_assign_phone(
             detail=f"Error comprando número en Twilio: {e}",
         )
 
-    # Configurar SIP en LiveKit
+    # Si es subaccount, asociar el número al Elastic SIP Trunk de la subaccount
+    if twilio_trunk_sid:
+        try:
+            await asyncio.to_thread(
+                associate_number_to_trunk,
+                phone_sid, twilio_trunk_sid,
+                account_sid=creds_sid, auth_token=creds_token,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Número comprado ({normalized_number}) pero falló asociación con trunk Twilio: {e}",
+            )
+
+    # Configurar SIP en LiveKit (inbound trunk + dispatch rule)
     try:
         trunk_id, _ = await setup_livekit_sip(normalized_number)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Número comprado ({normalized_number}) pero error configurando SIP: {e}",
+            detail=f"Número comprado ({normalized_number}) pero error configurando SIP en LiveKit: {e}",
         )
 
     # Guardar en DB
@@ -239,17 +293,53 @@ async def create_client(
     req: ClientCreateRequest,
     admin: CurrentUser = Depends(require_admin),
 ) -> ClientOut:
-    """Crea un nuevo cliente (solo admin)."""
+    """Crea un nuevo cliente completo (solo admin).
+
+    Flujo:
+      1. Valida slug único y owner_email libre
+      2. Crea FileSearchStore en Gemini (aislado por cliente)
+      3. Inserta fila en clients + agent default + créditos de bienvenida
+      4. Crea usuario Supabase Auth + fila en users (si owner_email)
+      5. Envía email de bienvenida con credenciales (opt-in)
+      6. Dispara webhook client.created + audit log
+
+    Si falla cualquier paso posterior al Gemini store, rollback
+    (borra store Gemini + auth user para no dejar recursos huérfanos).
+    """
     try:
         voice_id = load_voice_id(req.voice_key)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    sb = get_supabase()
+
+    # 1. Pre-validar slug único (evita 500 de Supabase por UNIQUE constraint)
+    existing_slug = (
+        sb.table("clients").select("id").eq("slug", req.slug).limit(1).execute()
+    )
+    if existing_slug.data:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"El slug '{req.slug}' ya está en uso",
+        )
+
+    # Pre-validar owner_email no usado en tabla users
+    if req.owner_email:
+        existing_user = (
+            sb.table("users").select("id").eq("email", req.owner_email).limit(1).execute()
+        )
+        if existing_user.data:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"El email '{req.owner_email}' ya está registrado",
+            )
 
     greeting = req.greeting or build_greeting(req.name, req.agent_name)
     system_prompt = req.system_prompt or build_system_prompt(
         req.business_type, req.agent_name, req.name, req.language,
     )
 
+    # 2. Crear FileSearchStore en Gemini
     store_id = None
     store_name = None
     if not req.skip_store:
@@ -263,39 +353,148 @@ async def create_client(
                 detail=f"Error creando FileSearchStore: {e}",
             )
 
-    sb = get_supabase()
-    row = create_client_in_db(
-        sb,
-        name=req.name,
-        slug=req.slug,
-        business_type=req.business_type,
-        agent_name=req.agent_name,
-        language=req.language,
-        voice_id=voice_id,
-        greeting=greeting,
-        system_prompt=system_prompt,
-        store_id=store_id,
-        store_name=store_name,
-        owner_email=req.owner_email,
-    )
+    # A partir de aquí, cualquier fallo requiere rollback del store
+    client_id: str | None = None
+    created_auth_email: str | None = None
 
-    # Crear agent default para el nuevo cliente
-    client_id = row["id"]
-    voice_config = {"provider": "cartesia", "voice_id": voice_id, "realtime_voice": "alloy", "realtime_model": "gpt-4o-realtime-preview"}
-    llm_config = {"provider": "google"}
-    stt_config = {"provider": "deepgram"}
-    sb.table("agents").insert({
-        "client_id": client_id,
-        "name": req.agent_name,
-        "slug": "default",
-        "system_prompt": system_prompt,
-        "greeting": greeting,
-        "voice_config": voice_config,
-        "llm_config": llm_config,
-        "stt_config": stt_config,
-    }).execute()
+    try:
+        # 3. Insertar cliente + otorgar créditos de bienvenida
+        row = create_client_in_db(
+            sb,
+            name=req.name,
+            slug=req.slug,
+            business_type=req.business_type,
+            agent_name=req.agent_name,
+            language=req.language,
+            voice_id=voice_id,
+            greeting=greeting,
+            system_prompt=system_prompt,
+            store_id=store_id,
+            store_name=store_name,
+            owner_email=req.owner_email,
+        )
+        client_id = row["id"]
 
-    return client_out_from_row(row)
+        # Crear agent default
+        voice_config = {
+            "provider": "cartesia",
+            "voice_id": voice_id,
+            "realtime_voice": "alloy",
+            "realtime_model": "gpt-4o-realtime-preview",
+        }
+        sb.table("agents").insert({
+            "client_id": client_id,
+            "name": req.agent_name,
+            "slug": "default",
+            "system_prompt": system_prompt,
+            "greeting": greeting,
+            "voice_config": voice_config,
+            "llm_config": {"provider": "google"},
+            "stt_config": {"provider": "deepgram"},
+        }).execute()
+
+        # 4. Crear usuario Supabase Auth + fila en users
+        temp_password: str | None = None
+        if req.owner_email:
+            temp_password = req.owner_password or generate_temp_password()
+            try:
+                await asyncio.to_thread(
+                    create_owner_user,
+                    sb,
+                    email=req.owner_email,
+                    password=temp_password,
+                    client_id=client_id,
+                )
+                created_auth_email = req.owner_email
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e),
+                )
+
+        # 5. Enviar email de bienvenida (opt-in) — no bloquea si falla Resend
+        if req.owner_email and req.send_welcome_email and temp_password:
+            try:
+                await send_welcome_email(
+                    to=req.owner_email,
+                    client_name=req.name,
+                    temp_password=temp_password,
+                )
+            except Exception:
+                logger.exception("Fallo enviando welcome email a %s", req.owner_email)
+
+        # 6. Webhook + audit log — fire-and-forget, no debe impedir la respuesta
+        try:
+            await dispatch_event(
+                client_id=client_id,
+                event="client.created",
+                payload={
+                    "id": client_id,
+                    "slug": req.slug,
+                    "name": req.name,
+                    "owner_email": req.owner_email,
+                    "created_at": row.get("created_at"),
+                },
+            )
+        except Exception:
+            logger.exception("Fallo despachando webhook client.created")
+
+        log_audit(
+            action="client.created",
+            user_id=admin.id,
+            client_id=client_id,
+            resource_type="client",
+            resource_id=client_id,
+            details={
+                "slug": req.slug,
+                "name": req.name,
+                "owner_email": req.owner_email,
+                "user_created": bool(created_auth_email),
+                "welcome_email_sent": bool(
+                    req.owner_email and req.send_welcome_email
+                ),
+            },
+        )
+
+        return client_out_from_row(row)
+
+    except HTTPException:
+        await _rollback_client_creation(sb, client_id, store_id, created_auth_email)
+        raise
+    except Exception as e:
+        await _rollback_client_creation(sb, client_id, store_id, created_auth_email)
+        logger.exception("Error inesperado en create_client")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creando cliente: {e}",
+        )
+
+
+async def _rollback_client_creation(
+    sb,
+    client_id: str | None,
+    store_id: str | None,
+    owner_email: str | None,
+) -> None:
+    """Revierte recursos creados durante create_client ante un fallo parcial."""
+    # Borrar user de Auth (si se creó)
+    if owner_email:
+        await asyncio.to_thread(delete_owner_user, owner_email)
+
+    # Borrar agent + client de DB (si se insertaron)
+    if client_id:
+        try:
+            sb.table("agents").delete().eq("client_id", client_id).execute()
+            sb.table("clients").delete().eq("id", client_id).execute()
+            logger.info("Client %s borrado en rollback", client_id)
+        except Exception:
+            logger.exception("Error borrando client %s en rollback", client_id)
+
+    # Borrar FileSearchStore en Gemini
+    if store_id:
+        await asyncio.to_thread(
+            delete_gemini_store, store_id, os.environ.get("GOOGLE_API_KEY", "")
+        )
 
 
 @router.patch("/{client_id}", response_model=ClientOut)

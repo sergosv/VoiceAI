@@ -296,6 +296,10 @@ class ClientOut(BaseModel):
     realtime_model: str = "gpt-4o-realtime-preview"
     # BYOT (Bring Your Own Twilio)
     has_twilio_credentials: bool = False
+    # Twilio Subaccount (platform-managed isolation)
+    twilio_subaccount_sid: str | None = None
+    twilio_subaccount_status: str | None = None  # provisioning|active|suspended|closed
+    twilio_subaccount_created_at: datetime | None = None
     # Orchestration
     orchestration_mode: str = "simple"
     orchestrator_model: str = "gemini-2.0-flash"
@@ -314,6 +318,8 @@ class ClientCreateRequest(BaseModel):
     greeting: str | None = None
     system_prompt: str | None = None
     owner_email: str | None = None
+    owner_password: str | None = Field(None, min_length=8, max_length=128)
+    send_welcome_email: bool = True
     skip_store: bool = False
 
     @field_validator("slug")
@@ -1123,6 +1129,9 @@ def client_out_from_row(row: dict) -> ClientOut:
         data.pop("twilio_account_sid", None) and data.get("twilio_auth_token")
     )
     data.pop("twilio_auth_token", None)
+    # Twilio Subaccount: exponer SID + status, ocultar token encrypted
+    data.pop("twilio_subaccount_auth_token", None)
+    data.pop("twilio_subaccount_trunk_sid", None)  # detalle interno, no admin UI
     # Eliminar google_service_account_key del output (es un JSON grande)
     data.pop("google_service_account_key", None)
     return ClientOut(**data)
